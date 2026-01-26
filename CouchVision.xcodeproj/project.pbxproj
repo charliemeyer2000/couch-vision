@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 77;
+	objectVersion = 63;
 	objects = {
 
 /* Begin PBXBuildFile section */
@@ -45,7 +45,7 @@
 		C06B01D38F55E6273E626CD9 /* SensorProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SensorProvider.swift; sourceTree = "<group>"; };
 		CA67DF29CD9D69C942084599 /* ZenohPublisher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZenohPublisher.swift; sourceTree = "<group>"; };
 		E0CA31563A14598E4A94E2D1 /* CameraManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraManager.swift; sourceTree = "<group>"; };
-		F473F8EDD6090021ADE3863B /* CouchVision.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = CouchVision.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		F473F8EDD6090021ADE3863B /* CouchVision.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CouchVision.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -192,7 +192,6 @@
 				LastUpgradeCheck = 1600;
 				TargetAttributes = {
 					7B943B1A5E1F5E32F8AB3985 = {
-						DevelopmentTeam = "";
 						ProvisioningStyle = Automatic;
 					};
 				};
@@ -207,7 +206,6 @@
 			);
 			mainGroup = EFFB4406F86754E2031F6B97;
 			minimizedProjectReferenceProxies = 1;
-			preferredProjectObjectVersion = 77;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
@@ -249,6 +247,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
+				DEVELOPMENT_TEAM = 9778KTLRXB;
 				ENABLE_PREVIEWS = YES;
 				INFOPLIST_FILE = CouchVision/Resources/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -266,6 +265,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
+				DEVELOPMENT_TEAM = 9778KTLRXB;
 				ENABLE_PREVIEWS = YES;
 				INFOPLIST_FILE = CouchVision/Resources/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (

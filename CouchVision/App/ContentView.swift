@@ -7,32 +7,26 @@ struct ContentView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 20) {
-                // Connection Status
-                connectionStatusView
-
-                Divider()
-
-                // Sensor Controls
-                sensorControlsView
-
-                Divider()
-
-                // Stats
-                statsView
-
-                Spacer()
-
-                // Action Buttons
-                actionButtonsView
+            ScrollView {
+                VStack(spacing: 20) {
+                    connectionStatusView
+                    Divider()
+                    sensorControlsView
+                    Divider()
+                    statsView
+                }
+                .padding()
             }
-            .padding()
+            .safeAreaInset(edge: .bottom) {
+                actionButtonsView
+                    .padding()
+                    .background(.regularMaterial)
+            }
             .navigationTitle("CouchVision")
+            .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        showSettings = true
-                    } label: {
+                    Button { showSettings = true } label: {
                         Image(systemName: "gear")
                     }
                 }
@@ -41,13 +35,10 @@ struct ContentView: View {
                 SettingsView()
             }
             .task {
-                // Request permissions on launch
-                await coordinator.requestAllPermissions()
+                _ = await coordinator.requestAllPermissions()
             }
         }
     }
-
-    // MARK: - Connection Status
 
     private var connectionStatusView: some View {
         VStack(spacing: 12) {
@@ -55,10 +46,8 @@ struct ContentView: View {
                 Circle()
                     .fill(coordinator.isConnected ? Color.green : Color.red)
                     .frame(width: 12, height: 12)
-
                 Text(coordinator.isConnected ? "Connected" : "Disconnected")
                     .font(.headline)
-
                 Spacer()
             }
 
@@ -91,8 +80,6 @@ struct ContentView: View {
         .background(Color(.systemGray6))
         .cornerRadius(12)
     }
-
-    // MARK: - Sensor Controls
 
     private var sensorControlsView: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -131,8 +118,6 @@ struct ContentView: View {
         .cornerRadius(12)
     }
 
-    // MARK: - Stats
-
     private var statsView: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Publishing Stats")
@@ -149,13 +134,10 @@ struct ContentView: View {
                             Text(topic)
                                 .font(.system(.caption, design: .monospaced))
                                 .lineLimit(1)
-
                             Spacer()
-
                             Text(String(format: "%.1f Hz", stat.averageHz))
                                 .font(.caption)
                                 .foregroundColor(.secondary)
-
                             Text(formatBytes(stat.bytesPublished))
                                 .font(.caption)
                                 .foregroundColor(.secondary)
@@ -168,8 +150,6 @@ struct ContentView: View {
         .background(Color(.systemGray6))
         .cornerRadius(12)
     }
-
-    // MARK: - Action Buttons
 
     private var actionButtonsView: some View {
         HStack(spacing: 16) {
@@ -192,16 +172,12 @@ struct ContentView: View {
         }
     }
 
-    // MARK: - Helpers
-
     private func formatBytes(_ bytes: UInt64) -> String {
         let formatter = ByteCountFormatter()
         formatter.countStyle = .binary
         return formatter.string(fromByteCount: Int64(bytes))
     }
 }
-
-// MARK: - Sensor Toggle Row
 
 struct SensorToggleRow: View {
     let name: String
@@ -213,17 +189,21 @@ struct SensorToggleRow: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(name)
                     .font(.subheadline)
-
                 Text(stateDescription)
                     .font(.caption)
                     .foregroundColor(stateColor)
             }
-
             Spacer()
-
             Toggle("", isOn: $isEnabled)
                 .labelsHidden()
-                .disabled(!state.isOperational && state != .ready)
+                .disabled(!canToggle)
+        }
+    }
+
+    private var canToggle: Bool {
+        switch state {
+        case .ready, .running: return true
+        default: return false
         }
     }
 

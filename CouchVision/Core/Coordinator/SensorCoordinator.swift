@@ -100,6 +100,26 @@ public final class SensorCoordinator: ObservableObject {
         self.motionManager = MotionManager()
 
         setupSubscriptions()
+        forwardManagerChanges()
+    }
+
+    /// Forward objectWillChange from child managers to coordinator
+    /// This ensures SwiftUI views update when manager state changes
+    private func forwardManagerChanges() {
+        cameraManager.objectWillChange
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &cancellables)
+
+        lidarManager.objectWillChange
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &cancellables)
+
+        motionManager.objectWillChange
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &cancellables)
     }
 
     // MARK: - Publisher Management
