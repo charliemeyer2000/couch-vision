@@ -9,38 +9,31 @@ on:
 jobs:
   lint:
     name: Lint
-    runs-on: ubuntu-latest
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5
 
-      - name: Run ruff
-        run: |
-          cd bridge
-          uv sync
-          uv run ruff check .
-          uv run ruff format --check .
+      - name: Install tools
+        run: brew install swiftlint swiftformat pre-commit
+
+      - name: Run pre-commit
+        run: pre-commit run --all-files
 
   build:
     name: Build iOS
     runs-on: macos-15
+    needs: lint
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install tools
-        run: |
-          brew install swiftlint swiftformat xcodegen
+      - name: Install xcodegen
+        run: brew install xcodegen
 
       - name: Generate Xcode project
         run: xcodegen generate
-
-      - name: SwiftFormat
-        run: swiftformat --lint .
-
-      - name: SwiftLint
-        run: swiftlint lint --strict
 
       - name: Build
         run: |
