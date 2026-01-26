@@ -1,6 +1,5 @@
 import os.log
 
-/// Centralized logging for CouchVision
 enum Log {
     private static let subsystem = "com.couchvision.CouchVision"
 

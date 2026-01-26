@@ -1,10 +1,7 @@
 import Foundation
 
-/// UserDefaults-backed settings persistence
 enum SettingsStorage {
     private static let defaults = UserDefaults.standard
-
-    // MARK: - Keys
 
     private enum Key: String {
         case endpoint
@@ -18,8 +15,6 @@ enum SettingsStorage {
         case imuRate
     }
 
-    // MARK: - Connection
-
     static var endpoint: String {
         get { defaults.string(forKey: Key.endpoint.rawValue) ?? "tcp://192.168.1.1:7447" }
         set { defaults.set(newValue, forKey: Key.endpoint.rawValue) }
@@ -29,8 +24,6 @@ enum SettingsStorage {
         get { defaults.string(forKey: Key.topicPrefix.rawValue) ?? "/iphone" }
         set { defaults.set(newValue, forKey: Key.topicPrefix.rawValue) }
     }
-
-    // MARK: - Camera
 
     static var cameraResolution: CameraConfig.Resolution {
         get {
@@ -59,8 +52,6 @@ enum SettingsStorage {
         set { defaults.set(newValue, forKey: Key.jpegQuality.rawValue) }
     }
 
-    // MARK: - LiDAR
-
     static var generatePointCloud: Bool {
         get { defaults.object(forKey: Key.generatePointCloud.rawValue) as? Bool ?? true }
         set { defaults.set(newValue, forKey: Key.generatePointCloud.rawValue) }
@@ -78,8 +69,6 @@ enum SettingsStorage {
         }
         set { defaults.set(newValue, forKey: Key.pointCloudDownsample.rawValue) }
     }
-
-    // MARK: - IMU
 
     static var imuRate: Int {
         get {
