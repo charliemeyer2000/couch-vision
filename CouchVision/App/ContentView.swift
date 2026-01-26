@@ -3,7 +3,7 @@ import SwiftUI
 struct ContentView: View {
     @EnvironmentObject var coordinator: SensorCoordinator
     @State private var showSettings = false
-    @State private var endpoint = "tcp://192.168.1.1:7447"
+    @State private var endpointText: String = ""
 
     var body: some View {
         NavigationStack {
@@ -31,11 +31,16 @@ struct ContentView: View {
                     }
                 }
             }
-            .sheet(isPresented: $showSettings) {
-                SettingsView()
-            }
+            .sheet(
+                isPresented: $showSettings,
+                onDismiss: { endpointText = coordinator.config.endpoint },
+                content: { SettingsView() }
+            )
             .task {
                 _ = await coordinator.requestAllPermissions()
+            }
+            .onAppear {
+                endpointText = coordinator.config.endpoint
             }
         }
     }
@@ -58,7 +63,7 @@ struct ContentView: View {
             }
 
             HStack {
-                TextField("Endpoint", text: $endpoint)
+                TextField("Endpoint", text: $endpointText)
                     .textFieldStyle(.roundedBorder)
                     .font(.system(.body, design: .monospaced))
                     .autocorrectionDisabled()
@@ -66,7 +71,10 @@ struct ContentView: View {
 
                 Button {
                     Task {
-                        coordinator.config = CoordinatorConfig(endpoint: endpoint)
+                        coordinator.config = CoordinatorConfig(
+                            topicPrefix: coordinator.config.topicPrefix,
+                            endpoint: endpointText
+                        )
                         await coordinator.connect()
                     }
                 } label: {
@@ -202,29 +210,31 @@ struct SensorToggleRow: View {
 
     private var canToggle: Bool {
         switch state {
-        case .ready, .running: return true
-        default: return false
+        case .ready,
+             .running: true
+        default: false
         }
     }
 
     private var stateDescription: String {
         switch state {
-        case .unknown: return "Checking..."
-        case .unavailable: return "Not available"
-        case .unauthorized: return "Permission required"
-        case .ready: return "Ready"
-        case .running: return "Running"
-        case .error(let msg): return "Error: \(msg)"
+        case .unknown: "Checking..."
+        case .unavailable: "Not available"
+        case .unauthorized: "Permission required"
+        case .ready: "Ready"
+        case .running: "Running"
+        case .error(let msg): "Error: \(msg)"
         }
     }
 
     private var stateColor: Color {
         switch state {
-        case .running: return .green
-        case .ready: return .blue
-        case .error, .unauthorized: return .red
-        case .unavailable: return .gray
-        case .unknown: return .secondary
+        case .running: .green
+        case .ready: .blue
+        case .error,
+             .unauthorized: .red
+        case .unavailable: .gray
+        case .unknown: .secondary
         }
     }
 }

@@ -1,0 +1,68 @@
+# SwiftFormat configuration for CouchVision
+# Aligned with .swiftlint.yml settings
+# See: https://github.com/nicklockwood/SwiftFormat/blob/main/Rules.md
+
+# Swift version
+--swiftversion 5.9
+
+# File options
+--exclude .build,DerivedData,build,.swiftpm
+
+# === Indentation & Whitespace ===
+--indent 4
+--indentcase false
+--linebreaks lf
+--tabwidth 4
+--trimwhitespace always
+
+# === Line Length ===
+# Match SwiftLint's line_length setting
+--maxwidth 140
+
+# === Wrapping ===
+--wraparguments before-first
+--wrapparameters before-first
+--wrapcollections before-first
+--wrapreturntype preserve
+--wrapconditions after-first
+--closingparen balanced
+
+# === Braces & Spacing ===
+--allman false
+--elseposition same-line
+--guardelse same-line
+--emptybraces no-space
+--operatorfunc spaced
+--ranges spaced
+
+# === Redundancy ===
+--self remove
+--redundanttype inferred
+--typeattributes prev-line
+--funcattributes prev-line
+
+# === Void Style ===
+--voidtype void
+--shortoptionals always
+
+# === Comments ===
+--header strip
+--commas inline
+
+# === Disabled Rules ===
+# (to avoid conflicts with SwiftLint or preserve flexibility)
+--disable trailingCommas
+--disable blankLinesAtEndOfScope
+--disable blankLinesAtStartOfScope
+--disable wrapMultilineStatementBraces
+--disable organizeDeclarations
+--disable markTypes
+--disable hoistPatternLet
+--disable unusedArguments
+--disable redundantType
+
+# === Enabled Rules (explicit) ===
+--enable isEmpty
+--enable sortImports
+--enable wrapEnumCases
+--enable wrapSwitchCases

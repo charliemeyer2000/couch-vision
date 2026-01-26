@@ -62,7 +62,7 @@ public final class CDREncoder {
         position += 8
     }
 
-    private func appendLittleEndian<T: FixedWidthInteger>(_ value: T) {
+    private func appendLittleEndian(_ value: some FixedWidthInteger) {
         var v = value.littleEndian
         withUnsafeBytes(of: &v) { buffer.append(contentsOf: $0) }
     }

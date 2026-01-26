@@ -1,14 +1,17 @@
-import Foundation
-import CoreMotion
 import Combine
+@preconcurrency import CoreMotion
+import Foundation
 
 public struct MotionConfig {
     public let imuRate: SensorRateConfig
     public let publishRawAccelerometer: Bool
     public let publishRawGyroscope: Bool
 
-    public init(imuRate: SensorRateConfig = .hz100, publishRawAccelerometer: Bool = false,
-                publishRawGyroscope: Bool = false) {
+    public init(
+        imuRate: SensorRateConfig = .hz100,
+        publishRawAccelerometer: Bool = false,
+        publishRawGyroscope: Bool = false
+    ) {
         self.imuRate = imuRate
         self.publishRawAccelerometer = publishRawAccelerometer
         self.publishRawGyroscope = publishRawGyroscope
@@ -72,18 +75,17 @@ public final class MotionManager: ObservableObject {
         }
 
         // CoreMotion prompts on first use - briefly start to trigger prompt
-        let semaphore = DispatchSemaphore(value: 0)
-        var granted = false
+        let granted = await withCheckedContinuation { continuation in
+            motionManager.startDeviceMotionUpdates(to: operationQueue) { [weak self] motion, _ in
+                self?.motionManager.stopDeviceMotionUpdates()
+                continuation.resume(returning: motion != nil)
+            }
 
-        motionManager.startDeviceMotionUpdates(to: operationQueue) { [weak self] motion, _ in
-            granted = motion != nil
-            self?.motionManager.stopDeviceMotionUpdates()
-            semaphore.signal()
-        }
-
-        if semaphore.wait(timeout: .now() + 2.0) == .timedOut {
-            motionManager.stopDeviceMotionUpdates()
-            granted = true
+            // Timeout after 2 seconds - assume granted if no callback
+            let manager = motionManager
+            DispatchQueue.global().asyncAfter(deadline: .now() + 2.0) {
+                manager.stopDeviceMotionUpdates()
+            }
         }
 
         await MainActor.run { state = granted ? .ready : .unauthorized }
@@ -95,23 +97,23 @@ public final class MotionManager: ObservableObject {
 
         motionManager.deviceMotionUpdateInterval = config.imuRate.interval
         motionManager.startDeviceMotionUpdates(using: .xArbitraryCorrectedZVertical, to: operationQueue) { [weak self] motion, _ in
-            guard let self = self, let motion = motion else { return }
-            self.processDeviceMotion(motion)
+            guard let self, let motion else { return }
+            processDeviceMotion(motion)
         }
 
         if config.publishRawAccelerometer {
             motionManager.accelerometerUpdateInterval = config.imuRate.interval
             motionManager.startAccelerometerUpdates(to: operationQueue) { [weak self] data, _ in
-                guard let self = self, let data = data else { return }
-                self.processAccelerometer(data)
+                guard let self, let data else { return }
+                processAccelerometer(data)
             }
         }
 
         if config.publishRawGyroscope {
             motionManager.gyroUpdateInterval = config.imuRate.interval
             motionManager.startGyroUpdates(to: operationQueue) { [weak self] data, _ in
-                guard let self = self, let data = data else { return }
-                self.processGyroscope(data)
+                guard let self, let data else { return }
+                processGyroscope(data)
             }
         }
 
@@ -184,8 +186,8 @@ public enum MotionError: Error, LocalizedError {
 
     public var errorDescription: String? {
         switch self {
-        case .notAvailable: return "Motion sensors not available on this device"
-        case .notAuthorized: return "Motion sensor access not authorized"
+        case .notAvailable: "Motion sensors not available on this device"
+        case .notAuthorized: "Motion sensor access not authorized"
         }
     }
 }

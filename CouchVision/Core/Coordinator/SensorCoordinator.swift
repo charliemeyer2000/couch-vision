@@ -1,5 +1,5 @@
-import Foundation
 import Combine
+import Foundation
 
 /// Configuration for the sensor coordinator
 public struct CoordinatorConfig {
@@ -68,10 +68,10 @@ public final class SensorCoordinator: ObservableObject {
 
     // MARK: - Configuration
 
-    public var config: CoordinatorConfig {
+    @Published public var config: CoordinatorConfig {
         didSet {
             // Reconnect if endpoint changed
-            if oldValue.endpoint != config.endpoint && isConnected {
+            if oldValue.endpoint != config.endpoint, isConnected {
                 Task { await reconnect() }
             }
         }
@@ -91,13 +91,32 @@ public final class SensorCoordinator: ObservableObject {
 
     // MARK: - Initialization
 
-    public init(config: CoordinatorConfig = CoordinatorConfig()) {
-        self.config = config
+    public init(config: CoordinatorConfig? = nil) {
+        // Load persisted settings or use provided config
+        self.config = config ?? CoordinatorConfig(
+            topicPrefix: SettingsStorage.topicPrefix,
+            endpoint: SettingsStorage.endpoint
+        )
 
-        // Initialize sensor managers
-        self.cameraManager = CameraManager()
-        self.lidarManager = LiDARManager()
-        self.motionManager = MotionManager()
+        // Initialize sensor managers with persisted configs
+        cameraManager = CameraManager()
+        cameraManager.config = CameraConfig(
+            resolution: SettingsStorage.cameraResolution,
+            frameRate: SettingsStorage.cameraFrameRate,
+            jpegQuality: CGFloat(SettingsStorage.jpegQuality / 100)
+        )
+
+        lidarManager = LiDARManager()
+        lidarManager.config = LiDARConfig(
+            generatePointCloud: SettingsStorage.generatePointCloud,
+            publishConfidence: SettingsStorage.publishConfidence,
+            pointCloudDownsample: SettingsStorage.pointCloudDownsample
+        )
+
+        motionManager = MotionManager()
+        motionManager.config = MotionConfig(
+            imuRate: SensorRateConfig(frequencyHz: Double(SettingsStorage.imuRate))
+        )
 
         setupSubscriptions()
         forwardManagerChanges()
@@ -139,7 +158,7 @@ public final class SensorCoordinator: ObservableObject {
 
     /// Connect to the configured endpoint
     public func connect() async {
-        guard let publisher = publisher else {
+        guard let publisher else {
             connectionError = "No publisher configured"
             return
         }
@@ -227,7 +246,7 @@ public final class SensorCoordinator: ObservableObject {
     // MARK: - Publishing
 
     private func publishCameraFrame(_ frame: TimestampedData<CameraFrame>) async {
-        guard isConnected, let publisher = publisher else { return }
+        guard isConnected, let publisher else { return }
 
         let topic = "\(config.topicPrefix)/camera/\(frame.data.cameraId)/image/compressed"
 
@@ -242,14 +261,13 @@ public final class SensorCoordinator: ObservableObject {
             try await publisher.publish(encoded, to: topic)
             updateStats(topic: topic, bytes: encoded.count)
         } catch {
-            print("Failed to publish camera frame: \(error)")
+            Log.ros.error("Failed to publish camera frame: \(error.localizedDescription)")
         }
     }
 
     private func publishLiDARData(_ data: TimestampedData<LiDARData>) async {
-        guard isConnected, let publisher = publisher else { return }
+        guard isConnected, let publisher else { return }
 
-        // Publish depth image
         if let depthImage = data.data.depthImage {
             let depthTopic = "\(config.topicPrefix)/lidar/depth/image"
             let encoded = CDREncoder.encode(depthImage)
@@ -257,11 +275,10 @@ public final class SensorCoordinator: ObservableObject {
                 try await publisher.publish(encoded, to: depthTopic)
                 updateStats(topic: depthTopic, bytes: encoded.count)
             } catch {
-                print("Failed to publish depth image: \(error)")
+                Log.ros.error("Failed to publish depth image: \(error.localizedDescription)")
             }
         }
 
-        // Publish point cloud
         if let pointCloud = data.data.pointCloud {
             let cloudTopic = "\(config.topicPrefix)/lidar/points"
             let encoded = CDREncoder.encode(pointCloud)
@@ -269,13 +286,13 @@ public final class SensorCoordinator: ObservableObject {
                 try await publisher.publish(encoded, to: cloudTopic)
                 updateStats(topic: cloudTopic, bytes: encoded.count)
             } catch {
-                print("Failed to publish point cloud: \(error)")
+                Log.ros.error("Failed to publish point cloud: \(error.localizedDescription)")
             }
         }
     }
 
     private func publishIMU(_ data: TimestampedData<ImuMessage>) async {
-        guard isConnected, let publisher = publisher else { return }
+        guard isConnected, let publisher else { return }
 
         let topic = "\(config.topicPrefix)/imu"
         let encoded = CDREncoder.encode(data.data)
@@ -284,7 +301,7 @@ public final class SensorCoordinator: ObservableObject {
             try await publisher.publish(encoded, to: topic)
             updateStats(topic: topic, bytes: encoded.count)
         } catch {
-            print("Failed to publish IMU: \(error)")
+            Log.ros.error("Failed to publish IMU: \(error.localizedDescription)")
         }
     }
 

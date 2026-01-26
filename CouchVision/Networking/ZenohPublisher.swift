@@ -90,7 +90,7 @@ public final class ZenohPublisher: Publisher {
     }
 
     public func publish(_ data: Data, to topic: String) async throws {
-        guard isConnected, let connection = connection else {
+        guard isConnected, let connection else {
             throw PublisherError.notConnected
         }
 
@@ -118,7 +118,7 @@ public final class ZenohPublisher: Publisher {
 
         return try await withCheckedThrowingContinuation { continuation in
             connection.send(content: frame, completion: .contentProcessed { error in
-                if let error = error {
+                if let error {
                     continuation.resume(throwing: PublisherError.publishFailed(error.localizedDescription))
                 } else {
                     continuation.resume()
@@ -140,7 +140,7 @@ public final class ZenohPublisher: Publisher {
         // zenoh://192.168.1.1:7447
         // 192.168.1.1:7447
 
-        var cleaned = endpoint
+        let cleaned = endpoint
             .replacingOccurrences(of: "tcp://", with: "")
             .replacingOccurrences(of: "zenoh://", with: "")
 
@@ -190,4 +190,4 @@ public final class ZenohPublisher: Publisher {
 
  Current implementation uses a simple framed protocol that requires
  a bridge on the receiving end to convert to Zenoh/ROS2.
-*/
+ */

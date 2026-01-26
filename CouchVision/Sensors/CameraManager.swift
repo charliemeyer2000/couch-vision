@@ -1,6 +1,6 @@
-import Foundation
 import AVFoundation
 import Combine
+import Foundation
 import UIKit
 
 public struct CameraFrame {
@@ -35,14 +35,16 @@ public struct CameraIntrinsics {
 }
 
 public struct CameraConfig {
-    public enum Resolution {
-        case p1080, p720, p480
+    public enum Resolution: String, CaseIterable {
+        case p1080
+        case p720
+        case p480
 
         var preset: AVCaptureSession.Preset {
             switch self {
-            case .p1080: return .hd1920x1080
-            case .p720: return .hd1280x720
-            case .p480: return .vga640x480
+            case .p1080: .hd1920x1080
+            case .p720: .hd1280x720
+            case .p480: .vga640x480
             }
         }
     }
@@ -62,13 +64,14 @@ public enum CameraType: String, CaseIterable {
     case backWide = "back_wide"
     case backUltraWide = "back_ultrawide"
     case backTelephoto = "back_telephoto"
-    case front = "front"
+    case front
 
     var deviceType: AVCaptureDevice.DeviceType {
         switch self {
-        case .backWide, .front: return .builtInWideAngleCamera
-        case .backUltraWide: return .builtInUltraWideCamera
-        case .backTelephoto: return .builtInTelephotoCamera
+        case .backWide,
+             .front: .builtInWideAngleCamera
+        case .backUltraWide: .builtInUltraWideCamera
+        case .backTelephoto: .builtInTelephotoCamera
         }
     }
 
@@ -95,7 +98,7 @@ public final class CameraManager: NSObject, ObservableObject {
     }
 
     public var selectedCamera: CameraType = .backWide {
-        didSet { if state == .running && oldValue != selectedCamera { switchCamera(to: selectedCamera) } }
+        didSet { if state == .running, oldValue != selectedCamera { switchCamera(to: selectedCamera) } }
     }
 
     private var captureSession: AVCaptureSession?
@@ -107,7 +110,7 @@ public final class CameraManager: NSObject, ObservableObject {
     public let sensorId = "camera"
     public let displayName = "Camera"
 
-    public override init() {
+    override public init() {
         super.init()
         checkAvailability()
     }
@@ -125,7 +128,9 @@ public final class CameraManager: NSObject, ObservableObject {
     private func updateAuthorizationState() {
         switch AVCaptureDevice.authorizationStatus(for: .video) {
         case .authorized: state = .ready
-        case .notDetermined, .denied, .restricted: state = .unauthorized
+        case .notDetermined,
+             .denied,
+             .restricted: state = .unauthorized
         @unknown default: state = .unknown
         }
     }
@@ -153,10 +158,16 @@ public final class CameraManager: NSObject, ObservableObject {
 
     public func stop() {
         sessionQueue.async { [weak self] in
-            self?.captureSession?.stopRunning()
+            guard let self else { return }
+            if let session = captureSession, session.isRunning {
+                session.stopRunning()
+            }
+            captureSession = nil
+            videoOutput = nil
+            currentDevice = nil
             DispatchQueue.main.async {
-                self?.state = .ready
-                self?.activeCamera = nil
+                self.state = .ready
+                self.activeCamera = nil
             }
         }
     }
@@ -208,7 +219,7 @@ public final class CameraManager: NSObject, ObservableObject {
     }
 
     private func configureFrameRate(device: AVCaptureDevice) {
-        guard let _ = try? device.lockForConfiguration() else { return }
+        guard (try? device.lockForConfiguration()) != nil else { return }
         defer { device.unlockForConfiguration() }
 
         let targetRate = Double(config.frameRate)
@@ -224,14 +235,14 @@ public final class CameraManager: NSObject, ObservableObject {
 
     private func switchCamera(to cameraType: CameraType) {
         sessionQueue.async { [weak self] in
-            guard let self = self, let session = self.captureSession else { return }
+            guard let self, let session = captureSession else { return }
             session.beginConfiguration()
 
             if let currentInput = session.inputs.first as? AVCaptureDeviceInput {
                 session.removeInput(currentInput)
             }
 
-            guard let device = self.getDevice(for: cameraType),
+            guard let device = getDevice(for: cameraType),
                   let input = try? AVCaptureDeviceInput(device: device),
                   session.canAddInput(input) else {
                 session.commitConfiguration()
@@ -239,8 +250,8 @@ public final class CameraManager: NSObject, ObservableObject {
             }
 
             session.addInput(input)
-            self.currentDevice = device
-            self.configureFrameRate(device: device)
+            currentDevice = device
+            configureFrameRate(device: device)
             session.commitConfiguration()
 
             DispatchQueue.main.async { self.activeCamera = cameraType }
@@ -249,10 +260,10 @@ public final class CameraManager: NSObject, ObservableObject {
 
     private func reconfigureSession() {
         sessionQueue.async { [weak self] in
-            guard let self = self, let session = self.captureSession else { return }
+            guard let self, let session = captureSession else { return }
             session.beginConfiguration()
-            session.sessionPreset = self.config.resolution.preset
-            if let device = self.currentDevice { self.configureFrameRate(device: device) }
+            session.sessionPreset = config.resolution.preset
+            if let device = currentDevice { configureFrameRate(device: device) }
             session.commitConfiguration()
         }
     }
@@ -302,9 +313,9 @@ public enum CameraError: Error, LocalizedError {
 
     public var errorDescription: String? {
         switch self {
-        case .notAvailable: return "Camera is not available on this device"
-        case .notAuthorized: return "Camera access not authorized"
-        case .configurationFailed(let reason): return "Camera configuration failed: \(reason)"
+        case .notAvailable: "Camera is not available on this device"
+        case .notAuthorized: "Camera access not authorized"
+        case .configurationFailed(let reason): "Camera configuration failed: \(reason)"
         }
     }
 }

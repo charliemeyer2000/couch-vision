@@ -1,0 +1,64 @@
+# Pre-commit hooks for CouchVision monorepo
+# Install: make setup (or: pre-commit install)
+# Run all: pre-commit run --all-files
+# See: https://pre-commit.com
+
+repos:
+  # === General Hooks ===
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: \.md$
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+        args: ['--maxkb=1000']
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: detect-private-key
+
+  # === Python: Ruff ===
+  # Replaces black/flake8/isort - faster and unified
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.9.4
+    hooks:
+      - id: ruff
+        name: ruff lint (Python)
+        args: [--fix, --exit-non-zero-on-fix]
+        files: ^bridge/
+      - id: ruff-format
+        name: ruff format (Python)
+        files: ^bridge/
+
+  # === Swift: Format THEN Lint ===
+  # Order matters: format first, then lint the formatted code
+
+  # SwiftFormat (auto-formatting)
+  # Note: Formats in-place, files need to be re-staged if modified
+  - repo: local
+    hooks:
+      - id: swiftformat
+        name: SwiftFormat
+        entry: swiftformat
+        language: system
+        files: \.swift$
+        exclude: ^(\.build|DerivedData|build)/
+        pass_filenames: true
+        require_serial: true
+
+  # SwiftLint (linting with auto-fix)
+  - repo: local
+    hooks:
+      - id: swiftlint
+        name: SwiftLint
+        entry: swiftlint lint --fix --strict --quiet
+        language: system
+        files: \.swift$
+        exclude: ^(\.build|DerivedData|build)/
+        pass_filenames: true
+        require_serial: true
+
+# Config version
+default_language_version:
+  python: python3

@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 63;
+	objectVersion = 77;
 	objects = {
 
 /* Begin PBXBuildFile section */
@@ -17,8 +17,10 @@
 		670E58F09AAAD14A364F7B09 /* ImageMessages.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F0940103540482F7189960F /* ImageMessages.swift */; };
 		6B39CB97419F810D955EBE84 /* TimeUtils.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53EC739A43B279481C728B31 /* TimeUtils.swift */; };
 		6F2A1697B088B56AF9896AC7 /* Publisher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F9221EA27CF0D48D12B5B1E /* Publisher.swift */; };
+		6FE70D107D6AC93F706A3A5B /* Logger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 998CF88C47937956BF73EA86 /* Logger.swift */; };
 		7395924D19CD22E6B210A5A5 /* ZenohPublisher.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA67DF29CD9D69C942084599 /* ZenohPublisher.swift */; };
 		80E7C106D5E88D264BF9AD6E /* Header.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F1E8F2243F776BF1AA4E8B2 /* Header.swift */; };
+		85E8E9A9B976D6BA5EB1FDC9 /* SettingsStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 857EDF55AC4B89D61E1C71B2 /* SettingsStorage.swift */; };
 		B088CAD6A2E138E18D578F4E /* SensorProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = C06B01D38F55E6273E626CD9 /* SensorProvider.swift */; };
 		B11496215549FDB5BA14705C /* LiDARManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 939E2932B661D1CAFEDC6DBB /* LiDARManager.swift */; };
 		B70E5E17008CF36C2A2EE13B /* MockPublisher.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3DA3BB7A7A007CE2519E19C /* MockPublisher.swift */; };
@@ -36,7 +38,9 @@
 		7DA35D300DA7214084D1EA5B /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		7F1E8F2243F776BF1AA4E8B2 /* Header.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Header.swift; sourceTree = "<group>"; };
 		84AB8703216F912795E5183C /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		857EDF55AC4B89D61E1C71B2 /* SettingsStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsStorage.swift; sourceTree = "<group>"; };
 		939E2932B661D1CAFEDC6DBB /* LiDARManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiDARManager.swift; sourceTree = "<group>"; };
+		998CF88C47937956BF73EA86 /* Logger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Logger.swift; sourceTree = "<group>"; };
 		9F0940103540482F7189960F /* ImageMessages.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageMessages.swift; sourceTree = "<group>"; };
 		A39CFD6B3D75415C7BAA65AF /* CDREncoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CDREncoder.swift; sourceTree = "<group>"; };
 		A3DA3BB7A7A007CE2519E19C /* MockPublisher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockPublisher.swift; sourceTree = "<group>"; };
@@ -45,7 +49,7 @@
 		C06B01D38F55E6273E626CD9 /* SensorProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SensorProvider.swift; sourceTree = "<group>"; };
 		CA67DF29CD9D69C942084599 /* ZenohPublisher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZenohPublisher.swift; sourceTree = "<group>"; };
 		E0CA31563A14598E4A94E2D1 /* CameraManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraManager.swift; sourceTree = "<group>"; };
-		F473F8EDD6090021ADE3863B /* CouchVision.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CouchVision.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		F473F8EDD6090021ADE3863B /* CouchVision.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = CouchVision.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -78,6 +82,8 @@
 		8017FE6131181EE64DDB42F4 /* Core */ = {
 			isa = PBXGroup;
 			children = (
+				998CF88C47937956BF73EA86 /* Logger.swift */,
+				857EDF55AC4B89D61E1C71B2 /* SettingsStorage.swift */,
 				53EC739A43B279481C728B31 /* TimeUtils.swift */,
 				B596040D50FB48ED5D2774C5 /* Coordinator */,
 				6BABBED31A6AB07898B8AD88 /* Protocols */,
@@ -192,6 +198,7 @@
 				LastUpgradeCheck = 1600;
 				TargetAttributes = {
 					7B943B1A5E1F5E32F8AB3985 = {
+						DevelopmentTeam = "";
 						ProvisioningStyle = Automatic;
 					};
 				};
@@ -206,6 +213,7 @@
 			);
 			mainGroup = EFFB4406F86754E2031F6B97;
 			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
@@ -227,12 +235,14 @@
 				670E58F09AAAD14A364F7B09 /* ImageMessages.swift in Sources */,
 				323E9DC12467908A1BC9078F /* ImuMessages.swift in Sources */,
 				B11496215549FDB5BA14705C /* LiDARManager.swift in Sources */,
+				6FE70D107D6AC93F706A3A5B /* Logger.swift in Sources */,
 				B70E5E17008CF36C2A2EE13B /* MockPublisher.swift in Sources */,
 				0A24D1F486DC1F0641570849 /* MotionManager.swift in Sources */,
 				040B6E74FAC257BCEEC6A371 /* PointCloudMessages.swift in Sources */,
 				6F2A1697B088B56AF9896AC7 /* Publisher.swift in Sources */,
 				598F4B774D5F8EF19C4ED7B3 /* SensorCoordinator.swift in Sources */,
 				B088CAD6A2E138E18D578F4E /* SensorProvider.swift in Sources */,
+				85E8E9A9B976D6BA5EB1FDC9 /* SettingsStorage.swift in Sources */,
 				BBA333CDB11194E69C70DFDB /* SettingsView.swift in Sources */,
 				6B39CB97419F810D955EBE84 /* TimeUtils.swift in Sources */,
 				7395924D19CD22E6B210A5A5 /* ZenohPublisher.swift in Sources */,
@@ -247,7 +257,6 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				DEVELOPMENT_TEAM = 9778KTLRXB;
 				ENABLE_PREVIEWS = YES;
 				INFOPLIST_FILE = CouchVision/Resources/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -265,7 +274,6 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				DEVELOPMENT_TEAM = 9778KTLRXB;
 				ENABLE_PREVIEWS = YES;
 				INFOPLIST_FILE = CouchVision/Resources/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (

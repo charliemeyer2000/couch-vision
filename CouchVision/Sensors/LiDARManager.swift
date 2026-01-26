@@ -1,6 +1,6 @@
-import Foundation
 import ARKit
 import Combine
+import Foundation
 
 public struct LiDARData {
     public let depthImage: ROSImage?
@@ -8,8 +8,12 @@ public struct LiDARData {
     public let pointCloud: PointCloud2?
     public let cameraTransform: simd_float4x4?
 
-    public init(depthImage: ROSImage? = nil, confidenceImage: ROSImage? = nil,
-                pointCloud: PointCloud2? = nil, cameraTransform: simd_float4x4? = nil) {
+    public init(
+        depthImage: ROSImage? = nil,
+        confidenceImage: ROSImage? = nil,
+        pointCloud: PointCloud2? = nil,
+        cameraTransform: simd_float4x4? = nil
+    ) {
         self.depthImage = depthImage
         self.confidenceImage = confidenceImage
         self.pointCloud = pointCloud
@@ -23,8 +27,12 @@ public struct LiDARConfig {
     public let pointCloudDownsample: Int
     public let maxDepth: Float
 
-    public init(generatePointCloud: Bool = true, publishConfidence: Bool = false,
-                pointCloudDownsample: Int = 4, maxDepth: Float = 5.0) {
+    public init(
+        generatePointCloud: Bool = true,
+        publishConfidence: Bool = false,
+        pointCloudDownsample: Int = 4,
+        maxDepth: Float = 5.0
+    ) {
         self.generatePointCloud = generatePointCloud
         self.publishConfidence = publishConfidence
         self.pointCloudDownsample = max(1, pointCloudDownsample)
@@ -50,9 +58,13 @@ public final class LiDARManager: NSObject, ObservableObject {
     public let sensorId = "lidar"
     public let displayName = "LiDAR"
 
-    public override init() {
+    override public init() {
         super.init()
         checkAvailability()
+    }
+
+    deinit {
+        arSession?.pause()
     }
 
     @discardableResult
@@ -64,7 +76,7 @@ public final class LiDARManager: NSObject, ObservableObject {
 
     public func requestPermissions() async -> Bool {
         // ARKit uses camera permission, which should be requested separately
-        return checkAvailability()
+        checkAvailability()
     }
 
     public func start() throws {
@@ -99,20 +111,27 @@ public final class LiDARManager: NSObject, ObservableObject {
 
         let depthImage = pixelBufferToROSImage(sceneDepth.depthMap, encoding: "32FC1", timestamp: timestamp)
 
-        var confidenceImage: ROSImage? = nil
+        var confidenceImage: ROSImage?
         if config.publishConfidence, let confMap = sceneDepth.confidenceMap {
-            // Confidence: 0=low, 1=medium, 2=high
             confidenceImage = pixelBufferToROSImage(confMap, encoding: "mono8", timestamp: timestamp)
         }
 
-        var pointCloud: PointCloud2? = nil
+        var pointCloud: PointCloud2?
         if config.generatePointCloud {
-            pointCloud = createPointCloud(from: sceneDepth.depthMap, confidence: sceneDepth.confidenceMap,
-                                          camera: frame.camera, timestamp: timestamp)
+            pointCloud = createPointCloud(
+                from: sceneDepth.depthMap,
+                confidence: sceneDepth.confidenceMap,
+                camera: frame.camera,
+                timestamp: timestamp
+            )
         }
 
-        let data = LiDARData(depthImage: depthImage, confidenceImage: confidenceImage,
-                             pointCloud: pointCloud, cameraTransform: frame.camera.transform)
+        let data = LiDARData(
+            depthImage: depthImage,
+            confidenceImage: confidenceImage,
+            pointCloud: pointCloud,
+            cameraTransform: frame.camera.transform
+        )
         dataSubject.send(TimestampedData(data: data, timestamp: timestamp, frameId: frameId))
     }
 
@@ -125,18 +144,34 @@ public final class LiDARManager: NSObject, ObservableObject {
         let bytesPerRow = CVPixelBufferGetBytesPerRow(buffer)
 
         guard let baseAddress = CVPixelBufferGetBaseAddress(buffer) else {
-            return ROSImage(header: ROSHeader(timeInterval: timestamp, frameId: frameId),
-                           height: 0, width: 0, encoding: encoding, step: 0, data: Data())
+            return ROSImage(
+                header: ROSHeader(timeInterval: timestamp, frameId: frameId),
+                height: 0,
+                width: 0,
+                encoding: encoding,
+                step: 0,
+                data: Data()
+            )
         }
 
         let data = Data(bytes: baseAddress, count: height * bytesPerRow)
-        return ROSImage(header: ROSHeader(timeInterval: timestamp, frameId: frameId),
-                       height: UInt32(height), width: UInt32(width), encoding: encoding,
-                       isBigEndian: 0, step: UInt32(bytesPerRow), data: data)
+        return ROSImage(
+            header: ROSHeader(timeInterval: timestamp, frameId: frameId),
+            height: UInt32(height),
+            width: UInt32(width),
+            encoding: encoding,
+            isBigEndian: 0,
+            step: UInt32(bytesPerRow),
+            data: data
+        )
     }
 
-    private func createPointCloud(from depthMap: CVPixelBuffer, confidence: CVPixelBuffer?,
-                                  camera: ARCamera, timestamp: TimeInterval) -> PointCloud2 {
+    private func createPointCloud(
+        from depthMap: CVPixelBuffer,
+        confidence: CVPixelBuffer?,
+        camera: ARCamera,
+        timestamp: TimeInterval
+    ) -> PointCloud2 {
         CVPixelBufferLockBaseAddress(depthMap, .readOnly)
         defer { CVPixelBufferUnlockBaseAddress(depthMap, .readOnly) }
 
@@ -169,10 +204,10 @@ public final class LiDARManager: NSObject, ObservableObject {
                 let index = y * width + x
                 let depth = depthData[index]
 
-                guard depth > 0 && depth < config.maxDepth else { continue }
+                guard depth > 0, depth < config.maxDepth else { continue }
 
                 var conf: Float = 1.0
-                if let confData = confData {
+                if let confData {
                     let confValue = confData[index]
                     if confValue == 0 { continue }
                     conf = Float(confValue) / 2.0
@@ -216,8 +251,8 @@ public enum LiDARError: Error, LocalizedError {
 
     public var errorDescription: String? {
         switch self {
-        case .notAvailable: return "LiDAR not available (requires iPhone 12 Pro or later)"
-        case .sessionFailed(let reason): return "ARKit session failed: \(reason)"
+        case .notAvailable: "LiDAR not available (requires iPhone 12 Pro or later)"
+        case .sessionFailed(let reason): "ARKit session failed: \(reason)"
         }
     }
 }

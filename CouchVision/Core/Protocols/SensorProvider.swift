@@ -1,5 +1,5 @@
-import Foundation
 import Combine
+import Foundation
 
 /// Represents a timestamped sensor reading
 public struct TimestampedData<T> {
@@ -25,8 +25,9 @@ public enum SensorState: Equatable {
 
     var isOperational: Bool {
         switch self {
-        case .ready, .running: return true
-        default: return false
+        case .ready,
+             .running: true
+        default: false
         }
     }
 }
@@ -48,6 +49,6 @@ public struct SensorRateConfig {
     }
 
     public init(frequencyHz: Double) {
-        self.interval = 1.0 / max(1.0, frequencyHz)
+        interval = 1.0 / max(1.0, frequencyHz)
     }
 }

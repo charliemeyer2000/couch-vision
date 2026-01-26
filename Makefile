@@ -2,39 +2,77 @@
 # Run `make help` to see available commands
 
 SHELL := /bin/bash
-.SHELLFLAGS := -c
-ROS2_SETUP := source ~/ros2_jazzy/install/setup.bash
+PROJECT_ROOT := $(shell pwd)
 BRIDGE_PORT ?= 7447
 
-.PHONY: help build-ios build-sim xcode regen bridge topics echo hz rviz rqt image ip check-ros2 setup-bridge clean
+# ROS2 setup - searches common install locations
+ROS2_SETUP := source ~/ros2_jazzy/install/setup.bash 2>/dev/null || \
+              source ~/ros2_ws/install/setup.bash 2>/dev/null || \
+              source /opt/ros/jazzy/setup.bash 2>/dev/null || \
+              (echo "Error: ROS2 not found. Run 'make setup-ros2'" && exit 1)
+
+.PHONY: help setup setup-ros2 setup-bridge \
+        build-ios build-sim xcode regen \
+        bridge topics echo hz rviz rqt image \
+        ip check-ros2 clean \
+        lint lint-fix format
+
+# === Help ===
 
 help:
 	@echo "CouchVision - iOS Sensor Streamer for ROS2"
 	@echo ""
+	@echo "Setup (run once):"
+	@echo "  make setup          Full dev environment setup"
+	@echo "  make setup-ros2     Install ROS2 Jazzy (macOS Apple Silicon)"
+	@echo "  make setup-bridge   Install bridge Python dependencies"
+	@echo ""
 	@echo "iOS App:"
-	@echo "  make build-ios    Build for device"
-	@echo "  make build-sim    Build for simulator"
-	@echo "  make xcode        Open Xcode project"
-	@echo "  make regen        Regenerate Xcode project"
+	@echo "  make xcode          Open Xcode project"
+	@echo "  make regen          Regenerate Xcode project"
+	@echo "  make build-ios      Build for device"
+	@echo "  make build-sim      Build for simulator"
 	@echo ""
 	@echo "ROS2 Bridge:"
-	@echo "  make setup-bridge Install Python dependencies"
-	@echo "  make bridge       Run iOS bridge (PORT=7447)"
+	@echo "  make bridge         Run iOS bridge (PORT=$(BRIDGE_PORT))"
 	@echo ""
 	@echo "ROS2 Tools:"
-	@echo "  make topics       List ROS2 topics"
-	@echo "  make hz T=/topic  Show topic frequency"
-	@echo "  make echo T=/topic Echo topic messages"
-	@echo "  make rviz         Launch RViz2"
-	@echo "  make rqt          Launch rqt"
-	@echo "  make image        View camera in rqt_image_view"
+	@echo "  make topics         List ROS2 topics"
+	@echo "  make hz T=/topic    Show topic frequency"
+	@echo "  make echo T=/topic  Echo topic messages"
+	@echo "  make rviz           Launch RViz2"
+	@echo "  make rqt            Launch rqt"
+	@echo "  make image          View camera in rqt_image_view"
+	@echo ""
+	@echo "Linting & Formatting:"
+	@echo "  make lint           Run all linters (via pre-commit)"
+	@echo "  make lint-fix       Run linters with auto-fix"
+	@echo "  make format         Format all code"
 	@echo ""
 	@echo "Utilities:"
-	@echo "  make ip           Show Mac IP addresses"
-	@echo "  make check-ros2   Verify ROS2 installation"
-	@echo "  make quickstart   Show quick start guide"
+	@echo "  make ip             Show Mac IP addresses"
+	@echo "  make check-ros2     Verify ROS2 installation"
+	@echo "  make quickstart     Show quick start guide"
+	@echo "  make clean          Clean build artifacts"
+
+# === Setup ===
+
+setup:
+	@bash scripts/setup.sh
+
+setup-ros2:
+	@bash scripts/setup-ros2.sh
+
+setup-bridge:
+	cd bridge && uv sync
 
 # === iOS App ===
+
+xcode:
+	open CouchVision.xcodeproj
+
+regen:
+	xcodegen generate
 
 build-ios:
 	xcodebuild -project CouchVision.xcodeproj -scheme CouchVision -sdk iphoneos build
@@ -43,16 +81,7 @@ build-sim:
 	xcodebuild -project CouchVision.xcodeproj -scheme CouchVision \
 		-sdk iphonesimulator -destination 'platform=iOS Simulator,name=iPhone 17 Pro' build
 
-xcode:
-	open CouchVision.xcodeproj
-
-regen:
-	xcodegen generate
-
 # === ROS2 Bridge ===
-
-setup-bridge:
-	cd bridge && uv sync
 
 bridge:
 	@echo "Starting iOS bridge on port $(BRIDGE_PORT)..."
@@ -79,13 +108,13 @@ else
 endif
 
 rviz:
-	$(ROS2_SETUP) && rviz2
+	@$(ROS2_SETUP) && rviz2
 
 rqt:
-	$(ROS2_SETUP) && rqt
+	@$(ROS2_SETUP) && rqt
 
 image:
-	$(ROS2_SETUP) && ros2 run rqt_image_view rqt_image_view /iphone/camera/back_wide/image/compressed
+	@$(ROS2_SETUP) && ros2 run rqt_image_view rqt_image_view /iphone/camera/back_wide/image/compressed
 
 # === Utilities ===
 
@@ -94,33 +123,56 @@ ip:
 	@ifconfig | grep "inet " | grep -v 127.0.0.1 | awk '{print $$2}'
 
 check-ros2:
-	@$(ROS2_SETUP) && ros2 -h > /dev/null && echo "ROS2 is installed and working!"
+	@$(ROS2_SETUP) && ros2 --version && echo "ROS2 is working!"
 
 quickstart:
 	@echo "=== CouchVision Quick Start ==="
 	@echo ""
+	@echo "First time setup:"
+	@echo "  make setup"
+	@echo ""
+	@echo "Development workflow:"
+	@echo ""
 	@echo "1. Get your Mac's IP address:"
 	@echo "   make ip"
 	@echo ""
-	@echo "2. Set up the bridge (first time only):"
-	@echo "   make setup-bridge"
-	@echo ""
-	@echo "3. Start the ROS2 bridge (Terminal 1):"
+	@echo "2. Start the ROS2 bridge (Terminal 1):"
 	@echo "   make bridge"
 	@echo ""
-	@echo "4. Run iOS app on iPhone:"
+	@echo "3. Run iOS app on iPhone:"
 	@echo "   make xcode  # then Cmd+R with iPhone selected"
 	@echo ""
-	@echo "5. In the iOS app:"
+	@echo "4. In the iOS app:"
 	@echo "   - Enter: tcp://<your-mac-ip>:7447"
 	@echo "   - Tap Connect"
 	@echo "   - Enable sensors, tap Start All"
 	@echo ""
-	@echo "6. View data (Terminal 2):"
+	@echo "5. View data (Terminal 2):"
 	@echo "   make topics"
 	@echo "   make hz T=/iphone/imu"
 	@echo "   make image"
 
+# === Linting & Formatting ===
+
+lint:
+	@echo "Running all linters..."
+	pre-commit run --all-files
+
+lint-fix:
+	@echo "Running linters with auto-fix..."
+	cd bridge && uv run ruff check --fix .
+	cd bridge && uv run ruff format .
+	swiftlint --fix --quiet || true
+	swiftformat . --quiet || true
+
+format:
+	@echo "Formatting all code..."
+	cd bridge && uv run ruff format .
+	swiftformat . --quiet || true
+
+# === Cleanup ===
+
 clean:
 	rm -rf build/
+	rm -rf DerivedData/
 	cd bridge && rm -rf .venv __pycache__

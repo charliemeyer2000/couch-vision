@@ -12,8 +12,8 @@ public struct ROSTime: Equatable {
 
     public init(timeInterval: TimeInterval) {
         let wholeSec = floor(timeInterval)
-        self.sec = Int32(wholeSec)
-        self.nanosec = UInt32((timeInterval - wholeSec) * 1_000_000_000)
+        sec = Int32(wholeSec)
+        nanosec = UInt32((timeInterval - wholeSec) * 1_000_000_000)
     }
 
     public static var now: ROSTime { ROSTime(timeInterval: Date().timeIntervalSince1970) }
@@ -34,7 +34,7 @@ public struct ROSHeader: Equatable {
     }
 
     public init(timeInterval: TimeInterval, frameId: String) {
-        self.stamp = ROSTime(timeInterval: timeInterval)
+        stamp = ROSTime(timeInterval: timeInterval)
         self.frameId = frameId
     }
 }

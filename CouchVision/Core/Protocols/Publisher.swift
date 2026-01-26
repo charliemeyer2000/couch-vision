@@ -6,8 +6,8 @@ public enum QoS {
 
     var description: String {
         switch self {
-        case .reliable: return "reliable"
-        case .bestEffort: return "best_effort"
+        case .reliable: "reliable"
+        case .bestEffort: "best_effort"
         }
     }
 }
@@ -45,11 +45,11 @@ public enum PublisherError: Error, LocalizedError {
 
     public var errorDescription: String? {
         switch self {
-        case .notConnected: return "Publisher is not connected"
-        case .connectionFailed(let reason): return "Connection failed: \(reason)"
-        case .publishFailed(let reason): return "Publish failed: \(reason)"
-        case .invalidEndpoint(let endpoint): return "Invalid endpoint: \(endpoint)"
-        case .timeout: return "Operation timed out"
+        case .notConnected: "Publisher is not connected"
+        case .connectionFailed(let reason): "Connection failed: \(reason)"
+        case .publishFailed(let reason): "Publish failed: \(reason)"
+        case .invalidEndpoint(let endpoint): "Invalid endpoint: \(endpoint)"
+        case .timeout: "Operation timed out"
         }
     }
 }
