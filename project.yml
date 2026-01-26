@@ -1,0 +1,52 @@
+name: CouchVision
+options:
+  bundleIdPrefix: com.couchvision
+  deploymentTarget:
+    iOS: "16.0"
+  xcodeVersion: "16.0"
+  generateEmptyDirectories: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    TARGETED_DEVICE_FAMILY: "1" # iPhone only
+    INFOPLIST_FILE: CouchVision/Resources/Info.plist
+    DEVELOPMENT_TEAM: ""
+    CODE_SIGN_STYLE: Automatic
+
+targets:
+  CouchVision:
+    type: application
+    platform: iOS
+    sources:
+      - CouchVision
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.couchvision.CouchVision
+        INFOPLIST_FILE: CouchVision/Resources/Info.plist
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ENABLE_PREVIEWS: YES
+    info:
+      path: CouchVision/Resources/Info.plist
+      properties:
+        CFBundleDisplayName: CouchVision
+        CFBundleShortVersionString: "1.0"
+        CFBundleVersion: "1"
+        UILaunchScreen:
+          UIColorName: ""
+          UIImageName: ""
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UIRequiredDeviceCapabilities:
+          - armv7
+        # Permissions
+        NSCameraUsageDescription: "CouchVision streams camera data to ROS2 for robotics applications."
+        NSLocationWhenInUseUsageDescription: "CouchVision streams GPS location to ROS2 for robotics applications."
+        NSLocationAlwaysAndWhenInUseUsageDescription: "CouchVision needs location access in background to maintain connection and stream GPS data."
+        NSMotionUsageDescription: "CouchVision streams IMU sensor data to ROS2 for robotics applications."
+        # Background Modes
+        UIBackgroundModes:
+          - location
+          - audio

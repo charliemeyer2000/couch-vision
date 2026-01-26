@@ -1,0 +1,432 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		040B6E74FAC257BCEEC6A371 /* PointCloudMessages.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13E2AEC76841DD49A288CA42 /* PointCloudMessages.swift */; };
+		0A24D1F486DC1F0641570849 /* MotionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9D238299B901206D565558C /* MotionManager.swift */; };
+		0AF8C867BCF9F5CB40BC225F /* CouchVisionApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B88064F3F70E9F967CCFFD5 /* CouchVisionApp.swift */; };
+		16FAD974F85188341A6AADD8 /* CDREncoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A39CFD6B3D75415C7BAA65AF /* CDREncoder.swift */; };
+		323E9DC12467908A1BC9078F /* ImuMessages.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54AAFAF2FFE3A36D1FEF4EE8 /* ImuMessages.swift */; };
+		4BA7463010EEB8E2B19A419C /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15E2DD4B63420F32FDB8A40A /* ContentView.swift */; };
+		598F4B774D5F8EF19C4ED7B3 /* SensorCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACA7823899FEF66E11703FE7 /* SensorCoordinator.swift */; };
+		670E58F09AAAD14A364F7B09 /* ImageMessages.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F0940103540482F7189960F /* ImageMessages.swift */; };
+		6B39CB97419F810D955EBE84 /* TimeUtils.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53EC739A43B279481C728B31 /* TimeUtils.swift */; };
+		6F2A1697B088B56AF9896AC7 /* Publisher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F9221EA27CF0D48D12B5B1E /* Publisher.swift */; };
+		7395924D19CD22E6B210A5A5 /* ZenohPublisher.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA67DF29CD9D69C942084599 /* ZenohPublisher.swift */; };
+		80E7C106D5E88D264BF9AD6E /* Header.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F1E8F2243F776BF1AA4E8B2 /* Header.swift */; };
+		B088CAD6A2E138E18D578F4E /* SensorProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = C06B01D38F55E6273E626CD9 /* SensorProvider.swift */; };
+		B11496215549FDB5BA14705C /* LiDARManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 939E2932B661D1CAFEDC6DBB /* LiDARManager.swift */; };
+		B70E5E17008CF36C2A2EE13B /* MockPublisher.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3DA3BB7A7A007CE2519E19C /* MockPublisher.swift */; };
+		BBA333CDB11194E69C70DFDB /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DA35D300DA7214084D1EA5B /* SettingsView.swift */; };
+		C8C26DBE480BA955AE520C36 /* CameraManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0CA31563A14598E4A94E2D1 /* CameraManager.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		0F9221EA27CF0D48D12B5B1E /* Publisher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Publisher.swift; sourceTree = "<group>"; };
+		13E2AEC76841DD49A288CA42 /* PointCloudMessages.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PointCloudMessages.swift; sourceTree = "<group>"; };
+		15E2DD4B63420F32FDB8A40A /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		4B88064F3F70E9F967CCFFD5 /* CouchVisionApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CouchVisionApp.swift; sourceTree = "<group>"; };
+		53EC739A43B279481C728B31 /* TimeUtils.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimeUtils.swift; sourceTree = "<group>"; };
+		54AAFAF2FFE3A36D1FEF4EE8 /* ImuMessages.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImuMessages.swift; sourceTree = "<group>"; };
+		7DA35D300DA7214084D1EA5B /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		7F1E8F2243F776BF1AA4E8B2 /* Header.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Header.swift; sourceTree = "<group>"; };
+		84AB8703216F912795E5183C /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		939E2932B661D1CAFEDC6DBB /* LiDARManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiDARManager.swift; sourceTree = "<group>"; };
+		9F0940103540482F7189960F /* ImageMessages.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageMessages.swift; sourceTree = "<group>"; };
+		A39CFD6B3D75415C7BAA65AF /* CDREncoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CDREncoder.swift; sourceTree = "<group>"; };
+		A3DA3BB7A7A007CE2519E19C /* MockPublisher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockPublisher.swift; sourceTree = "<group>"; };
+		ACA7823899FEF66E11703FE7 /* SensorCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SensorCoordinator.swift; sourceTree = "<group>"; };
+		B9D238299B901206D565558C /* MotionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MotionManager.swift; sourceTree = "<group>"; };
+		C06B01D38F55E6273E626CD9 /* SensorProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SensorProvider.swift; sourceTree = "<group>"; };
+		CA67DF29CD9D69C942084599 /* ZenohPublisher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZenohPublisher.swift; sourceTree = "<group>"; };
+		E0CA31563A14598E4A94E2D1 /* CameraManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraManager.swift; sourceTree = "<group>"; };
+		F473F8EDD6090021ADE3863B /* CouchVision.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = CouchVision.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		5285AF0355880B8BC2051ED5 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				84AB8703216F912795E5183C /* Info.plist */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		6BABBED31A6AB07898B8AD88 /* Protocols */ = {
+			isa = PBXGroup;
+			children = (
+				0F9221EA27CF0D48D12B5B1E /* Publisher.swift */,
+				C06B01D38F55E6273E626CD9 /* SensorProvider.swift */,
+			);
+			path = Protocols;
+			sourceTree = "<group>";
+		};
+		76A0CA6BDC62B00E2D433C51 /* Networking */ = {
+			isa = PBXGroup;
+			children = (
+				A3DA3BB7A7A007CE2519E19C /* MockPublisher.swift */,
+				CA67DF29CD9D69C942084599 /* ZenohPublisher.swift */,
+			);
+			path = Networking;
+			sourceTree = "<group>";
+		};
+		8017FE6131181EE64DDB42F4 /* Core */ = {
+			isa = PBXGroup;
+			children = (
+				53EC739A43B279481C728B31 /* TimeUtils.swift */,
+				B596040D50FB48ED5D2774C5 /* Coordinator */,
+				6BABBED31A6AB07898B8AD88 /* Protocols */,
+			);
+			path = Core;
+			sourceTree = "<group>";
+		};
+		8D094E71A24223586DAED21E /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				F473F8EDD6090021ADE3863B /* CouchVision.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		9777C75C4AD011197899C35B /* Sensors */ = {
+			isa = PBXGroup;
+			children = (
+				E0CA31563A14598E4A94E2D1 /* CameraManager.swift */,
+				939E2932B661D1CAFEDC6DBB /* LiDARManager.swift */,
+				B9D238299B901206D565558C /* MotionManager.swift */,
+			);
+			path = Sensors;
+			sourceTree = "<group>";
+		};
+		A7FA8064A7ED1155F536BC22 /* CouchVision */ = {
+			isa = PBXGroup;
+			children = (
+				ED91060441E5F8A81E12B166 /* App */,
+				8017FE6131181EE64DDB42F4 /* Core */,
+				76A0CA6BDC62B00E2D433C51 /* Networking */,
+				5285AF0355880B8BC2051ED5 /* Resources */,
+				C4474A58ECA8565576DA7E40 /* ROS */,
+				9777C75C4AD011197899C35B /* Sensors */,
+			);
+			path = CouchVision;
+			sourceTree = "<group>";
+		};
+		B12EE5CB43D90A24B30E022B /* Messages */ = {
+			isa = PBXGroup;
+			children = (
+				7F1E8F2243F776BF1AA4E8B2 /* Header.swift */,
+				9F0940103540482F7189960F /* ImageMessages.swift */,
+				54AAFAF2FFE3A36D1FEF4EE8 /* ImuMessages.swift */,
+				13E2AEC76841DD49A288CA42 /* PointCloudMessages.swift */,
+			);
+			path = Messages;
+			sourceTree = "<group>";
+		};
+		B596040D50FB48ED5D2774C5 /* Coordinator */ = {
+			isa = PBXGroup;
+			children = (
+				ACA7823899FEF66E11703FE7 /* SensorCoordinator.swift */,
+			);
+			path = Coordinator;
+			sourceTree = "<group>";
+		};
+		C4474A58ECA8565576DA7E40 /* ROS */ = {
+			isa = PBXGroup;
+			children = (
+				A39CFD6B3D75415C7BAA65AF /* CDREncoder.swift */,
+				B12EE5CB43D90A24B30E022B /* Messages */,
+			);
+			path = ROS;
+			sourceTree = "<group>";
+		};
+		ED91060441E5F8A81E12B166 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				15E2DD4B63420F32FDB8A40A /* ContentView.swift */,
+				4B88064F3F70E9F967CCFFD5 /* CouchVisionApp.swift */,
+				7DA35D300DA7214084D1EA5B /* SettingsView.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		EFFB4406F86754E2031F6B97 = {
+			isa = PBXGroup;
+			children = (
+				A7FA8064A7ED1155F536BC22 /* CouchVision */,
+				8D094E71A24223586DAED21E /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		7B943B1A5E1F5E32F8AB3985 /* CouchVision */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = DEA71E915BCBC3B70D4863D8 /* Build configuration list for PBXNativeTarget "CouchVision" */;
+			buildPhases = (
+				C0F0B50D0D010872CF526DC1 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = CouchVision;
+			packageProductDependencies = (
+			);
+			productName = CouchVision;
+			productReference = F473F8EDD6090021ADE3863B /* CouchVision.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		D840DCA89B1CBD60B156B7D4 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1600;
+				TargetAttributes = {
+					7B943B1A5E1F5E32F8AB3985 = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = D9EC6F40C32C6D067E1B7629 /* Build configuration list for PBXProject "CouchVision" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = EFFB4406F86754E2031F6B97;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				7B943B1A5E1F5E32F8AB3985 /* CouchVision */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		C0F0B50D0D010872CF526DC1 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				16FAD974F85188341A6AADD8 /* CDREncoder.swift in Sources */,
+				C8C26DBE480BA955AE520C36 /* CameraManager.swift in Sources */,
+				4BA7463010EEB8E2B19A419C /* ContentView.swift in Sources */,
+				0AF8C867BCF9F5CB40BC225F /* CouchVisionApp.swift in Sources */,
+				80E7C106D5E88D264BF9AD6E /* Header.swift in Sources */,
+				670E58F09AAAD14A364F7B09 /* ImageMessages.swift in Sources */,
+				323E9DC12467908A1BC9078F /* ImuMessages.swift in Sources */,
+				B11496215549FDB5BA14705C /* LiDARManager.swift in Sources */,
+				B70E5E17008CF36C2A2EE13B /* MockPublisher.swift in Sources */,
+				0A24D1F486DC1F0641570849 /* MotionManager.swift in Sources */,
+				040B6E74FAC257BCEEC6A371 /* PointCloudMessages.swift in Sources */,
+				6F2A1697B088B56AF9896AC7 /* Publisher.swift in Sources */,
+				598F4B774D5F8EF19C4ED7B3 /* SensorCoordinator.swift in Sources */,
+				B088CAD6A2E138E18D578F4E /* SensorProvider.swift in Sources */,
+				BBA333CDB11194E69C70DFDB /* SettingsView.swift in Sources */,
+				6B39CB97419F810D955EBE84 /* TimeUtils.swift in Sources */,
+				7395924D19CD22E6B210A5A5 /* ZenohPublisher.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		234F03EFAEA92F69D39F7D38 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				ENABLE_PREVIEWS = YES;
+				INFOPLIST_FILE = CouchVision/Resources/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.couchvision.CouchVision;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		A8CECE28D887F5DA675A2F18 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				ENABLE_PREVIEWS = YES;
+				INFOPLIST_FILE = CouchVision/Resources/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.couchvision.CouchVision;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		AE9C22AEB13A305C046D78EB /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = "";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				INFOPLIST_FILE = CouchVision/Resources/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.9;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+		B1550503A186C0459CF735CB /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				INFOPLIST_FILE = CouchVision/Resources/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.9;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		D9EC6F40C32C6D067E1B7629 /* Build configuration list for PBXProject "CouchVision" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B1550503A186C0459CF735CB /* Debug */,
+				AE9C22AEB13A305C046D78EB /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		DEA71E915BCBC3B70D4863D8 /* Build configuration list for PBXNativeTarget "CouchVision" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				234F03EFAEA92F69D39F7D38 /* Debug */,
+				A8CECE28D887F5DA675A2F18 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = D840DCA89B1CBD60B156B7D4 /* Project object */;
+}
