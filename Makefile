@@ -5,11 +5,12 @@ SHELL := /bin/bash
 PROJECT_ROOT := $(shell pwd)
 BRIDGE_PORT ?= 7447
 
-# ROS2 setup - searches common install locations
+# ROS2 setup - searches common install locations (Jazzy and Humble)
 ROS2_SETUP := source ~/ros2_jazzy/install/setup.bash 2>/dev/null || \
               source ~/ros2_ws/install/setup.bash 2>/dev/null || \
               source /opt/ros/jazzy/setup.bash 2>/dev/null || \
-              (echo "Error: ROS2 not found. Run 'make setup-ros2'" && exit 1)
+              source /opt/ros/humble/setup.bash 2>/dev/null || \
+              (echo "Error: ROS2 not found. See README.md for install instructions." && exit 1)
 
 .PHONY: help setup setup-ros2 setup-bridge \
         build-ios build-sim xcode regen \
