@@ -279,15 +279,39 @@ public final class SensorCoordinator: ObservableObject {
             }
             .store(in: &cancellables)
 
+        cameraManager.cameraInfoPublisher
+            .sink { [weak self] data in
+                Task { await self?.publishCameraInfo(data) }
+            }
+            .store(in: &cancellables)
+
         lidarManager.dataPublisher
             .sink { [weak self] data in
                 Task { await self?.publishLiDARData(data) }
             }
             .store(in: &cancellables)
 
+        lidarManager.transformPublisher
+            .sink { [weak self] data in
+                Task { await self?.publishTransform(data) }
+            }
+            .store(in: &cancellables)
+
         motionManager.imuPublisher
             .sink { [weak self] data in
                 Task { await self?.publishIMU(data) }
+            }
+            .store(in: &cancellables)
+
+        motionManager.accelerometerPublisher
+            .sink { [weak self] data in
+                Task { await self?.publishAccelerometer(data) }
+            }
+            .store(in: &cancellables)
+
+        motionManager.gyroscopePublisher
+            .sink { [weak self] data in
+                Task { await self?.publishGyroscope(data) }
             }
             .store(in: &cancellables)
 
@@ -300,6 +324,12 @@ public final class SensorCoordinator: ObservableObject {
         locationManager.velocityPublisher
             .sink { [weak self] data in
                 Task { await self?.publishVelocity(data) }
+            }
+            .store(in: &cancellables)
+
+        locationManager.headingPublisher
+            .sink { [weak self] data in
+                Task { await self?.publishHeading(data) }
             }
             .store(in: &cancellables)
 
@@ -332,6 +362,12 @@ public final class SensorCoordinator: ObservableObject {
                 Task { await self?.publishThermal(data) }
             }
             .store(in: &cancellables)
+
+        deviceStatusManager.proximityPublisher
+            .sink { [weak self] data in
+                Task { await self?.publishProximity(data) }
+            }
+            .store(in: &cancellables)
     }
 
     private func publishCameraFrame(_ frame: TimestampedData<CameraFrame>) async {
@@ -351,6 +387,20 @@ public final class SensorCoordinator: ObservableObject {
             updateStats(topic: topic, bytes: encoded.count)
         } catch {
             Log.ros.error("Failed to publish camera frame: \(error.localizedDescription)")
+        }
+    }
+
+    private func publishCameraInfo(_ data: TimestampedData<CameraInfo>) async {
+        guard isConnected, let publisher else { return }
+
+        let topic = "\(config.topicPrefix)/camera/\(data.frameId)/camera_info"
+        let encoded = CDREncoder.encode(data.data)
+
+        do {
+            try await publisher.publish(encoded, to: topic)
+            updateStats(topic: topic, bytes: encoded.count)
+        } catch {
+            Log.ros.error("Failed to publish camera info: \(error.localizedDescription)")
         }
     }
 
@@ -380,6 +430,21 @@ public final class SensorCoordinator: ObservableObject {
         }
     }
 
+    private func publishTransform(_ data: TimestampedData<TransformStamped>) async {
+        guard isConnected, let publisher else { return }
+
+        let topic = "/tf" // Standard ROS TF topic (no prefix)
+        let tfMsg = TFMessage(transforms: [data.data])
+        let encoded = CDREncoder.encode(tfMsg)
+
+        do {
+            try await publisher.publish(encoded, to: topic)
+            updateStats(topic: topic, bytes: encoded.count)
+        } catch {
+            Log.ros.error("Failed to publish TF: \(error.localizedDescription)")
+        }
+    }
+
     private func publishIMU(_ data: TimestampedData<ImuMessage>) async {
         guard isConnected, let publisher else { return }
 
@@ -391,6 +456,34 @@ public final class SensorCoordinator: ObservableObject {
             updateStats(topic: topic, bytes: encoded.count)
         } catch {
             Log.ros.error("Failed to publish IMU: \(error.localizedDescription)")
+        }
+    }
+
+    private func publishAccelerometer(_ data: TimestampedData<Vector3Stamped>) async {
+        guard isConnected, let publisher else { return }
+
+        let topic = "\(config.topicPrefix)/accelerometer"
+        let encoded = CDREncoder.encode(data.data)
+
+        do {
+            try await publisher.publish(encoded, to: topic)
+            updateStats(topic: topic, bytes: encoded.count)
+        } catch {
+            Log.ros.error("Failed to publish accelerometer: \(error.localizedDescription)")
+        }
+    }
+
+    private func publishGyroscope(_ data: TimestampedData<Vector3Stamped>) async {
+        guard isConnected, let publisher else { return }
+
+        let topic = "\(config.topicPrefix)/gyroscope"
+        let encoded = CDREncoder.encode(data.data)
+
+        do {
+            try await publisher.publish(encoded, to: topic)
+            updateStats(topic: topic, bytes: encoded.count)
+        } catch {
+            Log.ros.error("Failed to publish gyroscope: \(error.localizedDescription)")
         }
     }
 
@@ -419,6 +512,20 @@ public final class SensorCoordinator: ObservableObject {
             updateStats(topic: topic, bytes: encoded.count)
         } catch {
             Log.ros.error("Failed to publish velocity: \(error.localizedDescription)")
+        }
+    }
+
+    private func publishHeading(_ data: TimestampedData<Float64Msg>) async {
+        guard isConnected, let publisher else { return }
+
+        let topic = "\(config.topicPrefix)/heading"
+        let encoded = CDREncoder.encode(data.data)
+
+        do {
+            try await publisher.publish(encoded, to: topic)
+            updateStats(topic: topic, bytes: encoded.count)
+        } catch {
+            Log.ros.error("Failed to publish heading: \(error.localizedDescription)")
         }
     }
 
@@ -489,6 +596,20 @@ public final class SensorCoordinator: ObservableObject {
             updateStats(topic: topic, bytes: encoded.count)
         } catch {
             Log.ros.error("Failed to publish thermal: \(error.localizedDescription)")
+        }
+    }
+
+    private func publishProximity(_ data: TimestampedData<BoolMsg>) async {
+        guard isConnected, let publisher else { return }
+
+        let topic = "\(config.topicPrefix)/proximity"
+        let encoded = CDREncoder.encode(data.data)
+
+        do {
+            try await publisher.publish(encoded, to: topic)
+            updateStats(topic: topic, bytes: encoded.count)
+        } catch {
+            Log.ros.error("Failed to publish proximity: \(error.localizedDescription)")
         }
     }
 

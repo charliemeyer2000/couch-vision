@@ -50,6 +50,11 @@ public final class LiDARManager: NSObject, ObservableObject {
         dataSubject.eraseToAnyPublisher()
     }
 
+    private let transformSubject = PassthroughSubject<TimestampedData<TransformStamped>, Never>()
+    public var transformPublisher: AnyPublisher<TimestampedData<TransformStamped>, Never> {
+        transformSubject.eraseToAnyPublisher()
+    }
+
     public var config = LiDARConfig()
 
     private var arSession: ARSession?
@@ -133,6 +138,30 @@ public final class LiDARManager: NSObject, ObservableObject {
             cameraTransform: frame.camera.transform
         )
         dataSubject.send(TimestampedData(data: data, timestamp: timestamp, frameId: frameId))
+
+        let transformStamped = TransformStamped(
+            header: ROSHeader(timeInterval: timestamp, frameId: "world"),
+            childFrameId: "iphone_base_link",
+            transform: simdToROSTransform(frame.camera.transform)
+        )
+        transformSubject.send(TimestampedData(data: transformStamped, timestamp: timestamp, frameId: "world"))
+    }
+
+    private func simdToROSTransform(_ m: simd_float4x4) -> Transform {
+        let translation = Vector3(
+            x: Double(m.columns.3.x),
+            y: Double(m.columns.3.y),
+            z: Double(m.columns.3.z)
+        )
+        let quat = simd_quatf(m)
+        let rotation = Quaternion(
+            x: Double(quat.imag.x),
+            y: Double(quat.imag.y),
+            z: Double(quat.imag.z),
+            w: Double(quat.real)
+        )
+
+        return Transform(translation: translation, rotation: rotation)
     }
 
     private func pixelBufferToROSImage(_ buffer: CVPixelBuffer, encoding: String, timestamp: TimeInterval) -> ROSImage {

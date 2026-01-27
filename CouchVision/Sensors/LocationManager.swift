@@ -33,6 +33,11 @@ public final class LocationManager: NSObject, ObservableObject {
         velocitySubject.eraseToAnyPublisher()
     }
 
+    private let headingSubject = PassthroughSubject<TimestampedData<Float64Msg>, Never>()
+    public var headingPublisher: AnyPublisher<TimestampedData<Float64Msg>, Never> {
+        headingSubject.eraseToAnyPublisher()
+    }
+
     public var config = LocationConfig() {
         didSet { if state == .running { reconfigure() } }
     }
@@ -95,12 +100,14 @@ public final class LocationManager: NSObject, ObservableObject {
         locationManager.allowsBackgroundLocationUpdates = true
         locationManager.pausesLocationUpdatesAutomatically = false
         locationManager.startUpdatingLocation()
+        locationManager.startUpdatingHeading()
 
         DispatchQueue.main.async { [weak self] in self?.state = .running }
     }
 
     public func stop() {
         locationManager.stopUpdatingLocation()
+        locationManager.stopUpdatingHeading()
         DispatchQueue.main.async { [weak self] in self?.state = .ready }
     }
 
@@ -164,6 +171,14 @@ extension LocationManager: CLLocationManagerDelegate {
 
     public func locationManager(_: CLLocationManager, didFailWithError error: Error) {
         Log.sensor.error("Location error: \(error.localizedDescription)")
+    }
+
+    public func locationManager(_: CLLocationManager, didUpdateHeading newHeading: CLHeading) {
+        let timestamp = Date().timeIntervalSince1970
+        // Use true heading if available, otherwise magnetic heading
+        let heading = newHeading.trueHeading >= 0 ? newHeading.trueHeading : newHeading.magneticHeading
+        let msg = Float64Msg(data: heading)
+        headingSubject.send(TimestampedData(data: msg, timestamp: timestamp, frameId: frameId))
     }
 
     public func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {

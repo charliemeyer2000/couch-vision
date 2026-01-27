@@ -186,6 +186,24 @@ public final class CDREncoder {
         encode(msg.roiWidth); encode(msg.roiHeight); encode(msg.roiDoRectify)
     }
 
+    public func encode(_ msg: Transform) {
+        encode(msg.translation)
+        encode(msg.rotation)
+    }
+
+    public func encode(_ msg: TransformStamped) {
+        encode(msg.header)
+        encode(msg.childFrameId)
+        encode(msg.transform)
+    }
+
+    public func encode(_ msg: TFMessage) {
+        encode(UInt32(msg.transforms.count))
+        for t in msg.transforms {
+            encode(t)
+        }
+    }
+
     // MARK: - Factory
 
     public static func encode(_ msg: CompressedImage) -> Data { let e = CDREncoder(); e.encode(msg); return e.encodedData }
@@ -200,4 +218,7 @@ public final class CDREncoder {
     public static func encode(_ msg: Float64Msg) -> Data { let e = CDREncoder(); e.encode(msg); return e.encodedData }
     public static func encode(_ msg: Int32Msg) -> Data { let e = CDREncoder(); e.encode(msg); return e.encodedData }
     public static func encode(_ msg: BatteryState) -> Data { let e = CDREncoder(); e.encode(msg); return e.encodedData }
+    public static func encode(_ msg: BoolMsg) -> Data { let e = CDREncoder(); e.encode(msg); return e.encodedData }
+    public static func encode(_ msg: Vector3Stamped) -> Data { let e = CDREncoder(); e.encode(msg); return e.encodedData }
+    public static func encode(_ msg: TFMessage) -> Data { let e = CDREncoder(); e.encode(msg); return e.encodedData }
 }

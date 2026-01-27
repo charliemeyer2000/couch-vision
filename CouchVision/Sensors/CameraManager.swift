@@ -93,6 +93,11 @@ public final class CameraManager: NSObject, ObservableObject {
         dataSubject.eraseToAnyPublisher()
     }
 
+    private let cameraInfoSubject = PassthroughSubject<TimestampedData<CameraInfo>, Never>()
+    public var cameraInfoPublisher: AnyPublisher<TimestampedData<CameraInfo>, Never> {
+        cameraInfoSubject.eraseToAnyPublisher()
+    }
+
     public var config = CameraConfig() {
         didSet { if state == .running { reconfigureSession() } }
     }
@@ -284,21 +289,39 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
 
         let timestamp = TimeUtils.toUnixTimestamp(CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(sampleBuffer)))
+        let width = CVPixelBufferGetWidth(pixelBuffer)
+        let height = CVPixelBufferGetHeight(pixelBuffer)
+        let frameId = activeCamera?.frameId ?? "iphone_camera"
 
         let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
         guard let cgImage = CIContext().createCGImage(ciImage, from: ciImage.extent),
               let jpegData = UIImage(cgImage: cgImage).jpegData(compressionQuality: config.jpegQuality) else { return }
 
+        let intrinsics = getIntrinsics(from: sampleBuffer)
         let frame = CameraFrame(
             cameraId: activeCamera?.rawValue ?? "unknown",
             jpegData: jpegData,
-            width: CVPixelBufferGetWidth(pixelBuffer),
-            height: CVPixelBufferGetHeight(pixelBuffer),
-            intrinsics: getIntrinsics(from: sampleBuffer)
+            width: width,
+            height: height,
+            intrinsics: intrinsics
         )
 
-        let frameId = activeCamera?.frameId ?? "iphone_camera"
         dataSubject.send(TimestampedData(data: frame, timestamp: timestamp, frameId: frameId))
+
+        if let intrinsics {
+            let header = ROSHeader(timeInterval: timestamp, frameId: frameId)
+            let cameraInfo = CameraInfo(
+                header: header,
+                height: UInt32(height),
+                width: UInt32(width),
+                distortionModel: "plumb_bob",
+                d: [0, 0, 0, 0, 0],
+                k: intrinsics.kMatrix,
+                r: [1, 0, 0, 0, 1, 0, 0, 0, 1],
+                p: intrinsics.pMatrix
+            )
+            cameraInfoSubject.send(TimestampedData(data: cameraInfo, timestamp: timestamp, frameId: frameId))
+        }
     }
 
     public func captureOutput(_ output: AVCaptureOutput, didDrop sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
