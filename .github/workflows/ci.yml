@@ -135,7 +135,7 @@ jobs:
       - name: Upload to TestFlight
         uses: apple-actions/upload-testflight-build@v3
         with:
-          app-path: $RUNNER_TEMP/export/CouchVision.ipa
+          app-path: ${{ runner.temp }}/export/CouchVision.ipa
           issuer-id: ${{ secrets.APPSTORE_ISSUER_ID }}
           api-key-id: ${{ secrets.APPSTORE_API_KEY_ID }}
           api-private-key: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
