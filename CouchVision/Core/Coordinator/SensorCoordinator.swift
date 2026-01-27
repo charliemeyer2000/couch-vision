@@ -1,6 +1,7 @@
 import AVFoundation
 import Combine
 import Foundation
+import UIKit
 
 public struct CoordinatorConfig {
     public let topicPrefix: String
@@ -211,6 +212,7 @@ public final class SensorCoordinator: ObservableObject {
         if deviceStatusManager.isEnabled {
             deviceStatusManager.start()
         }
+        UIApplication.shared.isIdleTimerDisabled = true
         LiveActivityManager.shared.startActivity(coordinator: self)
     }
 
@@ -222,6 +224,7 @@ public final class SensorCoordinator: ObservableObject {
         environmentManager.stop()
         deviceStatusManager.stop()
         stats.removeAll()
+        UIApplication.shared.isIdleTimerDisabled = false
         LiveActivityManager.shared.endActivity()
     }
 
