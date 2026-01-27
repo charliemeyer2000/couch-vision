@@ -87,7 +87,7 @@ build-sim:
 bridge:
 	@echo "Starting iOS bridge on port $(BRIDGE_PORT)..."
 	@echo "Waiting for iPhone to connect..."
-	@$(ROS2_SETUP) && cd bridge && uv run ios_bridge.py --port $(BRIDGE_PORT)
+	@$(ROS2_SETUP) && cd bridge && uv sync --quiet && source .venv/bin/activate && python ios_bridge.py --port $(BRIDGE_PORT)
 
 # === ROS2 Tools ===
 

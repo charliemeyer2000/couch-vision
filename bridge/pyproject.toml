@@ -5,7 +5,9 @@ description = "ROS2 bridge for CouchVision iOS app"
 requires-python = ">=3.10"
 # ROS2 packages (rclpy, sensor_msgs, etc.) come from the ROS2 install
 # Add any extra pip dependencies here if needed
-dependencies = []
+dependencies = [
+    "pyyaml>=6.0",
+]
 
 [project.scripts]
 ios-bridge = "ios_bridge:main"
