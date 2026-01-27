@@ -139,6 +139,7 @@ class IOSBridge(Node):  # type: ignore[misc]
         self._reliable_topics = {"/tf"}
 
         self._topic_publishers: dict[str, Publisher[Any]] = {}
+        self._publishers_lock = threading.Lock()
 
         self._topic_types: dict[str, type[Any]] = {
             "/image/compressed": CompressedImage,
@@ -182,10 +183,13 @@ class IOSBridge(Node):  # type: ignore[misc]
 
     def get_publisher(self, topic: str) -> Publisher[Any] | None:
         """Get or create a publisher for the given topic."""
-        if topic not in self._topic_publishers:
+        with self._publishers_lock:
+            if topic in self._topic_publishers:
+                return self._topic_publishers[topic]
+
             msg_type: type[Any] | None = None
             for pattern, mtype in self._topic_types.items():
-                if topic == pattern or topic.endswith(pattern):
+                if topic == pattern or topic.endswith("/" + pattern.lstrip("/")):
                     msg_type = mtype
                     break
 
@@ -195,13 +199,15 @@ class IOSBridge(Node):  # type: ignore[misc]
 
             qos = (
                 self._reliable_qos
-                if any(topic == rt or topic.endswith(rt) for rt in self._reliable_topics)
+                if any(
+                    topic == rt or topic.endswith("/" + rt.lstrip("/"))
+                    for rt in self._reliable_topics
+                )
                 else self._sensor_qos
             )
             self.get_logger().info(f"Creating publisher for {topic} ({msg_type.__name__})")
             self._topic_publishers[topic] = self.create_publisher(msg_type, topic, qos)
-
-        return self._topic_publishers[topic]
+            return self._topic_publishers[topic]
 
     def start_server(self) -> None:
         """Start TCP server to accept iOS connections."""

@@ -80,14 +80,13 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            HStack {
-                TextField("Topic Prefix", text: $topicPrefixText)
+            LabeledContent("Topic Prefix") {
+                TextField("/iphone", text: $topicPrefixText)
                     .textFieldStyle(.roundedBorder)
                     .font(.system(.body, design: .monospaced))
                     .autocorrectionDisabled()
                     .textInputAutocapitalization(.never)
                     .disabled(coordinator.isConnecting)
-                    .frame(width: 140)
             }
 
             HStack {

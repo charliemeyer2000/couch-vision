@@ -87,7 +87,12 @@ public final class CameraManager: NSObject, ObservableObject {
     @Published public private(set) var state: SensorState = .unknown
     @Published public private(set) var activeCamera: CameraType?
     @Published public var isEnabled: Bool = false
-    public var framePrefix = "iphone"
+    private let _framePrefixLock = NSLock()
+    private var _framePrefix = "iphone"
+    public var framePrefix: String {
+        get { _framePrefixLock.withLock { _framePrefix } }
+        set { _framePrefixLock.withLock { _framePrefix = newValue } }
+    }
 
     private let dataSubject = PassthroughSubject<TimestampedData<CameraFrame>, Never>()
     public var dataPublisher: AnyPublisher<TimestampedData<CameraFrame>, Never> {
