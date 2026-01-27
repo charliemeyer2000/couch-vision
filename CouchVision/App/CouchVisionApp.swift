@@ -3,6 +3,7 @@ import SwiftUI
 @main
 struct CouchVisionApp: App {
     @StateObject private var coordinator: SensorCoordinator
+    @Environment(\.scenePhase) private var scenePhase
 
     init() {
         let coord = SensorCoordinator()
@@ -14,6 +15,16 @@ struct CouchVisionApp: App {
         WindowGroup {
             ContentView()
                 .environmentObject(coordinator)
+        }
+        .onChange(of: scenePhase) { newPhase in
+            switch newPhase {
+            case .background:
+                coordinator.enterBackground()
+            case .active:
+                coordinator.enterForeground()
+            default:
+                break
+            }
         }
     }
 }

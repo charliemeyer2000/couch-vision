@@ -2,7 +2,7 @@ name: CouchVision
 options:
   bundleIdPrefix: com.couchvision
   deploymentTarget:
-    iOS: "16.0"
+    iOS: "16.2"
   xcodeVersion: "16.0"
   generateEmptyDirectories: true
 
@@ -20,6 +20,8 @@ targets:
     platform: iOS
     sources:
       - CouchVision
+      - path: CouchVisionWidgets/StreamingActivityAttributes.swift
+        group: CouchVisionWidgets
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.couchvision.CouchVision
@@ -34,6 +36,8 @@ targets:
         CFBundleVersion: "1"
         CFBundleIconName: AppIcon
         ITSAppUsesNonExemptEncryption: false
+        NSSupportsLiveActivities: true
+        NSSupportsLiveActivitiesFrequentUpdates: true
         UILaunchScreen:
           UIColorName: ""
           UIImageName: ""
@@ -53,3 +57,25 @@ targets:
         UIBackgroundModes:
           - location
           - audio
+    dependencies:
+      - target: CouchVisionWidgets
+        embed: true
+
+  CouchVisionWidgets:
+    type: app-extension
+    platform: iOS
+    sources:
+      - CouchVisionWidgets
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.couchvision.CouchVision.Widgets
+        INFOPLIST_FILE: CouchVisionWidgets/Info.plist
+        SKIP_INSTALL: YES
+    info:
+      path: CouchVisionWidgets/Info.plist
+      properties:
+        CFBundleDisplayName: CouchVision Widgets
+        CFBundleShortVersionString: "1.0"
+        CFBundleVersion: "1"
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension

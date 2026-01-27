@@ -54,6 +54,9 @@ public final class SensorCoordinator: ObservableObject {
     @Published public private(set) var isConnected: Bool = false
     @Published public private(set) var connectionError: String?
     @Published public private(set) var stats: [String: TopicStats] = [:]
+    @Published public private(set) var isInBackground: Bool = false
+
+    private var sensorsRunningBeforeBackground = (camera: false, lidar: false, motion: false)
 
     @Published public var config: CoordinatorConfig {
         didSet {
@@ -166,12 +169,40 @@ public final class SensorCoordinator: ObservableObject {
         if motionManager.isEnabled {
             try? motionManager.start()
         }
+        LiveActivityManager.shared.startActivity(coordinator: self)
     }
 
     public func stopAllSensors() {
         cameraManager.stop()
         lidarManager.stop()
         motionManager.stop()
+        LiveActivityManager.shared.endActivity()
+    }
+
+    public func enterBackground() {
+        isInBackground = true
+        sensorsRunningBeforeBackground = (
+            camera: cameraManager.state == .running,
+            lidar: lidarManager.state == .running,
+            motion: motionManager.state == .running
+        )
+        if sensorsRunningBeforeBackground.lidar {
+            lidarManager.stop()
+        }
+        if sensorsRunningBeforeBackground.camera {
+            cameraManager.stop()
+        }
+        // IMU continues - CoreMotion works in background
+    }
+
+    public func enterForeground() {
+        isInBackground = false
+        if sensorsRunningBeforeBackground.lidar, lidarManager.isEnabled {
+            try? lidarManager.start()
+        }
+        if sensorsRunningBeforeBackground.camera, cameraManager.isEnabled {
+            try? cameraManager.start()
+        }
     }
 
     public func requestAllPermissions() async -> Bool {

@@ -8,33 +8,67 @@
 
 /* Begin PBXBuildFile section */
 		040B6E74FAC257BCEEC6A371 /* PointCloudMessages.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13E2AEC76841DD49A288CA42 /* PointCloudMessages.swift */; };
+		07CE9106DE1029921B4FAEAF /* CouchVisionWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = EA740775476126173BEFC495 /* CouchVisionWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		0A24D1F486DC1F0641570849 /* MotionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9D238299B901206D565558C /* MotionManager.swift */; };
 		0AF8C867BCF9F5CB40BC225F /* CouchVisionApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B88064F3F70E9F967CCFFD5 /* CouchVisionApp.swift */; };
 		16FAD974F85188341A6AADD8 /* CDREncoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A39CFD6B3D75415C7BAA65AF /* CDREncoder.swift */; };
 		323E9DC12467908A1BC9078F /* ImuMessages.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54AAFAF2FFE3A36D1FEF4EE8 /* ImuMessages.swift */; };
 		4BA7463010EEB8E2B19A419C /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15E2DD4B63420F32FDB8A40A /* ContentView.swift */; };
+		4CB51CDB16D48809E237B964 /* StreamingActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A54A22C1DAB38839B878AFD6 /* StreamingActivityAttributes.swift */; };
+		5923392EFA0B0114EE20AFC2 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 5CDED2D14B3E975541454448 /* Assets.xcassets */; };
 		598F4B774D5F8EF19C4ED7B3 /* SensorCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACA7823899FEF66E11703FE7 /* SensorCoordinator.swift */; };
 		670E58F09AAAD14A364F7B09 /* ImageMessages.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F0940103540482F7189960F /* ImageMessages.swift */; };
 		6B39CB97419F810D955EBE84 /* TimeUtils.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53EC739A43B279481C728B31 /* TimeUtils.swift */; };
 		6F2A1697B088B56AF9896AC7 /* Publisher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F9221EA27CF0D48D12B5B1E /* Publisher.swift */; };
 		6FE70D107D6AC93F706A3A5B /* Logger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 998CF88C47937956BF73EA86 /* Logger.swift */; };
 		7395924D19CD22E6B210A5A5 /* ZenohPublisher.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA67DF29CD9D69C942084599 /* ZenohPublisher.swift */; };
+		7F97BD5E10BB38C0CDF9C647 /* CouchVisionWidgetsBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5A53DA3BC86A332490E945C /* CouchVisionWidgetsBundle.swift */; };
 		80E7C106D5E88D264BF9AD6E /* Header.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F1E8F2243F776BF1AA4E8B2 /* Header.swift */; };
 		85E8E9A9B976D6BA5EB1FDC9 /* SettingsStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 857EDF55AC4B89D61E1C71B2 /* SettingsStorage.swift */; };
+		8D37499E641BDDC13BD0593A /* LiveActivityManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E60BEC1472E10BEABEA675C /* LiveActivityManager.swift */; };
+		9310B11F72A2D82A768509ED /* StreamingActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A54A22C1DAB38839B878AFD6 /* StreamingActivityAttributes.swift */; };
 		B088CAD6A2E138E18D578F4E /* SensorProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = C06B01D38F55E6273E626CD9 /* SensorProvider.swift */; };
 		B11496215549FDB5BA14705C /* LiDARManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 939E2932B661D1CAFEDC6DBB /* LiDARManager.swift */; };
 		B70E5E17008CF36C2A2EE13B /* MockPublisher.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3DA3BB7A7A007CE2519E19C /* MockPublisher.swift */; };
 		BBA333CDB11194E69C70DFDB /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DA35D300DA7214084D1EA5B /* SettingsView.swift */; };
 		C8C26DBE480BA955AE520C36 /* CameraManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0CA31563A14598E4A94E2D1 /* CameraManager.swift */; };
+		DF02C4CB73ECF9D234666028 /* StreamingLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD62316B6FA5C260A95BFA22 /* StreamingLiveActivity.swift */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		85A8093047A26579F13610AD /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = D840DCA89B1CBD60B156B7D4 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = E7E1AD0DD307C51E9CF98DC4;
+			remoteInfo = CouchVisionWidgets;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		D27419D7D0654D60F10F74F8 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				07CE9106DE1029921B4FAEAF /* CouchVisionWidgets.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
+		0E60BEC1472E10BEABEA675C /* LiveActivityManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveActivityManager.swift; sourceTree = "<group>"; };
 		0F9221EA27CF0D48D12B5B1E /* Publisher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Publisher.swift; sourceTree = "<group>"; };
 		13E2AEC76841DD49A288CA42 /* PointCloudMessages.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PointCloudMessages.swift; sourceTree = "<group>"; };
 		15E2DD4B63420F32FDB8A40A /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		4B88064F3F70E9F967CCFFD5 /* CouchVisionApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CouchVisionApp.swift; sourceTree = "<group>"; };
+		4D02297BD046BDA199485351 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		53EC739A43B279481C728B31 /* TimeUtils.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimeUtils.swift; sourceTree = "<group>"; };
 		54AAFAF2FFE3A36D1FEF4EE8 /* ImuMessages.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImuMessages.swift; sourceTree = "<group>"; };
+		5CDED2D14B3E975541454448 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		7DA35D300DA7214084D1EA5B /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		7F1E8F2243F776BF1AA4E8B2 /* Header.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Header.swift; sourceTree = "<group>"; };
 		84AB8703216F912795E5183C /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
@@ -44,11 +78,15 @@
 		9F0940103540482F7189960F /* ImageMessages.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageMessages.swift; sourceTree = "<group>"; };
 		A39CFD6B3D75415C7BAA65AF /* CDREncoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CDREncoder.swift; sourceTree = "<group>"; };
 		A3DA3BB7A7A007CE2519E19C /* MockPublisher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockPublisher.swift; sourceTree = "<group>"; };
+		A54A22C1DAB38839B878AFD6 /* StreamingActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamingActivityAttributes.swift; sourceTree = "<group>"; };
 		ACA7823899FEF66E11703FE7 /* SensorCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SensorCoordinator.swift; sourceTree = "<group>"; };
 		B9D238299B901206D565558C /* MotionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MotionManager.swift; sourceTree = "<group>"; };
 		C06B01D38F55E6273E626CD9 /* SensorProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SensorProvider.swift; sourceTree = "<group>"; };
 		CA67DF29CD9D69C942084599 /* ZenohPublisher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZenohPublisher.swift; sourceTree = "<group>"; };
+		D5A53DA3BC86A332490E945C /* CouchVisionWidgetsBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CouchVisionWidgetsBundle.swift; sourceTree = "<group>"; };
+		DD62316B6FA5C260A95BFA22 /* StreamingLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamingLiveActivity.swift; sourceTree = "<group>"; };
 		E0CA31563A14598E4A94E2D1 /* CameraManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraManager.swift; sourceTree = "<group>"; };
+		EA740775476126173BEFC495 /* CouchVisionWidgets.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = CouchVisionWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		F473F8EDD6090021ADE3863B /* CouchVision.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = CouchVision.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -56,6 +94,7 @@
 		5285AF0355880B8BC2051ED5 /* Resources */ = {
 			isa = PBXGroup;
 			children = (
+				5CDED2D14B3E975541454448 /* Assets.xcassets */,
 				84AB8703216F912795E5183C /* Info.plist */,
 			);
 			path = Resources;
@@ -82,6 +121,7 @@
 		8017FE6131181EE64DDB42F4 /* Core */ = {
 			isa = PBXGroup;
 			children = (
+				0E60BEC1472E10BEABEA675C /* LiveActivityManager.swift */,
 				998CF88C47937956BF73EA86 /* Logger.swift */,
 				857EDF55AC4B89D61E1C71B2 /* SettingsStorage.swift */,
 				53EC739A43B279481C728B31 /* TimeUtils.swift */,
@@ -95,6 +135,7 @@
 			isa = PBXGroup;
 			children = (
 				F473F8EDD6090021ADE3863B /* CouchVision.app */,
+				EA740775476126173BEFC495 /* CouchVisionWidgets.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -120,6 +161,17 @@
 				9777C75C4AD011197899C35B /* Sensors */,
 			);
 			path = CouchVision;
+			sourceTree = "<group>";
+		};
+		AB5CBD8E0CFADC6990FABD5F /* CouchVisionWidgets */ = {
+			isa = PBXGroup;
+			children = (
+				D5A53DA3BC86A332490E945C /* CouchVisionWidgetsBundle.swift */,
+				4D02297BD046BDA199485351 /* Info.plist */,
+				A54A22C1DAB38839B878AFD6 /* StreamingActivityAttributes.swift */,
+				DD62316B6FA5C260A95BFA22 /* StreamingLiveActivity.swift */,
+			);
+			path = CouchVisionWidgets;
 			sourceTree = "<group>";
 		};
 		B12EE5CB43D90A24B30E022B /* Messages */ = {
@@ -164,6 +216,7 @@
 			isa = PBXGroup;
 			children = (
 				A7FA8064A7ED1155F536BC22 /* CouchVision */,
+				AB5CBD8E0CFADC6990FABD5F /* CouchVisionWidgets */,
 				8D094E71A24223586DAED21E /* Products */,
 			);
 			sourceTree = "<group>";
@@ -176,10 +229,13 @@
 			buildConfigurationList = DEA71E915BCBC3B70D4863D8 /* Build configuration list for PBXNativeTarget "CouchVision" */;
 			buildPhases = (
 				C0F0B50D0D010872CF526DC1 /* Sources */,
+				FC5CDC31B4EEAD8D1D9D3981 /* Resources */,
+				D27419D7D0654D60F10F74F8 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				BBA50E89F4ACA8179650E8AE /* PBXTargetDependency */,
 			);
 			name = CouchVision;
 			packageProductDependencies = (
@@ -187,6 +243,23 @@
 			productName = CouchVision;
 			productReference = F473F8EDD6090021ADE3863B /* CouchVision.app */;
 			productType = "com.apple.product-type.application";
+		};
+		E7E1AD0DD307C51E9CF98DC4 /* CouchVisionWidgets */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 3E5F0B25788562AE2A3A401F /* Build configuration list for PBXNativeTarget "CouchVisionWidgets" */;
+			buildPhases = (
+				D6ED50E2CBF8FF99E1FC73CC /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = CouchVisionWidgets;
+			packageProductDependencies = (
+			);
+			productName = CouchVisionWidgets;
+			productReference = EA740775476126173BEFC495 /* CouchVisionWidgets.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
 
@@ -198,6 +271,10 @@
 				LastUpgradeCheck = 1600;
 				TargetAttributes = {
 					7B943B1A5E1F5E32F8AB3985 = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Automatic;
+					};
+					E7E1AD0DD307C51E9CF98DC4 = {
 						DevelopmentTeam = "";
 						ProvisioningStyle = Automatic;
 					};
@@ -218,9 +295,21 @@
 			projectRoot = "";
 			targets = (
 				7B943B1A5E1F5E32F8AB3985 /* CouchVision */,
+				E7E1AD0DD307C51E9CF98DC4 /* CouchVisionWidgets */,
 			);
 		};
 /* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		FC5CDC31B4EEAD8D1D9D3981 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5923392EFA0B0114EE20AFC2 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		C0F0B50D0D010872CF526DC1 /* Sources */ = {
@@ -235,6 +324,7 @@
 				670E58F09AAAD14A364F7B09 /* ImageMessages.swift in Sources */,
 				323E9DC12467908A1BC9078F /* ImuMessages.swift in Sources */,
 				B11496215549FDB5BA14705C /* LiDARManager.swift in Sources */,
+				8D37499E641BDDC13BD0593A /* LiveActivityManager.swift in Sources */,
 				6FE70D107D6AC93F706A3A5B /* Logger.swift in Sources */,
 				B70E5E17008CF36C2A2EE13B /* MockPublisher.swift in Sources */,
 				0A24D1F486DC1F0641570849 /* MotionManager.swift in Sources */,
@@ -244,12 +334,31 @@
 				B088CAD6A2E138E18D578F4E /* SensorProvider.swift in Sources */,
 				85E8E9A9B976D6BA5EB1FDC9 /* SettingsStorage.swift in Sources */,
 				BBA333CDB11194E69C70DFDB /* SettingsView.swift in Sources */,
+				9310B11F72A2D82A768509ED /* StreamingActivityAttributes.swift in Sources */,
 				6B39CB97419F810D955EBE84 /* TimeUtils.swift in Sources */,
 				7395924D19CD22E6B210A5A5 /* ZenohPublisher.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		D6ED50E2CBF8FF99E1FC73CC /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				7F97BD5E10BB38C0CDF9C647 /* CouchVisionWidgetsBundle.swift in Sources */,
+				4CB51CDB16D48809E237B964 /* StreamingActivityAttributes.swift in Sources */,
+				DF02C4CB73ECF9D234666028 /* StreamingLiveActivity.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		BBA50E89F4ACA8179650E8AE /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = E7E1AD0DD307C51E9CF98DC4 /* CouchVisionWidgets */;
+			targetProxy = 85A8093047A26579F13610AD /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		234F03EFAEA92F69D39F7D38 /* Debug */ = {
@@ -334,7 +443,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				INFOPLIST_FILE = CouchVision/Resources/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.2;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -400,7 +509,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				INFOPLIST_FILE = CouchVision/Resources/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.2;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -413,9 +522,50 @@
 			};
 			name = Debug;
 		};
+		B2BE82D0EE63AE9C193D3C3B /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				INFOPLIST_FILE = CouchVisionWidgets/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.couchvision.CouchVision.Widgets;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		DEE32949D650AC7C588D45EC /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				INFOPLIST_FILE = CouchVisionWidgets/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.couchvision.CouchVision.Widgets;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		3E5F0B25788562AE2A3A401F /* Build configuration list for PBXNativeTarget "CouchVisionWidgets" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B2BE82D0EE63AE9C193D3C3B /* Debug */,
+				DEE32949D650AC7C588D45EC /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
 		D9EC6F40C32C6D067E1B7629 /* Build configuration list for PBXProject "CouchVision" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

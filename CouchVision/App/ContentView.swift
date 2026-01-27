@@ -71,6 +71,7 @@ struct ContentView: View {
 
                 Button {
                     Task {
+                        SettingsStorage.endpoint = endpointText
                         coordinator.config = CoordinatorConfig(
                             topicPrefix: coordinator.config.topicPrefix,
                             endpoint: endpointText
