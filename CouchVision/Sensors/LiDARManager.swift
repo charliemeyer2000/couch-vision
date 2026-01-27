@@ -1,6 +1,7 @@
 import ARKit
 import Combine
 import Foundation
+import UIKit
 
 public struct LiDARData {
     public let depthImage: ROSImage?
@@ -55,9 +56,23 @@ public final class LiDARManager: NSObject, ObservableObject {
         transformSubject.eraseToAnyPublisher()
     }
 
+    private let cameraFrameSubject = PassthroughSubject<TimestampedData<CameraFrame>, Never>()
+    public var cameraFramePublisher: AnyPublisher<TimestampedData<CameraFrame>, Never> {
+        cameraFrameSubject.eraseToAnyPublisher()
+    }
+
+    private let cameraInfoSubject = PassthroughSubject<TimestampedData<CameraInfo>, Never>()
+    public var cameraInfoPublisher: AnyPublisher<TimestampedData<CameraInfo>, Never> {
+        cameraInfoSubject.eraseToAnyPublisher()
+    }
+
     public var config = LiDARConfig()
+    public var jpegQuality: CGFloat = 0.8
 
     private var arSession: ARSession?
+    private let encodingQueue = DispatchQueue(label: "com.couchvision.lidar.encoding")
+    private var isEncoding = false
+    private let ciContext = CIContext()
     private let _framePrefixLock = NSLock()
     private var _framePrefix = "iphone"
     public var framePrefix: String {
@@ -161,6 +176,94 @@ public final class LiDARManager: NSObject, ObservableObject {
             transform: simdToROSTransform(frame.camera.transform)
         )
         transformSubject.send(TimestampedData(data: transformStamped, timestamp: timestamp, frameId: "world"))
+
+        publishCameraFrame(from: frame, timestamp: timestamp)
+    }
+
+    private func publishCameraFrame(from frame: ARFrame, timestamp: TimeInterval) {
+        guard !isEncoding else { return }
+        isEncoding = true
+
+        let pixelBuffer = deepCopyPixelBuffer(frame.capturedImage)
+        let intrinsics = frame.camera.intrinsics
+        let imageRes = frame.camera.imageResolution
+        let quality = jpegQuality
+        let prefix = framePrefix
+        let cameraFrameId = "\(prefix)_camera_arkit"
+
+        encodingQueue.async { [weak self] in
+            defer { self?.isEncoding = false }
+            guard let self, let pixelBuffer else { return }
+
+            let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
+            guard let cgImage = ciContext.createCGImage(ciImage, from: ciImage.extent),
+                  let jpegData = UIImage(cgImage: cgImage).jpegData(compressionQuality: quality) else { return }
+
+            let width = Int(imageRes.width)
+            let height = Int(imageRes.height)
+            let cameraIntrinsics = CameraIntrinsics(
+                fx: intrinsics.columns.0.x,
+                fy: intrinsics.columns.1.y,
+                cx: intrinsics.columns.2.x,
+                cy: intrinsics.columns.2.y
+            )
+
+            let cameraFrame = CameraFrame(
+                cameraId: "arkit",
+                jpegData: jpegData,
+                width: width,
+                height: height,
+                intrinsics: cameraIntrinsics
+            )
+            cameraFrameSubject.send(TimestampedData(data: cameraFrame, timestamp: timestamp, frameId: cameraFrameId))
+
+            let header = ROSHeader(timeInterval: timestamp, frameId: cameraFrameId)
+            let cameraInfo = CameraInfo(
+                header: header,
+                height: UInt32(height),
+                width: UInt32(width),
+                distortionModel: "plumb_bob",
+                d: [0, 0, 0, 0, 0],
+                k: cameraIntrinsics.kMatrix,
+                r: [1, 0, 0, 0, 1, 0, 0, 0, 1],
+                p: cameraIntrinsics.pMatrix
+            )
+            cameraInfoSubject.send(TimestampedData(data: cameraInfo, timestamp: timestamp, frameId: cameraFrameId))
+        }
+    }
+
+    private func deepCopyPixelBuffer(_ source: CVPixelBuffer) -> CVPixelBuffer? {
+        let width = CVPixelBufferGetWidth(source)
+        let height = CVPixelBufferGetHeight(source)
+        let format = CVPixelBufferGetPixelFormatType(source)
+
+        var copy: CVPixelBuffer?
+        CVPixelBufferCreate(nil, width, height, format, nil, &copy)
+        guard let copy else { return nil }
+
+        CVPixelBufferLockBaseAddress(source, .readOnly)
+        CVPixelBufferLockBaseAddress(copy, [])
+        defer {
+            CVPixelBufferUnlockBaseAddress(copy, [])
+            CVPixelBufferUnlockBaseAddress(source, .readOnly)
+        }
+
+        let planeCount = CVPixelBufferGetPlaneCount(source)
+        if planeCount > 0 {
+            for plane in 0 ..< planeCount {
+                guard let dest = CVPixelBufferGetBaseAddressOfPlane(copy, plane),
+                      let src = CVPixelBufferGetBaseAddressOfPlane(source, plane) else { continue }
+                let h = CVPixelBufferGetHeightOfPlane(source, plane)
+                let bytesPerRow = CVPixelBufferGetBytesPerRowOfPlane(source, plane)
+                memcpy(dest, src, h * bytesPerRow)
+            }
+        } else {
+            guard let dest = CVPixelBufferGetBaseAddress(copy),
+                  let src = CVPixelBufferGetBaseAddress(source) else { return copy }
+            let bytesPerRow = CVPixelBufferGetBytesPerRow(source)
+            memcpy(dest, src, height * bytesPerRow)
+        }
+        return copy
     }
 
     private func simdToROSTransform(_ m: simd_float4x4) -> Transform {

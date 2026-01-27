@@ -101,6 +101,7 @@ public final class SensorCoordinator: ObservableObject {
         )
 
         lidarManager = LiDARManager()
+        lidarManager.jpegQuality = CGFloat(SettingsStorage.jpegQuality / 100)
         lidarManager.config = LiDARConfig(
             generatePointCloud: SettingsStorage.generatePointCloud,
             publishConfidence: SettingsStorage.publishConfidence,
@@ -194,11 +195,11 @@ public final class SensorCoordinator: ObservableObject {
     }
 
     public func startAllSensors() {
-        if cameraManager.isEnabled {
-            try? cameraManager.start()
-        }
         if lidarManager.isEnabled {
             try? lidarManager.start()
+        }
+        if cameraManager.isEnabled, !lidarManager.isEnabled {
+            try? cameraManager.start()
         }
         if motionManager.isEnabled {
             try? motionManager.start()
@@ -292,6 +293,18 @@ public final class SensorCoordinator: ObservableObject {
         lidarManager.transformPublisher
             .sink { [weak self] data in
                 Task { await self?.publishTransform(data) }
+            }
+            .store(in: &cancellables)
+
+        lidarManager.cameraFramePublisher
+            .sink { [weak self] data in
+                Task { await self?.publishCameraFrame(data) }
+            }
+            .store(in: &cancellables)
+
+        lidarManager.cameraInfoPublisher
+            .sink { [weak self] data in
+                Task { await self?.publishCameraInfo(data) }
             }
             .store(in: &cancellables)
 
