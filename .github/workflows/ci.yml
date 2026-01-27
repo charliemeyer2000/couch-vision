@@ -114,6 +114,13 @@ jobs:
             <string>app-store-connect</string>
             <key>teamID</key>
             <string>9778KTLRXB</string>
+            <key>signingStyle</key>
+            <string>manual</string>
+            <key>provisioningProfiles</key>
+            <dict>
+              <key>com.couchvision.CouchVision</key>
+              <string>CouchVision GitHub Action Distribution</string>
+            </dict>
             <key>uploadSymbols</key>
             <true/>
           </dict>
