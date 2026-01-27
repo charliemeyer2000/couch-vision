@@ -123,8 +123,8 @@ class IOSBridge(Node):  # type: ignore[misc]
         super().__init__("ios_bridge")
         self.port = port
         self.server_socket: socket.socket | None = None
-        self._clients: dict[str, socket.socket] = {}
-        self._clients_lock = threading.Lock()
+        self._tcp_clients: dict[str, socket.socket] = {}
+        self._tcp_clients_lock = threading.Lock()
         self.running = False
 
         self._sensor_qos = QoSProfile(
@@ -238,11 +238,11 @@ class IOSBridge(Node):  # type: ignore[misc]
                 try:
                     client, addr = self.server_socket.accept()
                     addr_key = f"{addr[0]}:{addr[1]}"
-                    with self._clients_lock:
-                        self._clients[addr_key] = client
+                    with self._tcp_clients_lock:
+                        self._tcp_clients[addr_key] = client
                     self.get_logger().info(
                         f"iOS device connected from {addr} "
-                        f"({len(self._clients)} client(s) connected)"
+                        f"({len(self._tcp_clients)} client(s) connected)"
                     )
                     thread = threading.Thread(
                         target=self._client_thread,
@@ -262,10 +262,10 @@ class IOSBridge(Node):  # type: ignore[misc]
         try:
             self.handle_client(client)
         finally:
-            with self._clients_lock:
-                self._clients.pop(addr_key, None)
+            with self._tcp_clients_lock:
+                self._tcp_clients.pop(addr_key, None)
             self.get_logger().info(
-                f"Client {addr_key} removed ({len(self._clients)} client(s) connected)"
+                f"Client {addr_key} removed ({len(self._tcp_clients)} client(s) connected)"
             )
 
     def handle_client(self, client: socket.socket) -> None:
@@ -530,10 +530,10 @@ class IOSBridge(Node):  # type: ignore[misc]
     def stop(self) -> None:
         """Stop the bridge."""
         self.running = False
-        with self._clients_lock:
-            for client in self._clients.values():
+        with self._tcp_clients_lock:
+            for client in self._tcp_clients.values():
                 client.close()
-            self._clients.clear()
+            self._tcp_clients.clear()
         if self.server_socket:
             self.server_socket.close()
 
