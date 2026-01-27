@@ -58,7 +58,14 @@ public final class LiDARManager: NSObject, ObservableObject {
     public var config = LiDARConfig()
 
     private var arSession: ARSession?
-    private let frameId = "iphone_lidar"
+    private let _framePrefixLock = NSLock()
+    private var _framePrefix = "iphone"
+    public var framePrefix: String {
+        get { _framePrefixLock.withLock { _framePrefix } }
+        set { _framePrefixLock.withLock { _framePrefix = newValue } }
+    }
+
+    private var frameId: String { "\(framePrefix)_lidar" }
 
     public let sensorId = "lidar"
     public let displayName = "LiDAR"
@@ -150,7 +157,7 @@ public final class LiDARManager: NSObject, ObservableObject {
 
         let transformStamped = TransformStamped(
             header: ROSHeader(timeInterval: timestamp, frameId: "world"),
-            childFrameId: "iphone_base_link",
+            childFrameId: "\(framePrefix)_base_link",
             transform: simdToROSTransform(frame.camera.transform)
         )
         transformSubject.send(TimestampedData(data: transformStamped, timestamp: timestamp, frameId: "world"))

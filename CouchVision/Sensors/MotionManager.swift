@@ -44,7 +44,14 @@ public final class MotionManager: ObservableObject {
 
     private let motionManager = CMMotionManager()
     private let operationQueue: OperationQueue
-    private let frameId = "iphone_imu"
+    private let _framePrefixLock = NSLock()
+    private var _framePrefix = "iphone"
+    public var framePrefix: String {
+        get { _framePrefixLock.withLock { _framePrefix } }
+        set { _framePrefixLock.withLock { _framePrefix = newValue } }
+    }
+
+    private var frameId: String { "\(framePrefix)_imu" }
 
     // Estimated covariance values for iPhone sensors
     private let accelCovariance: Covariance3x3 = [0.01, 0, 0, 0, 0.01, 0, 0, 0, 0.01]

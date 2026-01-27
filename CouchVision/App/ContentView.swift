@@ -4,6 +4,7 @@ struct ContentView: View {
     @EnvironmentObject var coordinator: SensorCoordinator
     @State private var showSettings = false
     @State private var endpointText: String = ""
+    @State private var topicPrefixText: String = ""
 
     private var isStreaming: Bool {
         coordinator.isConnected && (
@@ -45,7 +46,10 @@ struct ContentView: View {
             }
             .sheet(
                 isPresented: $showSettings,
-                onDismiss: { endpointText = coordinator.config.endpoint },
+                onDismiss: {
+                    endpointText = coordinator.config.endpoint
+                    topicPrefixText = coordinator.config.topicPrefix
+                },
                 content: { SettingsView() }
             )
             .task {
@@ -53,6 +57,7 @@ struct ContentView: View {
             }
             .onAppear {
                 endpointText = coordinator.config.endpoint
+                topicPrefixText = coordinator.config.topicPrefix
             }
         }
     }
@@ -73,6 +78,15 @@ struct ContentView: View {
                     .font(.caption)
                     .foregroundColor(.red)
                     .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            LabeledContent("Topic Prefix") {
+                TextField("/iphone", text: $topicPrefixText)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.body, design: .monospaced))
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                    .disabled(coordinator.isConnecting)
             }
 
             HStack {
@@ -253,8 +267,9 @@ struct ContentView: View {
     private func connectToEndpoint() {
         Task {
             SettingsStorage.endpoint = endpointText
+            SettingsStorage.topicPrefix = topicPrefixText
             coordinator.config = CoordinatorConfig(
-                topicPrefix: coordinator.config.topicPrefix,
+                topicPrefix: topicPrefixText,
                 endpoint: endpointText
             )
             await coordinator.connect()

@@ -65,7 +65,7 @@ public final class SensorCoordinator: ObservableObject {
 
     @Published public var config: CoordinatorConfig {
         didSet {
-            // Reconnect if endpoint changed
+            updateFramePrefix()
             if oldValue.endpoint != config.endpoint, isConnected {
                 Task { await reconnect() }
             }
@@ -115,6 +115,7 @@ public final class SensorCoordinator: ObservableObject {
         environmentManager = EnvironmentManager()
         deviceStatusManager = DeviceStatusManager()
 
+        updateFramePrefix()
         setupSubscriptions()
         forwardManagerChanges()
         setupBackgroundAudio()
@@ -398,7 +399,7 @@ public final class SensorCoordinator: ObservableObject {
     }
 
     private func publishTransform(_ data: TimestampedData<TransformStamped>) async {
-        await publish(CDREncoder.encode(TFMessage(transforms: [data.data])), to: "/tf")
+        await publish(CDREncoder.encode(TFMessage(transforms: [data.data])), to: "\(config.topicPrefix)/tf")
     }
 
     private func publishIMU(_ data: TimestampedData<ImuMessage>) async {
@@ -455,6 +456,19 @@ public final class SensorCoordinator: ObservableObject {
         }
         stats[topic]?.recordPublish(bytes: bytes)
         consecutivePublishFailures = 0
+    }
+
+    private func updateFramePrefix() {
+        let prefix = config.topicPrefix
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            .replacingOccurrences(of: "/", with: "_")
+        let framePrefix = prefix.isEmpty ? "iphone" : prefix
+        cameraManager.framePrefix = framePrefix
+        lidarManager.framePrefix = framePrefix
+        motionManager.framePrefix = framePrefix
+        locationManager.framePrefix = framePrefix
+        environmentManager.framePrefix = framePrefix
+        deviceStatusManager.framePrefix = framePrefix
     }
 
     private func handlePublishError(_ error: Error) {

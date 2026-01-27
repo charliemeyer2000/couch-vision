@@ -41,7 +41,14 @@ public final class DeviceStatusManager: ObservableObject {
     private var batteryTimer: Timer?
     private var thermalObserver: NSObjectProtocol?
     private var proximityObserver: NSObjectProtocol?
-    private let frameId = "iphone_device"
+    private let _framePrefixLock = NSLock()
+    private var _framePrefix = "iphone"
+    public var framePrefix: String {
+        get { _framePrefixLock.withLock { _framePrefix } }
+        set { _framePrefixLock.withLock { _framePrefix = newValue } }
+    }
+
+    private var frameId: String { "\(framePrefix)_device" }
 
     public let sensorId = "device_status"
     public let displayName = "Device Status"
