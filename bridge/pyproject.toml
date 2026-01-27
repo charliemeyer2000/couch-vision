@@ -3,17 +3,23 @@ name = "couch-vision-bridge"
 version = "0.1.0"
 description = "ROS2 bridge for CouchVision iOS app"
 requires-python = ">=3.12,<3.13"
-# ROS2 packages (rclpy, sensor_msgs, etc.) come from the ROS2 install
-# Add any extra pip dependencies here if needed
+# ROS2 packages (rclpy, sensor_msgs, geometry_msgs) come from the ROS2 system install.
+# This project uses --system-site-packages to access them.
+# Only add pure-Python pip dependencies here if needed.
 dependencies = [
-    "pyyaml>=6.0",
+    "numpy>=2.4.1",
+    "pyyaml>=6.0.3",
 ]
 
 [project.scripts]
 ios-bridge = "ios_bridge:main"
 
+[tool.uv]
+# Reminder: venv must be created with `uv venv --system-site-packages`
+# to access ROS2 Python packages from the system installation.
+
 [tool.ruff]
-target-version = "py310"
+target-version = "py312"
 line-length = 100
 
 [tool.ruff.lint]
@@ -26,11 +32,12 @@ select = [
     "C4",     # flake8-comprehensions
     "UP",     # pyupgrade
     "SIM",    # flake8-simplify
+    "ANN",    # flake8-annotations (type hints)
+    "RUF",    # Ruff-specific rules
 ]
 ignore = [
     "E501",   # line too long (handled by formatter)
-    "E702",   # multiple statements on one line (common pattern for CDR parsing)
-    "B008",   # function calls in default args (common in ROS2)
+    "ANN401", # Dynamically typed expressions (Any)
 ]
 
 [tool.ruff.lint.isort]
@@ -41,7 +48,18 @@ quote-style = "double"
 indent-style = "space"
 skip-magic-trailing-comma = false
 
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+# ROS2 packages don't have type stubs
+ignore_missing_imports = true
+
 [dependency-groups]
 dev = [
-    "ruff>=0.14.14",
+    "mypy>=1.14",
+    "ruff>=0.9",
 ]

@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""
-iOS Sensor Bridge for ROS2
+"""iOS Sensor Bridge for ROS2.
 
 Receives CDR-encoded sensor data from CouchVision iOS app over TCP
 and republishes to ROS2 topics.
@@ -9,22 +8,28 @@ Protocol: [topic_len:4][topic][data_len:4][data]
 All integers are little-endian uint32.
 """
 
+from __future__ import annotations
+
 import argparse
 import socket
 import struct
 import threading
+from typing import TYPE_CHECKING, Any
 
 import rclpy
 from geometry_msgs.msg import Vector3Stamped
 from rclpy.node import Node
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
-
-# ROS2 message types
 from sensor_msgs.msg import CompressedImage, Image, Imu, PointCloud2
 
+if TYPE_CHECKING:
+    from rclpy.publisher import Publisher
 
-class iOSBridge(Node):
-    def __init__(self, port: int = 7447):
+
+class IOSBridge(Node):  # type: ignore[misc]
+    """ROS2 node that bridges iOS sensor data to ROS2 topics."""
+
+    def __init__(self, port: int = 7447) -> None:
         super().__init__("ios_bridge")
         self.port = port
         self.server_socket: socket.socket | None = None
@@ -33,15 +38,17 @@ class iOSBridge(Node):
 
         # QoS for sensor data (best effort, keep last)
         sensor_qos = QoSProfile(
-            reliability=ReliabilityPolicy.BEST_EFFORT, history=HistoryPolicy.KEEP_LAST, depth=10
+            reliability=ReliabilityPolicy.BEST_EFFORT,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=10,
         )
 
         # Publishers - created dynamically based on received topics
-        self.publishers = {}
-        self.sensor_qos = sensor_qos
+        self._topic_publishers: dict[str, Publisher[Any]] = {}
+        self._sensor_qos = sensor_qos
 
         # Topic type mapping based on topic name patterns
-        self.topic_types = {
+        self._topic_types: dict[str, type[Any]] = {
             "/image/compressed": CompressedImage,
             "/depth/image": Image,
             "/points": PointCloud2,
@@ -52,12 +59,12 @@ class iOSBridge(Node):
 
         self.get_logger().info(f"iOS Bridge initialized, will listen on port {port}")
 
-    def get_publisher(self, topic: str):
+    def get_publisher(self, topic: str) -> Publisher[Any] | None:
         """Get or create a publisher for the given topic."""
-        if topic not in self.publishers:
+        if topic not in self._topic_publishers:
             # Determine message type from topic name
-            msg_type = None
-            for pattern, mtype in self.topic_types.items():
+            msg_type: type[Any] | None = None
+            for pattern, mtype in self._topic_types.items():
                 if pattern in topic:
                     msg_type = mtype
                     break
@@ -67,11 +74,11 @@ class iOSBridge(Node):
                 return None
 
             self.get_logger().info(f"Creating publisher for {topic} ({msg_type.__name__})")
-            self.publishers[topic] = self.create_publisher(msg_type, topic, self.sensor_qos)
+            self._topic_publishers[topic] = self.create_publisher(msg_type, topic, self._sensor_qos)
 
-        return self.publishers[topic]
+        return self._topic_publishers[topic]
 
-    def start_server(self):
+    def start_server(self) -> None:
         """Start TCP server to accept iOS connections."""
         self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -96,7 +103,7 @@ class iOSBridge(Node):
                     self.get_logger().error(f"Server error: {e}")
                 break
 
-    def handle_client(self, client: socket.socket):
+    def handle_client(self, client: socket.socket) -> None:
         """Handle incoming data from iOS client."""
         self.client_socket = client
         client.settimeout(5.0)
@@ -140,7 +147,7 @@ class iOSBridge(Node):
                     buffer = buffer[total_len:]
 
                     # Publish to ROS2
-                    self.publish_message(topic, cdr_data)
+                    self._publish_message(topic, cdr_data)
                     msg_count += 1
 
                     if msg_count % 100 == 0:
@@ -155,35 +162,26 @@ class iOSBridge(Node):
         client.close()
         self.client_socket = None
 
-    def publish_message(self, topic: str, cdr_data: bytes):
+    def _publish_message(self, topic: str, cdr_data: bytes) -> None:
         """Publish CDR-encoded message to ROS2."""
         publisher = self.get_publisher(topic)
         if publisher is None:
             return
 
         try:
-            # The cdr_data includes the 4-byte CDR encapsulation header
-            # ROS2 rmw expects raw CDR without this header for some implementations
-            # but with rcl, we can publish the serialized message directly
-
-            # For now, we'll deserialize and republish
-            # This is less efficient but more compatible
+            # Get the message type from the publisher
             msg_type = type(publisher.msg_type())
 
-            # Create message and deserialize
-            # Note: This requires the CDR data to match the message type exactly
-            msg = msg_type()
-
-            # For CompressedImage, we need to parse the CDR manually
-            # since ROS2 Python doesn't expose direct CDR deserialization
+            # Parse based on message type
+            msg: Any = None
             if msg_type == CompressedImage:
-                msg = self.parse_compressed_image(cdr_data)
+                msg = self._parse_compressed_image(cdr_data)
             elif msg_type == Image:
-                msg = self.parse_image(cdr_data)
+                msg = self._parse_image(cdr_data)
             elif msg_type == Imu:
-                msg = self.parse_imu(cdr_data)
+                msg = self._parse_imu(cdr_data)
             elif msg_type == PointCloud2:
-                msg = self.parse_pointcloud2(cdr_data)
+                msg = self._parse_pointcloud2(cdr_data)
             else:
                 self.get_logger().warn(f"No parser for {msg_type.__name__}")
                 return
@@ -194,7 +192,7 @@ class iOSBridge(Node):
         except Exception as e:
             self.get_logger().error(f"Failed to publish {topic}: {e}")
 
-    def parse_compressed_image(self, cdr_data: bytes) -> CompressedImage | None:
+    def _parse_compressed_image(self, cdr_data: bytes) -> CompressedImage | None:
         """Parse CDR-encoded CompressedImage."""
         try:
             # Skip 4-byte CDR header
@@ -239,7 +237,7 @@ class iOSBridge(Node):
             self.get_logger().error(f"Failed to parse CompressedImage: {e}")
             return None
 
-    def parse_image(self, cdr_data: bytes) -> Image | None:
+    def _parse_image(self, cdr_data: bytes) -> Image | None:
         """Parse CDR-encoded Image."""
         try:
             data = cdr_data[4:]  # Skip CDR header
@@ -288,7 +286,7 @@ class iOSBridge(Node):
             self.get_logger().error(f"Failed to parse Image: {e}")
             return None
 
-    def parse_imu(self, cdr_data: bytes) -> Imu | None:
+    def _parse_imu(self, cdr_data: bytes) -> Imu | None:
         """Parse CDR-encoded Imu message."""
         try:
             data = cdr_data[4:]  # Skip CDR header
@@ -357,13 +355,14 @@ class iOSBridge(Node):
             self.get_logger().error(f"Failed to parse Imu: {e}")
             return None
 
-    def parse_pointcloud2(self, cdr_data: bytes) -> PointCloud2 | None:
+    def _parse_pointcloud2(self, cdr_data: bytes) -> PointCloud2 | None:
         """Parse CDR-encoded PointCloud2."""
         # PointCloud2 is complex - for now just log that we received it
+        _ = cdr_data  # unused for now
         self.get_logger().info("Received PointCloud2 (parsing not yet implemented)")
         return None
 
-    def stop(self):
+    def stop(self) -> None:
         """Stop the bridge."""
         self.running = False
         if self.client_socket:
@@ -372,13 +371,14 @@ class iOSBridge(Node):
             self.server_socket.close()
 
 
-def main():
+def main() -> None:
+    """Entry point for the iOS bridge."""
     parser = argparse.ArgumentParser(description="iOS Sensor Bridge for ROS2")
     parser.add_argument("--port", type=int, default=7447, help="TCP port to listen on")
     args = parser.parse_args()
 
     rclpy.init()
-    bridge = iOSBridge(port=args.port)
+    bridge = IOSBridge(port=args.port)
 
     # Run server in separate thread
     server_thread = threading.Thread(target=bridge.start_server, daemon=True)

@@ -65,7 +65,7 @@ setup-ros2:
 	@bash scripts/setup-ros2.sh
 
 setup-bridge:
-	cd bridge && uv sync
+	cd bridge && uv venv --system-site-packages && uv sync
 
 # === iOS App ===
 
@@ -86,8 +86,10 @@ build-sim:
 
 bridge:
 	@echo "Starting iOS bridge on port $(BRIDGE_PORT)..."
-	@echo "Waiting for iPhone to connect..."
-	@$(ROS2_SETUP) && cd bridge && uv sync --quiet && source .venv/bin/activate && python ios_bridge.py --port $(BRIDGE_PORT)
+	@echo "Connect from iPhone using one of these addresses:"
+	@ifconfig | grep "inet " | grep -v 127.0.0.1 | awk '{print "  tcp://" $$2 ":$(BRIDGE_PORT)"}'
+	@echo ""
+	@$(ROS2_SETUP) && cd bridge && ([ -f .venv/pyvenv.cfg ] && grep -q "include-system-site-packages = true" .venv/pyvenv.cfg || uv venv --system-site-packages) && uv sync --quiet && uv run python ios_bridge.py --port $(BRIDGE_PORT)
 
 # === ROS2 Tools ===
 
