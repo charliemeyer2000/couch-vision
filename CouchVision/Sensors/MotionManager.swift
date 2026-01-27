@@ -121,10 +121,10 @@ public final class MotionManager: ObservableObject {
     }
 
     public func stop() {
+        state = .ready
         motionManager.stopDeviceMotionUpdates()
         motionManager.stopAccelerometerUpdates()
         motionManager.stopGyroUpdates()
-        DispatchQueue.main.async { [weak self] in self?.state = .ready }
     }
 
     private func reconfigure() {

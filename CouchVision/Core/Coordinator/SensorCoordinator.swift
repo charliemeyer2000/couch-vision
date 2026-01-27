@@ -131,35 +131,17 @@ public final class SensorCoordinator: ObservableObject {
     }
 
     private func forwardManagerChanges() {
-        cameraManager.objectWillChange
-            .receive(on: RunLoop.main)
-            .sink { [weak self] _ in self?.objectWillChange.send() }
-            .store(in: &cancellables)
-
-        lidarManager.objectWillChange
-            .receive(on: RunLoop.main)
-            .sink { [weak self] _ in self?.objectWillChange.send() }
-            .store(in: &cancellables)
-
-        motionManager.objectWillChange
-            .receive(on: RunLoop.main)
-            .sink { [weak self] _ in self?.objectWillChange.send() }
-            .store(in: &cancellables)
-
-        locationManager.objectWillChange
-            .receive(on: RunLoop.main)
-            .sink { [weak self] _ in self?.objectWillChange.send() }
-            .store(in: &cancellables)
-
-        environmentManager.objectWillChange
-            .receive(on: RunLoop.main)
-            .sink { [weak self] _ in self?.objectWillChange.send() }
-            .store(in: &cancellables)
-
-        deviceStatusManager.objectWillChange
-            .receive(on: RunLoop.main)
-            .sink { [weak self] _ in self?.objectWillChange.send() }
-            .store(in: &cancellables)
+        func forward<P: Combine.Publisher>(_ pub: P) where P.Failure == Never {
+            pub.receive(on: RunLoop.main)
+                .sink { [weak self] _ in self?.objectWillChange.send() }
+                .store(in: &cancellables)
+        }
+        forward(cameraManager.objectWillChange)
+        forward(lidarManager.objectWillChange)
+        forward(motionManager.objectWillChange)
+        forward(locationManager.objectWillChange)
+        forward(environmentManager.objectWillChange)
+        forward(deviceStatusManager.objectWillChange)
     }
 
     public func setPublisher(_ publisher: Publisher) {
@@ -167,14 +149,10 @@ public final class SensorCoordinator: ObservableObject {
         publisher.onConnectionStateChanged = { [weak self] connected in
             Task { @MainActor in
                 guard let self else { return }
-                let wasConnected = self.isConnected
                 self.isConnected = connected
                 if !connected {
                     self.connectionError = "Connection lost"
-                    if wasConnected {
-                        Log.app.warning("Connection lost, stopping all sensors")
-                        self.stopAllSensors()
-                    }
+                    self.stopAllSensors()
                 }
             }
         }
@@ -242,6 +220,7 @@ public final class SensorCoordinator: ObservableObject {
         locationManager.stop()
         environmentManager.stop()
         deviceStatusManager.stop()
+        stats.removeAll()
         LiveActivityManager.shared.endActivity()
     }
 
@@ -385,264 +364,89 @@ public final class SensorCoordinator: ObservableObject {
             .store(in: &cancellables)
     }
 
-    private func publishCameraFrame(_ frame: TimestampedData<CameraFrame>) async {
+    private func publish(_ encoded: Data, to topic: String) async {
         guard isConnected, let publisher else { return }
+        do {
+            try await publisher.publish(encoded, to: topic)
+            updateStats(topic: topic, bytes: encoded.count)
+        } catch {
+            Log.ros.error("Failed to publish to \(topic): \(error.localizedDescription)")
+            handlePublishError(error)
+        }
+    }
 
-        let topic = "\(config.topicPrefix)/camera/\(frame.data.cameraId)/image/compressed"
-
+    private func publishCameraFrame(_ frame: TimestampedData<CameraFrame>) async {
         let msg = CompressedImage.jpeg(
             data: frame.data.jpegData,
             frameId: frame.frameId,
             timestamp: frame.timestamp
         )
-        let encoded = CDREncoder.encode(msg)
-
-        do {
-            try await publisher.publish(encoded, to: topic)
-            updateStats(topic: topic, bytes: encoded.count)
-        } catch {
-            Log.ros.error("Failed to publish camera frame: \(error.localizedDescription)")
-            handlePublishError(error)
-        }
+        await publish(CDREncoder.encode(msg), to: "\(config.topicPrefix)/camera/\(frame.data.cameraId)/image/compressed")
     }
 
     private func publishCameraInfo(_ data: TimestampedData<CameraInfo>) async {
-        guard isConnected, let publisher else { return }
-
-        let topic = "\(config.topicPrefix)/camera/\(data.frameId)/camera_info"
-        let encoded = CDREncoder.encode(data.data)
-
-        do {
-            try await publisher.publish(encoded, to: topic)
-            updateStats(topic: topic, bytes: encoded.count)
-        } catch {
-            Log.ros.error("Failed to publish camera info: \(error.localizedDescription)")
-            handlePublishError(error)
-        }
+        await publish(CDREncoder.encode(data.data), to: "\(config.topicPrefix)/camera/\(data.frameId)/camera_info")
     }
 
     private func publishLiDARData(_ data: TimestampedData<LiDARData>) async {
-        guard isConnected, let publisher else { return }
-
         if let depthImage = data.data.depthImage {
-            let depthTopic = "\(config.topicPrefix)/lidar/depth/image"
-            let encoded = CDREncoder.encode(depthImage)
-            do {
-                try await publisher.publish(encoded, to: depthTopic)
-                updateStats(topic: depthTopic, bytes: encoded.count)
-            } catch {
-                Log.ros.error("Failed to publish depth image: \(error.localizedDescription)")
-                handlePublishError(error)
-            }
+            await publish(CDREncoder.encode(depthImage), to: "\(config.topicPrefix)/lidar/depth/image")
         }
-
         if let pointCloud = data.data.pointCloud {
-            let cloudTopic = "\(config.topicPrefix)/lidar/points"
-            let encoded = CDREncoder.encode(pointCloud)
-            do {
-                try await publisher.publish(encoded, to: cloudTopic)
-                updateStats(topic: cloudTopic, bytes: encoded.count)
-            } catch {
-                Log.ros.error("Failed to publish point cloud: \(error.localizedDescription)")
-                handlePublishError(error)
-            }
+            await publish(CDREncoder.encode(pointCloud), to: "\(config.topicPrefix)/lidar/points")
         }
     }
 
     private func publishTransform(_ data: TimestampedData<TransformStamped>) async {
-        guard isConnected, let publisher else { return }
-
-        let topic = "/tf"
-        let tfMsg = TFMessage(transforms: [data.data])
-        let encoded = CDREncoder.encode(tfMsg)
-
-        do {
-            try await publisher.publish(encoded, to: topic)
-            updateStats(topic: topic, bytes: encoded.count)
-        } catch {
-            Log.ros.error("Failed to publish TF: \(error.localizedDescription)")
-            handlePublishError(error)
-        }
+        await publish(CDREncoder.encode(TFMessage(transforms: [data.data])), to: "/tf")
     }
 
     private func publishIMU(_ data: TimestampedData<ImuMessage>) async {
-        guard isConnected, let publisher else { return }
-
-        let topic = "\(config.topicPrefix)/imu"
-        let encoded = CDREncoder.encode(data.data)
-
-        do {
-            try await publisher.publish(encoded, to: topic)
-            updateStats(topic: topic, bytes: encoded.count)
-        } catch {
-            Log.ros.error("Failed to publish IMU: \(error.localizedDescription)")
-            handlePublishError(error)
-        }
+        await publish(CDREncoder.encode(data.data), to: "\(config.topicPrefix)/imu")
     }
 
     private func publishAccelerometer(_ data: TimestampedData<Vector3Stamped>) async {
-        guard isConnected, let publisher else { return }
-
-        let topic = "\(config.topicPrefix)/accelerometer"
-        let encoded = CDREncoder.encode(data.data)
-
-        do {
-            try await publisher.publish(encoded, to: topic)
-            updateStats(topic: topic, bytes: encoded.count)
-        } catch {
-            Log.ros.error("Failed to publish accelerometer: \(error.localizedDescription)")
-            handlePublishError(error)
-        }
+        await publish(CDREncoder.encode(data.data), to: "\(config.topicPrefix)/accelerometer")
     }
 
     private func publishGyroscope(_ data: TimestampedData<Vector3Stamped>) async {
-        guard isConnected, let publisher else { return }
-
-        let topic = "\(config.topicPrefix)/gyroscope"
-        let encoded = CDREncoder.encode(data.data)
-
-        do {
-            try await publisher.publish(encoded, to: topic)
-            updateStats(topic: topic, bytes: encoded.count)
-        } catch {
-            Log.ros.error("Failed to publish gyroscope: \(error.localizedDescription)")
-            handlePublishError(error)
-        }
+        await publish(CDREncoder.encode(data.data), to: "\(config.topicPrefix)/gyroscope")
     }
 
     private func publishLocation(_ data: TimestampedData<NavSatFix>) async {
-        guard isConnected, let publisher else { return }
-
-        let topic = "\(config.topicPrefix)/gps/fix"
-        let encoded = CDREncoder.encode(data.data)
-
-        do {
-            try await publisher.publish(encoded, to: topic)
-            updateStats(topic: topic, bytes: encoded.count)
-        } catch {
-            Log.ros.error("Failed to publish GPS: \(error.localizedDescription)")
-            handlePublishError(error)
-        }
+        await publish(CDREncoder.encode(data.data), to: "\(config.topicPrefix)/gps/fix")
     }
 
     private func publishVelocity(_ data: TimestampedData<TwistStamped>) async {
-        guard isConnected, let publisher else { return }
-
-        let topic = "\(config.topicPrefix)/gps/velocity"
-        let encoded = CDREncoder.encode(data.data)
-
-        do {
-            try await publisher.publish(encoded, to: topic)
-            updateStats(topic: topic, bytes: encoded.count)
-        } catch {
-            Log.ros.error("Failed to publish velocity: \(error.localizedDescription)")
-            handlePublishError(error)
-        }
+        await publish(CDREncoder.encode(data.data), to: "\(config.topicPrefix)/gps/velocity")
     }
 
     private func publishHeading(_ data: TimestampedData<Float64Msg>) async {
-        guard isConnected, let publisher else { return }
-
-        let topic = "\(config.topicPrefix)/heading"
-        let encoded = CDREncoder.encode(data.data)
-
-        do {
-            try await publisher.publish(encoded, to: topic)
-            updateStats(topic: topic, bytes: encoded.count)
-        } catch {
-            Log.ros.error("Failed to publish heading: \(error.localizedDescription)")
-            handlePublishError(error)
-        }
+        await publish(CDREncoder.encode(data.data), to: "\(config.topicPrefix)/heading")
     }
 
     private func publishMagneticField(_ data: TimestampedData<MagneticField>) async {
-        guard isConnected, let publisher else { return }
-
-        let topic = "\(config.topicPrefix)/magnetic_field"
-        let encoded = CDREncoder.encode(data.data)
-
-        do {
-            try await publisher.publish(encoded, to: topic)
-            updateStats(topic: topic, bytes: encoded.count)
-        } catch {
-            Log.ros.error("Failed to publish magnetic field: \(error.localizedDescription)")
-            handlePublishError(error)
-        }
+        await publish(CDREncoder.encode(data.data), to: "\(config.topicPrefix)/magnetic_field")
     }
 
     private func publishPressure(_ data: TimestampedData<FluidPressure>) async {
-        guard isConnected, let publisher else { return }
-
-        let topic = "\(config.topicPrefix)/pressure"
-        let encoded = CDREncoder.encode(data.data)
-
-        do {
-            try await publisher.publish(encoded, to: topic)
-            updateStats(topic: topic, bytes: encoded.count)
-        } catch {
-            Log.ros.error("Failed to publish pressure: \(error.localizedDescription)")
-            handlePublishError(error)
-        }
+        await publish(CDREncoder.encode(data.data), to: "\(config.topicPrefix)/pressure")
     }
 
     private func publishAltitude(_ data: TimestampedData<Float64Msg>) async {
-        guard isConnected, let publisher else { return }
-
-        let topic = "\(config.topicPrefix)/altitude"
-        let encoded = CDREncoder.encode(data.data)
-
-        do {
-            try await publisher.publish(encoded, to: topic)
-            updateStats(topic: topic, bytes: encoded.count)
-        } catch {
-            Log.ros.error("Failed to publish altitude: \(error.localizedDescription)")
-            handlePublishError(error)
-        }
+        await publish(CDREncoder.encode(data.data), to: "\(config.topicPrefix)/altitude")
     }
 
     private func publishBattery(_ data: TimestampedData<BatteryState>) async {
-        guard isConnected, let publisher else { return }
-
-        let topic = "\(config.topicPrefix)/battery"
-        let encoded = CDREncoder.encode(data.data)
-
-        do {
-            try await publisher.publish(encoded, to: topic)
-            updateStats(topic: topic, bytes: encoded.count)
-        } catch {
-            Log.ros.error("Failed to publish battery: \(error.localizedDescription)")
-            handlePublishError(error)
-        }
+        await publish(CDREncoder.encode(data.data), to: "\(config.topicPrefix)/battery")
     }
 
     private func publishThermal(_ data: TimestampedData<Int32Msg>) async {
-        guard isConnected, let publisher else { return }
-
-        let topic = "\(config.topicPrefix)/thermal"
-        let encoded = CDREncoder.encode(data.data)
-
-        do {
-            try await publisher.publish(encoded, to: topic)
-            updateStats(topic: topic, bytes: encoded.count)
-        } catch {
-            Log.ros.error("Failed to publish thermal: \(error.localizedDescription)")
-            handlePublishError(error)
-        }
+        await publish(CDREncoder.encode(data.data), to: "\(config.topicPrefix)/thermal")
     }
 
     private func publishProximity(_ data: TimestampedData<BoolMsg>) async {
-        guard isConnected, let publisher else { return }
-
-        let topic = "\(config.topicPrefix)/proximity"
-        let encoded = CDREncoder.encode(data.data)
-
-        do {
-            try await publisher.publish(encoded, to: topic)
-            updateStats(topic: topic, bytes: encoded.count)
-        } catch {
-            Log.ros.error("Failed to publish proximity: \(error.localizedDescription)")
-            handlePublishError(error)
-        }
+        await publish(CDREncoder.encode(data.data), to: "\(config.topicPrefix)/proximity")
     }
 
     private func updateStats(topic: String, bytes: Int) {

@@ -22,7 +22,8 @@ Visualization Manager:
       Enabled: true
       Topic:
         Value: /iphone/lidar/points
-        Depth: 5
+        Depth: 10
+        History Policy: Keep Last
         Reliability Policy: Best Effort
       Size (Pixels): 2
       Style: Points
@@ -34,17 +35,17 @@ Visualization Manager:
       Enabled: true
       Topic:
         Value: /iphone/lidar/depth/image
-        Depth: 5
+        Depth: 10
+        History Policy: Keep Last
         Reliability Policy: Best Effort
-      Max Value: 5
-      Min Value: 0
 
     - Class: rviz_default_plugins/Image
       Name: Camera
       Enabled: true
       Topic:
-        Value: /iphone/camera/back_wide/image/compressed
-        Depth: 5
+        Value: /iphone/camera/back_wide/image/raw
+        Depth: 10
+        History Policy: Keep Last
         Reliability Policy: Best Effort
 
     - Class: rviz_default_plugins/Axes

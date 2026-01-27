@@ -162,6 +162,8 @@ public final class CameraManager: NSObject, ObservableObject {
     }
 
     public func stop() {
+        state = .ready
+        activeCamera = nil
         sessionQueue.async { [weak self] in
             guard let self else { return }
             if let session = captureSession, session.isRunning {
@@ -170,10 +172,6 @@ public final class CameraManager: NSObject, ObservableObject {
             captureSession = nil
             videoOutput = nil
             currentDevice = nil
-            DispatchQueue.main.async {
-                self.state = .ready
-                self.activeCamera = nil
-            }
         }
     }
 

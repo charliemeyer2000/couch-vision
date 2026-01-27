@@ -102,9 +102,9 @@ public final class EnvironmentManager: ObservableObject {
     }
 
     public func stop() {
+        state = .ready
         motionManager.stopMagnetometerUpdates()
         altimeter.stopRelativeAltitudeUpdates()
-        DispatchQueue.main.async { [weak self] in self?.state = .ready }
     }
 
     private func reconfigure() {

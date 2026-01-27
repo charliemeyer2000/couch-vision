@@ -112,10 +112,10 @@ public final class LiDARManager: NSObject, ObservableObject {
     }
 
     public func stop() {
-        arSession?.delegate = nil // Prevent stale callbacks
+        state = .ready
+        arSession?.delegate = nil
         arSession?.pause()
         arSession = nil
-        DispatchQueue.main.async { [weak self] in self?.state = .ready }
     }
 
     private func processFrame(_ frame: ARFrame) {

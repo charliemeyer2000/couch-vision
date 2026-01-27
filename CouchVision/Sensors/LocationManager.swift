@@ -106,9 +106,9 @@ public final class LocationManager: NSObject, ObservableObject {
     }
 
     public func stop() {
+        state = .ready
         locationManager.stopUpdatingLocation()
         locationManager.stopUpdatingHeading()
-        DispatchQueue.main.async { [weak self] in self?.state = .ready }
     }
 
     private func reconfigure() {

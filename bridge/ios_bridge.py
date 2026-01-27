@@ -14,8 +14,11 @@ import argparse
 import socket
 import struct
 import threading
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
+import cv2
+import numpy as np
 import rclpy
 from geometry_msgs.msg import TransformStamped, TwistStamped, Vector3Stamped
 from rclpy.node import Node
@@ -122,18 +125,20 @@ class IOSBridge(Node):  # type: ignore[misc]
         self.client_socket: socket.socket | None = None
         self.running = False
 
-        # QoS for sensor data (best effort, keep last)
-        sensor_qos = QoSProfile(
+        self._sensor_qos = QoSProfile(
             reliability=ReliabilityPolicy.BEST_EFFORT,
             history=HistoryPolicy.KEEP_LAST,
             depth=10,
         )
+        self._reliable_qos = QoSProfile(
+            reliability=ReliabilityPolicy.RELIABLE,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=10,
+        )
+        self._reliable_topics = {"/tf"}
 
-        # Publishers - created dynamically based on received topics
         self._topic_publishers: dict[str, Publisher[Any]] = {}
-        self._sensor_qos = sensor_qos
 
-        # Topic type mapping based on topic name patterns
         self._topic_types: dict[str, type[Any]] = {
             "/image/compressed": CompressedImage,
             "/camera_info": CameraInfo,
@@ -154,12 +159,29 @@ class IOSBridge(Node):  # type: ignore[misc]
             "/proximity": Bool,
         }
 
+        self._parsers: dict[type[Any], Callable[[bytes], Any | None]] = {
+            CompressedImage: self._parse_compressed_image,
+            Image: self._parse_image,
+            Imu: self._parse_imu,
+            PointCloud2: self._parse_pointcloud2,
+            Vector3Stamped: self._parse_vector3_stamped,
+            CameraInfo: self._parse_camera_info,
+            TFMessage: self._parse_tf_message,
+            NavSatFix: self._parse_navsatfix,
+            TwistStamped: self._parse_twist_stamped,
+            Float64: self._parse_float64,
+            MagneticField: self._parse_magnetic_field,
+            FluidPressure: self._parse_fluid_pressure,
+            BatteryState: self._parse_battery_state,
+            Int32: self._parse_int32,
+            Bool: self._parse_bool,
+        }
+
         self.get_logger().info(f"iOS Bridge initialized, will listen on port {port}")
 
     def get_publisher(self, topic: str) -> Publisher[Any] | None:
         """Get or create a publisher for the given topic."""
         if topic not in self._topic_publishers:
-            # Determine message type from topic name
             msg_type: type[Any] | None = None
             for pattern, mtype in self._topic_types.items():
                 if topic == pattern or topic.endswith(pattern):
@@ -170,8 +192,9 @@ class IOSBridge(Node):  # type: ignore[misc]
                 self.get_logger().warn(f"Unknown topic type for: {topic}, skipping")
                 return None
 
+            qos = self._reliable_qos if topic in self._reliable_topics else self._sensor_qos
             self.get_logger().info(f"Creating publisher for {topic} ({msg_type.__name__})")
-            self._topic_publishers[topic] = self.create_publisher(msg_type, topic, self._sensor_qos)
+            self._topic_publishers[topic] = self.create_publisher(msg_type, topic, qos)
 
         return self._topic_publishers[topic]
 
@@ -217,33 +240,22 @@ class IOSBridge(Node):  # type: ignore[misc]
 
                 buffer += data
 
-                # Process complete messages from buffer
-                while len(buffer) >= 8:  # Minimum: 4 (topic_len) + 4 (data_len)
-                    # Read topic length
+                while len(buffer) >= 8:
                     topic_len = struct.unpack("<I", buffer[:4])[0]
 
-                    # Check if we have complete topic + data_len
                     if len(buffer) < 4 + topic_len + 4:
                         break
 
-                    # Read topic
                     topic = buffer[4 : 4 + topic_len].decode("utf-8")
-
-                    # Read data length
                     data_len = struct.unpack("<I", buffer[4 + topic_len : 8 + topic_len])[0]
 
-                    # Check if we have complete message
                     total_len = 4 + topic_len + 4 + data_len
                     if len(buffer) < total_len:
                         break
 
-                    # Extract CDR data
                     cdr_data = buffer[8 + topic_len : total_len]
-
-                    # Remove processed message from buffer
                     buffer = buffer[total_len:]
 
-                    # Publish to ROS2
                     self._publish_message(topic, cdr_data)
                     msg_count += 1
 
@@ -265,51 +277,49 @@ class IOSBridge(Node):  # type: ignore[misc]
         if publisher is None:
             return
 
+        msg_type = type(publisher.msg_type())
+        parser = self._parsers.get(msg_type)
+        if parser is None:
+            self.get_logger().warn(f"No parser for {msg_type.__name__}")
+            return
+
         try:
-            # Get the message type from the publisher
-            msg_type = type(publisher.msg_type())
-
-            # Parse based on message type
-            msg: Any = None
-            if msg_type == CompressedImage:
-                msg = self._parse_compressed_image(cdr_data)
-            elif msg_type == Image:
-                msg = self._parse_image(cdr_data)
-            elif msg_type == Imu:
-                msg = self._parse_imu(cdr_data)
-            elif msg_type == PointCloud2:
-                msg = self._parse_pointcloud2(cdr_data)
-            elif msg_type == Vector3Stamped:
-                msg = self._parse_vector3_stamped(cdr_data)
-            elif msg_type == CameraInfo:
-                msg = self._parse_camera_info(cdr_data)
-            elif msg_type == TFMessage:
-                msg = self._parse_tf_message(cdr_data)
-            elif msg_type == NavSatFix:
-                msg = self._parse_navsatfix(cdr_data)
-            elif msg_type == TwistStamped:
-                msg = self._parse_twist_stamped(cdr_data)
-            elif msg_type == Float64:
-                msg = self._parse_float64(cdr_data)
-            elif msg_type == MagneticField:
-                msg = self._parse_magnetic_field(cdr_data)
-            elif msg_type == FluidPressure:
-                msg = self._parse_fluid_pressure(cdr_data)
-            elif msg_type == BatteryState:
-                msg = self._parse_battery_state(cdr_data)
-            elif msg_type == Int32:
-                msg = self._parse_int32(cdr_data)
-            elif msg_type == Bool:
-                msg = self._parse_bool(cdr_data)
-            else:
-                self.get_logger().warn(f"No parser for {msg_type.__name__}")
-                return
-
-            if msg:
-                publisher.publish(msg)
-
+            msg = parser(cdr_data)
         except Exception as e:
-            self.get_logger().error(f"Failed to publish {topic}: {e}")
+            self.get_logger().error(f"Failed to parse {topic}: {e}")
+            return
+
+        if msg is None:
+            return
+
+        publisher.publish(msg)
+
+        if msg_type == CompressedImage:
+            self._publish_decompressed(topic, msg)
+
+    def _publish_decompressed(self, compressed_topic: str, msg: CompressedImage) -> None:
+        """Decompress JPEG and publish as raw Image."""
+        raw_topic = compressed_topic.replace("/image/compressed", "/image/raw")
+        if raw_topic not in self._topic_publishers:
+            self._topic_publishers[raw_topic] = self.create_publisher(
+                Image, raw_topic, self._sensor_qos
+            )
+
+        buf = np.frombuffer(bytes(msg.data), dtype=np.uint8)
+        bgr = cv2.imdecode(buf, cv2.IMREAD_COLOR)
+        if bgr is None:
+            return
+
+        raw = Image()
+        raw.header = msg.header
+        raw.height, raw.width = bgr.shape[:2]
+        raw.encoding = "bgr8"
+        raw.is_bigendian = 0
+        raw.step = raw.width * 3
+        raw.data = bgr.tobytes()
+        self._topic_publishers[raw_topic].publish(raw)
+
+    # -- CDR helpers --
 
     def _read_header(self, r: CdrReader, msg: Any) -> None:
         msg.header.stamp.sec = r.int32()
@@ -327,206 +337,152 @@ class IOSBridge(Node):  # type: ignore[misc]
         q.z = r.float64()
         q.w = r.float64()
 
-    def _parse_compressed_image(self, cdr_data: bytes) -> CompressedImage | None:
-        try:
-            r = CdrReader(cdr_data)
-            msg = CompressedImage()
-            self._read_header(r, msg)
-            msg.format = r.string()
-            msg.data = list(r.bytes_seq())
-            return msg
-        except Exception as e:
-            self.get_logger().error(f"Failed to parse CompressedImage: {e}")
-            return None
+    # -- Parsers --
 
-    def _parse_image(self, cdr_data: bytes) -> Image | None:
-        try:
-            r = CdrReader(cdr_data)
-            msg = Image()
-            self._read_header(r, msg)
-            msg.height = r.uint32()
-            msg.width = r.uint32()
-            msg.encoding = r.string()
-            msg.is_bigendian = r.uint8()
-            msg.step = r.uint32()
-            msg.data = list(r.bytes_seq())
-            return msg
-        except Exception as e:
-            self.get_logger().error(f"Failed to parse Image: {e}")
-            return None
+    def _parse_compressed_image(self, cdr_data: bytes) -> CompressedImage:
+        r = CdrReader(cdr_data)
+        msg = CompressedImage()
+        self._read_header(r, msg)
+        msg.format = r.string()
+        msg.data = list(r.bytes_seq())
+        return msg
 
-    def _parse_imu(self, cdr_data: bytes) -> Imu | None:
-        try:
-            r = CdrReader(cdr_data)
-            msg = Imu()
-            self._read_header(r, msg)
-            self._read_quaternion(r, msg.orientation)
-            msg.orientation_covariance = r.float64_array(9)
-            self._read_vector3(r, msg.angular_velocity)
-            msg.angular_velocity_covariance = r.float64_array(9)
-            self._read_vector3(r, msg.linear_acceleration)
-            msg.linear_acceleration_covariance = r.float64_array(9)
-            return msg
-        except Exception as e:
-            self.get_logger().error(f"Failed to parse Imu: {e}")
-            return None
+    def _parse_image(self, cdr_data: bytes) -> Image:
+        r = CdrReader(cdr_data)
+        msg = Image()
+        self._read_header(r, msg)
+        msg.height = r.uint32()
+        msg.width = r.uint32()
+        msg.encoding = r.string()
+        msg.is_bigendian = r.uint8()
+        msg.step = r.uint32()
+        msg.data = list(r.bytes_seq())
+        return msg
+
+    def _parse_imu(self, cdr_data: bytes) -> Imu:
+        r = CdrReader(cdr_data)
+        msg = Imu()
+        self._read_header(r, msg)
+        self._read_quaternion(r, msg.orientation)
+        msg.orientation_covariance = r.float64_array(9)
+        self._read_vector3(r, msg.angular_velocity)
+        msg.angular_velocity_covariance = r.float64_array(9)
+        self._read_vector3(r, msg.linear_acceleration)
+        msg.linear_acceleration_covariance = r.float64_array(9)
+        return msg
 
     def _parse_pointcloud2(self, cdr_data: bytes) -> PointCloud2 | None:
         _ = cdr_data
         self.get_logger().info("Received PointCloud2 (parsing not yet implemented)")
         return None
 
-    def _parse_vector3_stamped(self, cdr_data: bytes) -> Vector3Stamped | None:
-        try:
-            r = CdrReader(cdr_data)
-            msg = Vector3Stamped()
-            self._read_header(r, msg)
-            self._read_vector3(r, msg.vector)
-            return msg
-        except Exception as e:
-            self.get_logger().error(f"Failed to parse Vector3Stamped: {e}")
-            return None
+    def _parse_vector3_stamped(self, cdr_data: bytes) -> Vector3Stamped:
+        r = CdrReader(cdr_data)
+        msg = Vector3Stamped()
+        self._read_header(r, msg)
+        self._read_vector3(r, msg.vector)
+        return msg
 
-    def _parse_camera_info(self, cdr_data: bytes) -> CameraInfo | None:
-        try:
-            r = CdrReader(cdr_data)
-            msg = CameraInfo()
-            self._read_header(r, msg)
-            msg.height = r.uint32()
-            msg.width = r.uint32()
-            msg.distortion_model = r.string()
-            d_len = r.uint32()
-            msg.d = r.float64_array(d_len)
-            msg.k = r.float64_array(9)
-            msg.r = r.float64_array(9)
-            msg.p = r.float64_array(12)
-            msg.binning_x = r.uint32()
-            msg.binning_y = r.uint32()
-            return msg
-        except Exception as e:
-            self.get_logger().error(f"Failed to parse CameraInfo: {e}")
-            return None
+    def _parse_camera_info(self, cdr_data: bytes) -> CameraInfo:
+        r = CdrReader(cdr_data)
+        msg = CameraInfo()
+        self._read_header(r, msg)
+        msg.height = r.uint32()
+        msg.width = r.uint32()
+        msg.distortion_model = r.string()
+        d_len = r.uint32()
+        msg.d = r.float64_array(d_len)
+        msg.k = r.float64_array(9)
+        msg.r = r.float64_array(9)
+        msg.p = r.float64_array(12)
+        msg.binning_x = r.uint32()
+        msg.binning_y = r.uint32()
+        return msg
 
-    def _parse_tf_message(self, cdr_data: bytes) -> TFMessage | None:
-        try:
-            r = CdrReader(cdr_data)
-            msg = TFMessage()
-            num_transforms = r.uint32()
-            for _ in range(num_transforms):
-                tf = TransformStamped()
-                self._read_header(r, tf)
-                tf.child_frame_id = r.string()
-                self._read_vector3(r, tf.transform.translation)
-                self._read_quaternion(r, tf.transform.rotation)
-                msg.transforms.append(tf)
-            return msg
-        except Exception as e:
-            self.get_logger().error(f"Failed to parse TFMessage: {e}")
-            return None
+    def _parse_tf_message(self, cdr_data: bytes) -> TFMessage:
+        r = CdrReader(cdr_data)
+        msg = TFMessage()
+        num_transforms = r.uint32()
+        for _ in range(num_transforms):
+            tf = TransformStamped()
+            self._read_header(r, tf)
+            tf.child_frame_id = r.string()
+            self._read_vector3(r, tf.transform.translation)
+            self._read_quaternion(r, tf.transform.rotation)
+            msg.transforms.append(tf)
+        return msg
 
-    def _parse_navsatfix(self, cdr_data: bytes) -> NavSatFix | None:
-        try:
-            r = CdrReader(cdr_data)
-            msg = NavSatFix()
-            self._read_header(r, msg)
-            msg.status.status = r.int8()
-            msg.status.service = r.uint16()
-            msg.latitude = r.float64()
-            msg.longitude = r.float64()
-            msg.altitude = r.float64()
-            msg.position_covariance = r.float64_array(9)
-            msg.position_covariance_type = r.uint8()
-            return msg
-        except Exception as e:
-            self.get_logger().error(f"Failed to parse NavSatFix: {e}")
-            return None
+    def _parse_navsatfix(self, cdr_data: bytes) -> NavSatFix:
+        r = CdrReader(cdr_data)
+        msg = NavSatFix()
+        self._read_header(r, msg)
+        msg.status.status = r.int8()
+        msg.status.service = r.uint16()
+        msg.latitude = r.float64()
+        msg.longitude = r.float64()
+        msg.altitude = r.float64()
+        msg.position_covariance = r.float64_array(9)
+        msg.position_covariance_type = r.uint8()
+        return msg
 
-    def _parse_twist_stamped(self, cdr_data: bytes) -> TwistStamped | None:
-        try:
-            r = CdrReader(cdr_data)
-            msg = TwistStamped()
-            self._read_header(r, msg)
-            self._read_vector3(r, msg.twist.linear)
-            self._read_vector3(r, msg.twist.angular)
-            return msg
-        except Exception as e:
-            self.get_logger().error(f"Failed to parse TwistStamped: {e}")
-            return None
+    def _parse_twist_stamped(self, cdr_data: bytes) -> TwistStamped:
+        r = CdrReader(cdr_data)
+        msg = TwistStamped()
+        self._read_header(r, msg)
+        self._read_vector3(r, msg.twist.linear)
+        self._read_vector3(r, msg.twist.angular)
+        return msg
 
-    def _parse_float64(self, cdr_data: bytes) -> Float64 | None:
-        try:
-            r = CdrReader(cdr_data)
-            msg = Float64()
-            msg.data = r.float64()
-            return msg
-        except Exception as e:
-            self.get_logger().error(f"Failed to parse Float64: {e}")
-            return None
+    def _parse_float64(self, cdr_data: bytes) -> Float64:
+        r = CdrReader(cdr_data)
+        msg = Float64()
+        msg.data = r.float64()
+        return msg
 
-    def _parse_magnetic_field(self, cdr_data: bytes) -> MagneticField | None:
-        try:
-            r = CdrReader(cdr_data)
-            msg = MagneticField()
-            self._read_header(r, msg)
-            self._read_vector3(r, msg.magnetic_field)
-            msg.magnetic_field_covariance = r.float64_array(9)
-            return msg
-        except Exception as e:
-            self.get_logger().error(f"Failed to parse MagneticField: {e}")
-            return None
+    def _parse_magnetic_field(self, cdr_data: bytes) -> MagneticField:
+        r = CdrReader(cdr_data)
+        msg = MagneticField()
+        self._read_header(r, msg)
+        self._read_vector3(r, msg.magnetic_field)
+        msg.magnetic_field_covariance = r.float64_array(9)
+        return msg
 
-    def _parse_fluid_pressure(self, cdr_data: bytes) -> FluidPressure | None:
-        try:
-            r = CdrReader(cdr_data)
-            msg = FluidPressure()
-            self._read_header(r, msg)
-            msg.fluid_pressure = r.float64()
-            msg.variance = r.float64()
-            return msg
-        except Exception as e:
-            self.get_logger().error(f"Failed to parse FluidPressure: {e}")
-            return None
+    def _parse_fluid_pressure(self, cdr_data: bytes) -> FluidPressure:
+        r = CdrReader(cdr_data)
+        msg = FluidPressure()
+        self._read_header(r, msg)
+        msg.fluid_pressure = r.float64()
+        msg.variance = r.float64()
+        return msg
 
-    def _parse_battery_state(self, cdr_data: bytes) -> BatteryState | None:
-        try:
-            r = CdrReader(cdr_data)
-            msg = BatteryState()
-            self._read_header(r, msg)
-            msg.voltage = r.float32()
-            msg.temperature = r.float32()
-            msg.current = r.float32()
-            msg.charge = r.float32()
-            msg.capacity = r.float32()
-            msg.design_capacity = r.float32()
-            msg.percentage = r.float32()
-            msg.power_supply_status = r.uint8()
-            msg.power_supply_health = r.uint8()
-            msg.power_supply_technology = r.uint8()
-            msg.present = r.bool()
-            return msg
-        except Exception as e:
-            self.get_logger().error(f"Failed to parse BatteryState: {e}")
-            return None
+    def _parse_battery_state(self, cdr_data: bytes) -> BatteryState:
+        r = CdrReader(cdr_data)
+        msg = BatteryState()
+        self._read_header(r, msg)
+        msg.voltage = r.float32()
+        msg.temperature = r.float32()
+        msg.current = r.float32()
+        msg.charge = r.float32()
+        msg.capacity = r.float32()
+        msg.design_capacity = r.float32()
+        msg.percentage = r.float32()
+        msg.power_supply_status = r.uint8()
+        msg.power_supply_health = r.uint8()
+        msg.power_supply_technology = r.uint8()
+        msg.present = r.bool()
+        return msg
 
-    def _parse_int32(self, cdr_data: bytes) -> Int32 | None:
-        try:
-            r = CdrReader(cdr_data)
-            msg = Int32()
-            msg.data = r.int32()
-            return msg
-        except Exception as e:
-            self.get_logger().error(f"Failed to parse Int32: {e}")
-            return None
+    def _parse_int32(self, cdr_data: bytes) -> Int32:
+        r = CdrReader(cdr_data)
+        msg = Int32()
+        msg.data = r.int32()
+        return msg
 
-    def _parse_bool(self, cdr_data: bytes) -> Bool | None:
-        try:
-            r = CdrReader(cdr_data)
-            msg = Bool()
-            msg.data = r.bool()
-            return msg
-        except Exception as e:
-            self.get_logger().error(f"Failed to parse Bool: {e}")
-            return None
+    def _parse_bool(self, cdr_data: bytes) -> Bool:
+        r = CdrReader(cdr_data)
+        msg = Bool()
+        msg.data = r.bool()
+        return msg
 
     def stop(self) -> None:
         """Stop the bridge."""
@@ -546,7 +502,6 @@ def main() -> None:
     rclpy.init()
     bridge = IOSBridge(port=args.port)
 
-    # Run server in separate thread
     server_thread = threading.Thread(target=bridge.start_server, daemon=True)
     server_thread.start()
 

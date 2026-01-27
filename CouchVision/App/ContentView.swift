@@ -6,12 +6,14 @@ struct ContentView: View {
     @State private var endpointText: String = ""
 
     private var isStreaming: Bool {
-        coordinator.cameraManager.state == .running ||
-            coordinator.lidarManager.state == .running ||
-            coordinator.motionManager.state == .running ||
-            coordinator.locationManager.state == .running ||
-            coordinator.environmentManager.state == .running ||
-            coordinator.deviceStatusManager.state == .running
+        coordinator.isConnected && (
+            coordinator.cameraManager.state == .running ||
+                coordinator.lidarManager.state == .running ||
+                coordinator.motionManager.state == .running ||
+                coordinator.locationManager.state == .running ||
+                coordinator.environmentManager.state == .running ||
+                coordinator.deviceStatusManager.state == .running
+        )
     }
 
     var body: some View {

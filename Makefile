@@ -7,13 +7,12 @@ BRIDGE_PORT ?= 7447
 
 # ROS2 setup - searches common install locations (Jazzy and Humble)
 # Uses CycloneDDS as FastRTPS discovery hangs on macOS
-ROS2_SETUP := export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp && \
-              (source ~/ros2_jazzy/install/setup.zsh 2>/dev/null || \
+ROS2_SETUP := export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp; \
               source ~/ros2_jazzy/install/setup.bash 2>/dev/null || \
               source ~/ros2_ws/install/setup.bash 2>/dev/null || \
               source /opt/ros/jazzy/setup.bash 2>/dev/null || \
               source /opt/ros/humble/setup.bash 2>/dev/null || \
-              (echo "Error: ROS2 not found. See README.md for install instructions." && exit 1))
+              (echo "Error: ROS2 not found. See README.md for install instructions." && exit 1)
 
 .PHONY: help setup setup-ros2 setup-bridge \
         build-ios build-sim xcode regen \
@@ -120,7 +119,9 @@ rqt:
 	@$(ROS2_SETUP) && rqt
 
 image:
-	@$(ROS2_SETUP) && ros2 run rqt_image_view rqt_image_view /iphone/camera/back_wide/image/compressed
+	@$(ROS2_SETUP) && ros2 run image_tools showimage --ros-args \
+		-r image:=/iphone/camera/back_wide/image/raw \
+		-p reliability:=best_effort
 
 # === Utilities ===
 

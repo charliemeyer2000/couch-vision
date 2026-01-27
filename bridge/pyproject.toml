@@ -8,6 +8,7 @@ requires-python = ">=3.12,<3.13"
 # Only add pure-Python pip dependencies here if needed.
 dependencies = [
     "numpy>=2.4.1",
+    "opencv-python-headless>=4.10",
     "pyyaml>=6.0.3",
 ]
 
