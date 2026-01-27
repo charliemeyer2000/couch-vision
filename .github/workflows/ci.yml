@@ -32,9 +32,6 @@ jobs:
       - name: Install xcodegen
         run: brew install xcodegen
 
-      - name: Download iOS Simulator runtime
-        run: xcodebuild -downloadPlatform iOS
-
       - name: Generate Xcode project
         run: xcodegen generate
 
@@ -42,8 +39,10 @@ jobs:
         run: |
           xcodebuild -project CouchVision.xcodeproj \
             -scheme CouchVision \
-            -sdk iphonesimulator \
-            -destination 'platform=iOS Simulator,name=iPhone 16 Pro,OS=18.5' \
+            -destination 'generic/platform=iOS' \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
             build
 
   deploy:
