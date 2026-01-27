@@ -1,0 +1,80 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+  - Class: rviz_common/Views
+    Name: Views
+
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Class: rviz_default_plugins/TF
+      Name: TF
+      Enabled: true
+      Value: true
+      Show Arrows: false
+      Show Axes: true
+      Show Names: true
+      Update Interval: 0
+      Frame Timeout: 15
+
+    - Class: rviz_default_plugins/PointCloud2
+      Name: LiDAR Points
+      Enabled: true
+      Topic:
+        Value: /iphone/lidar/points
+        Depth: 5
+        Reliability Policy: Best Effort
+      Size (Pixels): 2
+      Style: Points
+      Color Transformer: Intensity
+      Use Fixed Frame: true
+
+    - Class: rviz_default_plugins/Image
+      Name: Depth Image
+      Enabled: true
+      Topic:
+        Value: /iphone/lidar/depth/image
+        Depth: 5
+        Reliability Policy: Best Effort
+      Max Value: 5
+      Min Value: 0
+
+    - Class: rviz_default_plugins/Image
+      Name: Camera
+      Enabled: true
+      Topic:
+        Value: /iphone/camera/back_wide/image/compressed
+        Depth: 5
+        Reliability Policy: Best Effort
+
+    - Class: rviz_default_plugins/Axes
+      Name: World Origin
+      Enabled: true
+      Reference Frame: world
+      Length: 0.5
+      Radius: 0.02
+
+  Global Options:
+    Background Color: 48; 48; 48
+    Fixed Frame: world
+    Frame Rate: 30
+
+  Name: root
+  Tools:
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/FocusCamera
+
+  Value: true
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Distance: 3
+      Name: Current View
+      Focal Point:
+        X: 0
+        Y: 0
+        Z: 0
+      Focal Shape Fixed Size: true
+      Near Clip Distance: 0.01
+      Pitch: 0.5
+      Yaw: 0.5

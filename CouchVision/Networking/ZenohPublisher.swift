@@ -33,60 +33,82 @@ public final class ZenohPublisher: Publisher {
 
     // MARK: - Publisher Protocol Implementation
 
+    private static let connectionTimeout: UInt64 = 10_000_000_000
+
     public func connect(to endpoint: String) async throws {
         self.endpoint = endpoint
 
-        // Parse endpoint (format: tcp://host:port or zenoh://host:port)
         guard let (host, port) = parseEndpoint(endpoint) else {
             throw PublisherError.invalidEndpoint(endpoint)
         }
 
-        return try await withCheckedThrowingContinuation { continuation in
-            let nwEndpoint = NWEndpoint.hostPort(
-                host: NWEndpoint.Host(host),
-                port: NWEndpoint.Port(rawValue: port) ?? .init(integerLiteral: 7447)
-            )
+        let nwEndpoint = NWEndpoint.hostPort(
+            host: NWEndpoint.Host(host),
+            port: NWEndpoint.Port(rawValue: port) ?? .init(integerLiteral: 7447)
+        )
 
-            let parameters = NWParameters.tcp
-            parameters.allowLocalEndpointReuse = true
+        let parameters = NWParameters.tcp
+        parameters.allowLocalEndpointReuse = true
 
-            let connection = NWConnection(to: nwEndpoint, using: parameters)
+        let connection = NWConnection(to: nwEndpoint, using: parameters)
+        self.connection = connection
 
-            var didResume = false
+        do {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                var didResume = false
 
-            connection.stateUpdateHandler = { [weak self] state in
-                switch state {
-                case .ready:
-                    self?.isConnected = true
-                    self?.onConnectionStateChanged?(true)
-                    if !didResume {
-                        didResume = true
-                        continuation.resume()
-                        if let self { monitorConnection(connection) }
-                    }
-
-                case .failed(let error):
-                    self?.isConnected = false
-                    self?.onConnectionStateChanged?(false)
-                    if !didResume {
-                        didResume = true
-                        continuation.resume(throwing: PublisherError.connectionFailed(error.localizedDescription))
-                    }
-
-                case .cancelled:
-                    self?.isConnected = false
-                    self?.onConnectionStateChanged?(false)
-
-                case .waiting(let error):
-                    Log.ros.warning("Connection waiting: \(error.localizedDescription)")
-
-                default:
-                    break
+                let timeoutWork = DispatchWorkItem { [weak self] in
+                    guard !didResume else { return }
+                    didResume = true
+                    connection.stateUpdateHandler = nil
+                    connection.cancel()
+                    self?.connection = nil
+                    continuation.resume(throwing: PublisherError.connectionFailed("Connection timed out"))
                 }
-            }
+                queue.asyncAfter(deadline: .now() + .nanoseconds(Int(Self.connectionTimeout)), execute: timeoutWork)
 
-            self.connection = connection
-            connection.start(queue: queue)
+                connection.stateUpdateHandler = { [weak self] state in
+                    switch state {
+                    case .ready:
+                        timeoutWork.cancel()
+                        self?.isConnected = true
+                        self?.onConnectionStateChanged?(true)
+                        if !didResume {
+                            didResume = true
+                            continuation.resume()
+                            if let self { monitorConnection(connection) }
+                        }
+
+                    case .failed(let error):
+                        timeoutWork.cancel()
+                        self?.isConnected = false
+                        self?.onConnectionStateChanged?(false)
+                        if !didResume {
+                            didResume = true
+                            continuation.resume(throwing: PublisherError.connectionFailed(error.localizedDescription))
+                        }
+
+                    case .cancelled:
+                        self?.isConnected = false
+                        self?.onConnectionStateChanged?(false)
+                        if !didResume {
+                            didResume = true
+                            continuation.resume(throwing: PublisherError.connectionFailed("Connection cancelled"))
+                        }
+
+                    case .waiting(let error):
+                        Log.ros.warning("Connection waiting: \(error.localizedDescription)")
+
+                    default:
+                        break
+                    }
+                }
+
+                connection.start(queue: self.queue)
+            }
+        } catch {
+            self.connection = nil
+            throw error
         }
     }
 

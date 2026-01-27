@@ -6,11 +6,14 @@ PROJECT_ROOT := $(shell pwd)
 BRIDGE_PORT ?= 7447
 
 # ROS2 setup - searches common install locations (Jazzy and Humble)
-ROS2_SETUP := source ~/ros2_jazzy/install/setup.bash 2>/dev/null || \
+# Uses CycloneDDS as FastRTPS discovery hangs on macOS
+ROS2_SETUP := export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp && \
+              (source ~/ros2_jazzy/install/setup.zsh 2>/dev/null || \
+              source ~/ros2_jazzy/install/setup.bash 2>/dev/null || \
               source ~/ros2_ws/install/setup.bash 2>/dev/null || \
               source /opt/ros/jazzy/setup.bash 2>/dev/null || \
               source /opt/ros/humble/setup.bash 2>/dev/null || \
-              (echo "Error: ROS2 not found. See README.md for install instructions." && exit 1)
+              (echo "Error: ROS2 not found. See README.md for install instructions." && exit 1))
 
 .PHONY: help setup setup-ros2 setup-bridge \
         build-ios build-sim xcode regen \
@@ -111,7 +114,7 @@ else
 endif
 
 rviz:
-	@$(ROS2_SETUP) && rviz2
+	@$(ROS2_SETUP) && rviz2 -d $(PROJECT_ROOT)/rviz/couchvision.rviz
 
 rqt:
 	@$(ROS2_SETUP) && rqt

@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 77;
+	objectVersion = 63;
 	objects = {
 
 /* Begin PBXBuildFile section */
@@ -24,6 +24,7 @@
 		6B39CB97419F810D955EBE84 /* TimeUtils.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53EC739A43B279481C728B31 /* TimeUtils.swift */; };
 		6F2A1697B088B56AF9896AC7 /* Publisher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F9221EA27CF0D48D12B5B1E /* Publisher.swift */; };
 		6FE70D107D6AC93F706A3A5B /* Logger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 998CF88C47937956BF73EA86 /* Logger.swift */; };
+		735B063347C021FB49A8DAAF /* TransformMessages.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E46DA7B034187A775276DD0 /* TransformMessages.swift */; };
 		7395924D19CD22E6B210A5A5 /* ZenohPublisher.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA67DF29CD9D69C942084599 /* ZenohPublisher.swift */; };
 		75B6048847134405CB5ADA65 /* DeviceStatusManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = F488B6359ACB354B1152659A /* DeviceStatusManager.swift */; };
 		7F97BD5E10BB38C0CDF9C647 /* CouchVisionWidgetsBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5A53DA3BC86A332490E945C /* CouchVisionWidgetsBundle.swift */; };
@@ -39,7 +40,6 @@
 		C8C26DBE480BA955AE520C36 /* CameraManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0CA31563A14598E4A94E2D1 /* CameraManager.swift */; };
 		D83FEB7160A36CB898EBF1AB /* EnvironmentMessages.swift in Sources */ = {isa = PBXBuildFile; fileRef = A268FA045A642D71D2E12288 /* EnvironmentMessages.swift */; };
 		DF02C4CB73ECF9D234666028 /* StreamingLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD62316B6FA5C260A95BFA22 /* StreamingLiveActivity.swift */; };
-		E1F7A8B9C2D34E6F01234567 /* TransformMessages.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2E8B9C0D3E45F7012345678 /* TransformMessages.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -85,6 +85,7 @@
 		857EDF55AC4B89D61E1C71B2 /* SettingsStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsStorage.swift; sourceTree = "<group>"; };
 		939E2932B661D1CAFEDC6DBB /* LiDARManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiDARManager.swift; sourceTree = "<group>"; };
 		998CF88C47937956BF73EA86 /* Logger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Logger.swift; sourceTree = "<group>"; };
+		9E46DA7B034187A775276DD0 /* TransformMessages.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransformMessages.swift; sourceTree = "<group>"; };
 		9F0940103540482F7189960F /* ImageMessages.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageMessages.swift; sourceTree = "<group>"; };
 		A268FA045A642D71D2E12288 /* EnvironmentMessages.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnvironmentMessages.swift; sourceTree = "<group>"; };
 		A39CFD6B3D75415C7BAA65AF /* CDREncoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CDREncoder.swift; sourceTree = "<group>"; };
@@ -98,10 +99,9 @@
 		D5A53DA3BC86A332490E945C /* CouchVisionWidgetsBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CouchVisionWidgetsBundle.swift; sourceTree = "<group>"; };
 		DD62316B6FA5C260A95BFA22 /* StreamingLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamingLiveActivity.swift; sourceTree = "<group>"; };
 		E0CA31563A14598E4A94E2D1 /* CameraManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraManager.swift; sourceTree = "<group>"; };
-		EA740775476126173BEFC495 /* CouchVisionWidgets.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = CouchVisionWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
-		F473F8EDD6090021ADE3863B /* CouchVision.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = CouchVision.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		EA740775476126173BEFC495 /* CouchVisionWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = CouchVisionWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		F473F8EDD6090021ADE3863B /* CouchVision.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CouchVision.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		F488B6359ACB354B1152659A /* DeviceStatusManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceStatusManager.swift; sourceTree = "<group>"; };
-		F2E8B9C0D3E45F7012345678 /* TransformMessages.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransformMessages.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -201,7 +201,7 @@
 				54AAFAF2FFE3A36D1FEF4EE8 /* ImuMessages.swift */,
 				B37ECA2A6C266645FCF45BBD /* LocationMessages.swift */,
 				13E2AEC76841DD49A288CA42 /* PointCloudMessages.swift */,
-				F2E8B9C0D3E45F7012345678 /* TransformMessages.swift */,
+				9E46DA7B034187A775276DD0 /* TransformMessages.swift */,
 			);
 			path = Messages;
 			sourceTree = "<group>";
@@ -301,7 +301,6 @@
 			);
 			mainGroup = EFFB4406F86754E2031F6B97;
 			minimizedProjectReferenceProxies = 1;
-			preferredProjectObjectVersion = 77;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
@@ -353,7 +352,7 @@
 				BBA333CDB11194E69C70DFDB /* SettingsView.swift in Sources */,
 				9310B11F72A2D82A768509ED /* StreamingActivityAttributes.swift in Sources */,
 				6B39CB97419F810D955EBE84 /* TimeUtils.swift in Sources */,
-				E1F7A8B9C2D34E6F01234567 /* TransformMessages.swift in Sources */,
+				735B063347C021FB49A8DAAF /* TransformMessages.swift in Sources */,
 				7395924D19CD22E6B210A5A5 /* ZenohPublisher.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -384,6 +383,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
+				DEVELOPMENT_TEAM = 9778KTLRXB;
 				ENABLE_PREVIEWS = YES;
 				INFOPLIST_FILE = CouchVision/Resources/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -400,7 +400,9 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 9778KTLRXB;
 				ENABLE_PREVIEWS = YES;
 				INFOPLIST_FILE = CouchVision/Resources/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -408,7 +410,7 @@
 					"@executable_path/Frameworks",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.couchvision.CouchVision;
-				PROVISIONING_PROFILE_SPECIFIER = "CouchVision GitHub Action Distribution";
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
@@ -449,6 +451,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGN_STYLE = Manual;
 				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = 9778KTLRXB;
 				ENABLE_NS_ASSERTIONS = NO;
@@ -463,6 +466,7 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				INFOPLIST_FILE = CouchVision/Resources/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.2;
+				MARKETING_VERSION = 1.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -509,6 +513,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = "";
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -529,6 +534,7 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				INFOPLIST_FILE = CouchVision/Resources/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.2;
+				MARKETING_VERSION = 1.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -544,6 +550,7 @@
 		B2BE82D0EE63AE9C193D3C3B /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				DEVELOPMENT_TEAM = 9778KTLRXB;
 				INFOPLIST_FILE = CouchVisionWidgets/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -560,6 +567,9 @@
 		DEE32949D650AC7C588D45EC /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 9778KTLRXB;
 				INFOPLIST_FILE = CouchVisionWidgets/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -567,7 +577,7 @@
 					"@executable_path/../../Frameworks",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.couchvision.CouchVision.Widgets;
-				PROVISIONING_PROFILE_SPECIFIER = "CouchVision Widgets GitHub Action Distribution";
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
 				TARGETED_DEVICE_FAMILY = "1,2";

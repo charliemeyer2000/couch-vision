@@ -1,5 +1,11 @@
 # iOS Sensor Streamer for ROS2 - Technical Specification
 
+## Human Todo
+
+- how does this work over a wired connection (e.g. to a mac and/or jetson nano?) test this.
+- can we dockerize the bridge please + ci for that etc etc
+- 
+
 ## Overview
 
 Build a native Swift iOS application that streams all available iPhone sensor data to a ROS2 system running on a Jetson Orin Nano via a **wired USB-C connection**. The app must support background execution and publish data using the Zenoh protocol (ROS2 RMW).

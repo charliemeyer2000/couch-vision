@@ -53,6 +53,7 @@ public struct TopicStats {
 @MainActor
 public final class SensorCoordinator: ObservableObject {
     @Published public private(set) var isConnected: Bool = false
+    @Published public private(set) var isConnecting: Bool = false
     @Published public private(set) var connectionError: String?
     @Published public private(set) var stats: [String: TopicStats] = [:]
     @Published public private(set) var isInBackground: Bool = false
@@ -185,19 +186,25 @@ public final class SensorCoordinator: ObservableObject {
             return
         }
 
+        isConnecting = true
+        connectionError = nil
+
         do {
-            connectionError = nil
             try await publisher.connect(to: config.endpoint)
             isConnected = true
         } catch {
             connectionError = error.localizedDescription
             isConnected = false
         }
+
+        isConnecting = false
     }
 
     public func disconnect() async {
+        stopAllSensors()
         await publisher?.disconnect()
         isConnected = false
+        connectionError = nil
     }
 
     public func reconnect() async {

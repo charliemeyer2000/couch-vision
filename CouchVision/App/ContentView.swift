@@ -59,17 +59,18 @@ struct ContentView: View {
         VStack(spacing: 12) {
             HStack {
                 Circle()
-                    .fill(coordinator.isConnected ? Color.green : Color.red)
+                    .fill(connectionStatusColor)
                     .frame(width: 12, height: 12)
-                Text(coordinator.isConnected ? "Connected" : "Disconnected")
+                Text(connectionStatusText)
                     .font(.headline)
                 Spacer()
             }
 
             if let error = coordinator.connectionError {
-                Text(error)
+                Label(error, systemImage: "exclamationmark.triangle.fill")
                     .font(.caption)
                     .foregroundColor(.red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
 
             HStack {
@@ -79,15 +80,44 @@ struct ContentView: View {
                     .autocorrectionDisabled()
                     .textInputAutocapitalization(.never)
                     .onSubmit { connectToEndpoint() }
+                    .disabled(coordinator.isConnecting)
 
-                Button("Connect") { connectToEndpoint() }
+                if coordinator.isConnected {
+                    Button("Disconnect") {
+                        Task { await coordinator.disconnect() }
+                    }
                     .buttonStyle(.bordered)
-                    .disabled(coordinator.isConnected)
+                    .tint(.red)
+                } else {
+                    Button {
+                        connectToEndpoint()
+                    } label: {
+                        if coordinator.isConnecting {
+                            ProgressView()
+                        } else {
+                            Text("Connect")
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(coordinator.isConnecting)
+                }
             }
         }
         .padding()
         .background(Color(.systemGray6))
         .cornerRadius(12)
+    }
+
+    private var connectionStatusText: String {
+        if coordinator.isConnecting { return "Connecting..." }
+        if coordinator.isConnected { return "Connected" }
+        return "Disconnected"
+    }
+
+    private var connectionStatusColor: Color {
+        if coordinator.isConnecting { return .orange }
+        if coordinator.isConnected { return .green }
+        return .red
     }
 
     private var sensorControlsView: some View {

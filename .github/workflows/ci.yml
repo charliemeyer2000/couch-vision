@@ -26,6 +26,7 @@ jobs:
     name: Build iOS
     runs-on: macos-26
     needs: lint
+    if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@v4
 
@@ -48,7 +49,7 @@ jobs:
   deploy:
     name: Deploy to TestFlight
     runs-on: macos-26
-    needs: build
+    needs: lint
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v4
