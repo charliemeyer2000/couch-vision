@@ -170,12 +170,27 @@ public final class LiDARManager: NSObject, ObservableObject {
         )
         dataSubject.send(TimestampedData(data: data, timestamp: timestamp, frameId: frameId))
 
+        let baseLink = "\(framePrefix)_base_link"
         let transformStamped = TransformStamped(
             header: ROSHeader(timeInterval: timestamp, frameId: "world"),
-            childFrameId: "\(framePrefix)_base_link",
+            childFrameId: baseLink,
             transform: simdToROSTransform(frame.camera.transform)
         )
         transformSubject.send(TimestampedData(data: transformStamped, timestamp: timestamp, frameId: "world"))
+
+        // Static identity transforms so rviz2 can resolve sensor frame_ids
+        let lidarTf = TransformStamped(
+            header: ROSHeader(timeInterval: timestamp, frameId: baseLink),
+            childFrameId: frameId,
+            transform: .identity
+        )
+        let cameraTf = TransformStamped(
+            header: ROSHeader(timeInterval: timestamp, frameId: baseLink),
+            childFrameId: "\(framePrefix)_camera_arkit",
+            transform: .identity
+        )
+        transformSubject.send(TimestampedData(data: lidarTf, timestamp: timestamp, frameId: baseLink))
+        transformSubject.send(TimestampedData(data: cameraTf, timestamp: timestamp, frameId: baseLink))
 
         publishCameraFrame(from: frame, timestamp: timestamp)
     }
