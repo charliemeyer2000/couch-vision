@@ -40,6 +40,7 @@ targets:
           - UIInterfaceOrientationPortrait
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
+        UIRequiresFullScreen: true
         UIRequiredDeviceCapabilities:
           - armv7
         # Permissions
