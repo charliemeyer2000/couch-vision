@@ -98,6 +98,7 @@ jobs:
             DEVELOPMENT_TEAM=9778KTLRXB \
             CODE_SIGN_STYLE=Manual \
             CODE_SIGN_IDENTITY="Apple Distribution" \
+            CURRENT_PROJECT_VERSION=${{ github.run_number }} \
             archive
 
       - name: Export IPA
