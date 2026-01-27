@@ -5,6 +5,15 @@ struct ContentView: View {
     @State private var showSettings = false
     @State private var endpointText: String = ""
 
+    private var isStreaming: Bool {
+        coordinator.cameraManager.state == .running ||
+            coordinator.lidarManager.state == .running ||
+            coordinator.motionManager.state == .running ||
+            coordinator.locationManager.state == .running ||
+            coordinator.environmentManager.state == .running ||
+            coordinator.deviceStatusManager.state == .running
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -17,6 +26,7 @@ struct ContentView: View {
                 }
                 .padding()
             }
+            .scrollDismissesKeyboard(.interactively)
             .safeAreaInset(edge: .bottom) {
                 actionButtonsView
                     .padding()
@@ -68,21 +78,11 @@ struct ContentView: View {
                     .font(.system(.body, design: .monospaced))
                     .autocorrectionDisabled()
                     .textInputAutocapitalization(.never)
+                    .onSubmit { connectToEndpoint() }
 
-                Button {
-                    Task {
-                        SettingsStorage.endpoint = endpointText
-                        coordinator.config = CoordinatorConfig(
-                            topicPrefix: coordinator.config.topicPrefix,
-                            endpoint: endpointText
-                        )
-                        await coordinator.connect()
-                    }
-                } label: {
-                    Text("Connect")
-                }
-                .buttonStyle(.bordered)
-                .disabled(coordinator.isConnected)
+                Button("Connect") { connectToEndpoint() }
+                    .buttonStyle(.bordered)
+                    .disabled(coordinator.isConnected)
             }
         }
         .padding()
@@ -192,11 +192,19 @@ struct ContentView: View {
             Button {
                 coordinator.startAllSensors()
             } label: {
-                Label("Start All", systemImage: "play.fill")
-                    .frame(maxWidth: .infinity)
+                HStack {
+                    if isStreaming {
+                        Circle()
+                            .fill(.green)
+                            .frame(width: 8, height: 8)
+                    }
+                    Label("Start All", systemImage: "play.fill")
+                }
+                .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
-            .disabled(!coordinator.isConnected)
+            .tint(isStreaming ? .gray : .green)
+            .disabled(!coordinator.isConnected || isStreaming)
 
             Button {
                 coordinator.stopAllSensors()
@@ -204,7 +212,20 @@ struct ContentView: View {
                 Label("Stop All", systemImage: "stop.fill")
                     .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(.borderedProminent)
+            .tint(isStreaming ? .red : .gray)
+            .disabled(!coordinator.isConnected || !isStreaming)
+        }
+    }
+
+    private func connectToEndpoint() {
+        Task {
+            SettingsStorage.endpoint = endpointText
+            coordinator.config = CoordinatorConfig(
+                topicPrefix: coordinator.config.topicPrefix,
+                endpoint: endpointText
+            )
+            await coordinator.connect()
         }
     }
 

@@ -82,6 +82,8 @@ public final class SensorCoordinator: ObservableObject {
     public let deviceStatusManager: DeviceStatusManager
 
     private var backgroundAudioPlayer: AVAudioPlayer?
+    private var consecutivePublishFailures = 0
+    private let maxConsecutiveFailures = 5
 
     public init(config: CoordinatorConfig? = nil) {
         self.config = config ?? CoordinatorConfig(
@@ -163,9 +165,15 @@ public final class SensorCoordinator: ObservableObject {
         self.publisher = publisher
         publisher.onConnectionStateChanged = { [weak self] connected in
             Task { @MainActor in
-                self?.isConnected = connected
+                guard let self else { return }
+                let wasConnected = self.isConnected
+                self.isConnected = connected
                 if !connected {
-                    self?.connectionError = "Disconnected"
+                    self.connectionError = "Connection lost"
+                    if wasConnected {
+                        Log.app.warning("Connection lost, stopping all sensors")
+                        self.stopAllSensors()
+                    }
                 }
             }
         }
@@ -387,6 +395,7 @@ public final class SensorCoordinator: ObservableObject {
             updateStats(topic: topic, bytes: encoded.count)
         } catch {
             Log.ros.error("Failed to publish camera frame: \(error.localizedDescription)")
+            handlePublishError(error)
         }
     }
 
@@ -401,6 +410,7 @@ public final class SensorCoordinator: ObservableObject {
             updateStats(topic: topic, bytes: encoded.count)
         } catch {
             Log.ros.error("Failed to publish camera info: \(error.localizedDescription)")
+            handlePublishError(error)
         }
     }
 
@@ -415,6 +425,7 @@ public final class SensorCoordinator: ObservableObject {
                 updateStats(topic: depthTopic, bytes: encoded.count)
             } catch {
                 Log.ros.error("Failed to publish depth image: \(error.localizedDescription)")
+                handlePublishError(error)
             }
         }
 
@@ -426,6 +437,7 @@ public final class SensorCoordinator: ObservableObject {
                 updateStats(topic: cloudTopic, bytes: encoded.count)
             } catch {
                 Log.ros.error("Failed to publish point cloud: \(error.localizedDescription)")
+                handlePublishError(error)
             }
         }
     }
@@ -433,7 +445,7 @@ public final class SensorCoordinator: ObservableObject {
     private func publishTransform(_ data: TimestampedData<TransformStamped>) async {
         guard isConnected, let publisher else { return }
 
-        let topic = "/tf" // Standard ROS TF topic (no prefix)
+        let topic = "/tf"
         let tfMsg = TFMessage(transforms: [data.data])
         let encoded = CDREncoder.encode(tfMsg)
 
@@ -442,6 +454,7 @@ public final class SensorCoordinator: ObservableObject {
             updateStats(topic: topic, bytes: encoded.count)
         } catch {
             Log.ros.error("Failed to publish TF: \(error.localizedDescription)")
+            handlePublishError(error)
         }
     }
 
@@ -456,6 +469,7 @@ public final class SensorCoordinator: ObservableObject {
             updateStats(topic: topic, bytes: encoded.count)
         } catch {
             Log.ros.error("Failed to publish IMU: \(error.localizedDescription)")
+            handlePublishError(error)
         }
     }
 
@@ -470,6 +484,7 @@ public final class SensorCoordinator: ObservableObject {
             updateStats(topic: topic, bytes: encoded.count)
         } catch {
             Log.ros.error("Failed to publish accelerometer: \(error.localizedDescription)")
+            handlePublishError(error)
         }
     }
 
@@ -484,6 +499,7 @@ public final class SensorCoordinator: ObservableObject {
             updateStats(topic: topic, bytes: encoded.count)
         } catch {
             Log.ros.error("Failed to publish gyroscope: \(error.localizedDescription)")
+            handlePublishError(error)
         }
     }
 
@@ -498,6 +514,7 @@ public final class SensorCoordinator: ObservableObject {
             updateStats(topic: topic, bytes: encoded.count)
         } catch {
             Log.ros.error("Failed to publish GPS: \(error.localizedDescription)")
+            handlePublishError(error)
         }
     }
 
@@ -512,6 +529,7 @@ public final class SensorCoordinator: ObservableObject {
             updateStats(topic: topic, bytes: encoded.count)
         } catch {
             Log.ros.error("Failed to publish velocity: \(error.localizedDescription)")
+            handlePublishError(error)
         }
     }
 
@@ -526,6 +544,7 @@ public final class SensorCoordinator: ObservableObject {
             updateStats(topic: topic, bytes: encoded.count)
         } catch {
             Log.ros.error("Failed to publish heading: \(error.localizedDescription)")
+            handlePublishError(error)
         }
     }
 
@@ -540,6 +559,7 @@ public final class SensorCoordinator: ObservableObject {
             updateStats(topic: topic, bytes: encoded.count)
         } catch {
             Log.ros.error("Failed to publish magnetic field: \(error.localizedDescription)")
+            handlePublishError(error)
         }
     }
 
@@ -554,6 +574,7 @@ public final class SensorCoordinator: ObservableObject {
             updateStats(topic: topic, bytes: encoded.count)
         } catch {
             Log.ros.error("Failed to publish pressure: \(error.localizedDescription)")
+            handlePublishError(error)
         }
     }
 
@@ -568,6 +589,7 @@ public final class SensorCoordinator: ObservableObject {
             updateStats(topic: topic, bytes: encoded.count)
         } catch {
             Log.ros.error("Failed to publish altitude: \(error.localizedDescription)")
+            handlePublishError(error)
         }
     }
 
@@ -582,6 +604,7 @@ public final class SensorCoordinator: ObservableObject {
             updateStats(topic: topic, bytes: encoded.count)
         } catch {
             Log.ros.error("Failed to publish battery: \(error.localizedDescription)")
+            handlePublishError(error)
         }
     }
 
@@ -596,6 +619,7 @@ public final class SensorCoordinator: ObservableObject {
             updateStats(topic: topic, bytes: encoded.count)
         } catch {
             Log.ros.error("Failed to publish thermal: \(error.localizedDescription)")
+            handlePublishError(error)
         }
     }
 
@@ -610,6 +634,7 @@ public final class SensorCoordinator: ObservableObject {
             updateStats(topic: topic, bytes: encoded.count)
         } catch {
             Log.ros.error("Failed to publish proximity: \(error.localizedDescription)")
+            handlePublishError(error)
         }
     }
 
@@ -618,5 +643,17 @@ public final class SensorCoordinator: ObservableObject {
             stats[topic] = TopicStats(topic: topic)
         }
         stats[topic]?.recordPublish(bytes: bytes)
+        consecutivePublishFailures = 0
+    }
+
+    private func handlePublishError(_ error: Error) {
+        consecutivePublishFailures += 1
+        if consecutivePublishFailures >= maxConsecutiveFailures {
+            Log.ros.error("Too many consecutive publish failures, connection may be lost")
+            isConnected = false
+            connectionError = "Connection lost (publish failures)"
+            stopAllSensors()
+            consecutivePublishFailures = 0
+        }
     }
 }

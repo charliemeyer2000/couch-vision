@@ -69,6 +69,7 @@ public final class LiDARManager: NSObject, ObservableObject {
     }
 
     deinit {
+        arSession?.delegate = nil
         arSession?.pause()
     }
 
@@ -85,7 +86,14 @@ public final class LiDARManager: NSObject, ObservableObject {
     }
 
     public func start() throws {
-        guard state == .ready else { throw LiDARError.notAvailable }
+        switch state {
+        case .ready:
+            break
+        case .error:
+            stop()
+        default:
+            throw LiDARError.notAvailable
+        }
 
         let session = ARSession()
         session.delegate = self
@@ -104,6 +112,7 @@ public final class LiDARManager: NSObject, ObservableObject {
     }
 
     public func stop() {
+        arSession?.delegate = nil // Prevent stale callbacks
         arSession?.pause()
         arSession = nil
         DispatchQueue.main.async { [weak self] in self?.state = .ready }
@@ -262,15 +271,16 @@ extension LiDARManager: ARSessionDelegate {
     }
 
     public func session(_ session: ARSession, didFailWithError error: Error) {
-        DispatchQueue.main.async { [weak self] in self?.state = .error(error.localizedDescription) }
+        Log.sensor.error("ARSession error: \(error.localizedDescription)")
+        stop()
     }
 
     public func sessionWasInterrupted(_ session: ARSession) {
-        DispatchQueue.main.async { [weak self] in self?.state = .error("Session interrupted") }
+        Log.sensor.info("ARSession interrupted")
     }
 
     public func sessionInterruptionEnded(_ session: ARSession) {
-        if case .error("Session interrupted") = state { try? start() }
+        Log.sensor.info("ARSession interruption ended")
     }
 }
 

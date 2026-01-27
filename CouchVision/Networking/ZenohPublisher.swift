@@ -52,24 +52,33 @@ public final class ZenohPublisher: Publisher {
 
             let connection = NWConnection(to: nwEndpoint, using: parameters)
 
+            var didResume = false
+
             connection.stateUpdateHandler = { [weak self] state in
                 switch state {
                 case .ready:
                     self?.isConnected = true
                     self?.onConnectionStateChanged?(true)
-                    continuation.resume()
+                    if !didResume {
+                        didResume = true
+                        continuation.resume()
+                        if let self { monitorConnection(connection) }
+                    }
 
                 case .failed(let error):
                     self?.isConnected = false
                     self?.onConnectionStateChanged?(false)
-                    continuation.resume(throwing: PublisherError.connectionFailed(error.localizedDescription))
+                    if !didResume {
+                        didResume = true
+                        continuation.resume(throwing: PublisherError.connectionFailed(error.localizedDescription))
+                    }
 
                 case .cancelled:
                     self?.isConnected = false
                     self?.onConnectionStateChanged?(false)
 
                 case .waiting(let error):
-                    print("[ZenohPublisher] Waiting: \(error)")
+                    Log.ros.warning("Connection waiting: \(error.localizedDescription)")
 
                 default:
                     break
@@ -130,6 +139,22 @@ public final class ZenohPublisher: Publisher {
     public func declarePublisher(config: PublisherConfig) async throws {
         declaredTopics.insert(config.topic)
         // In actual Zenoh, we'd send a publisher declaration here
+    }
+
+    // MARK: - Connection Monitoring
+
+    private func monitorConnection(_ connection: NWConnection) {
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 1) { [weak self] _, _, isComplete, error in
+            guard let self else { return }
+
+            if isComplete || error != nil {
+                Log.ros.warning("Connection closed by remote")
+                isConnected = false
+                onConnectionStateChanged?(false)
+            } else if isConnected {
+                monitorConnection(connection)
+            }
+        }
     }
 
     // MARK: - Helpers
