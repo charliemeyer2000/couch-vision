@@ -29,9 +29,9 @@ public final class CDREncoder {
     // MARK: - Alignment
 
     private func align(to boundary: Int) {
-        let offset = (position + 4) % boundary
-        if offset != 0 {
-            let padding = boundary - offset
+        let remainder = position % boundary
+        if remainder != 0 {
+            let padding = boundary - remainder
             buffer.append(contentsOf: [UInt8](repeating: 0, count: padding))
             position += padding
         }

@@ -38,6 +38,80 @@ if TYPE_CHECKING:
     from rclpy.publisher import Publisher
 
 
+class CdrReader:
+    """XCDR1 CDR reader."""
+
+    def __init__(self, cdr_data: bytes) -> None:
+        self.data = cdr_data[4:]  # Skip 4-byte encapsulation header
+        self.offset = 0
+
+    def _align(self, boundary: int) -> None:
+        remainder = self.offset % boundary
+        if remainder != 0:
+            self.offset += boundary - remainder
+
+    def uint8(self) -> int:
+        val = self.data[self.offset]
+        self.offset += 1
+        return val
+
+    def int8(self) -> int:
+        val = struct.unpack("<b", self.data[self.offset : self.offset + 1])[0]
+        self.offset += 1
+        return val
+
+    def bool(self) -> bool:
+        return bool(self.uint8())
+
+    def uint16(self) -> int:
+        self._align(2)
+        val = struct.unpack("<H", self.data[self.offset : self.offset + 2])[0]
+        self.offset += 2
+        return val
+
+    def int32(self) -> int:
+        self._align(4)
+        val = struct.unpack("<i", self.data[self.offset : self.offset + 4])[0]
+        self.offset += 4
+        return val
+
+    def uint32(self) -> int:
+        self._align(4)
+        val = struct.unpack("<I", self.data[self.offset : self.offset + 4])[0]
+        self.offset += 4
+        return val
+
+    def float32(self) -> float:
+        self._align(4)
+        val = struct.unpack("<f", self.data[self.offset : self.offset + 4])[0]
+        self.offset += 4
+        return val
+
+    def float64(self) -> float:
+        self._align(8)
+        val = struct.unpack("<d", self.data[self.offset : self.offset + 8])[0]
+        self.offset += 8
+        return val
+
+    def string(self) -> str:
+        length = self.uint32()
+        val = self.data[self.offset : self.offset + length - 1].decode("utf-8")
+        self.offset += length
+        return val
+
+    def bytes_seq(self) -> bytes:
+        length = self.uint32()
+        val = self.data[self.offset : self.offset + length]
+        self.offset += length
+        return val
+
+    def float64_array(self, count: int) -> list[float]:
+        return [self.float64() for _ in range(count)]
+
+    def float32_array(self, count: int) -> list[float]:
+        return [self.float32() for _ in range(count)]
+
+
 class IOSBridge(Node):  # type: ignore[misc]
     """ROS2 node that bridges iOS sensor data to ROS2 topics."""
 
@@ -237,572 +311,218 @@ class IOSBridge(Node):  # type: ignore[misc]
         except Exception as e:
             self.get_logger().error(f"Failed to publish {topic}: {e}")
 
+    def _read_header(self, r: CdrReader, msg: Any) -> None:
+        msg.header.stamp.sec = r.int32()
+        msg.header.stamp.nanosec = r.uint32()
+        msg.header.frame_id = r.string()
+
+    def _read_vector3(self, r: CdrReader, v: Any) -> None:
+        v.x = r.float64()
+        v.y = r.float64()
+        v.z = r.float64()
+
+    def _read_quaternion(self, r: CdrReader, q: Any) -> None:
+        q.x = r.float64()
+        q.y = r.float64()
+        q.z = r.float64()
+        q.w = r.float64()
+
     def _parse_compressed_image(self, cdr_data: bytes) -> CompressedImage | None:
-        """Parse CDR-encoded CompressedImage."""
         try:
-            # Skip 4-byte CDR header
-            data = cdr_data[4:]
-            offset = 0
-
+            r = CdrReader(cdr_data)
             msg = CompressedImage()
-
-            # Header.stamp.sec (int32, aligned to 4)
-            msg.header.stamp.sec = struct.unpack("<i", data[offset : offset + 4])[0]
-            offset += 4
-
-            # Header.stamp.nanosec (uint32)
-            msg.header.stamp.nanosec = struct.unpack("<I", data[offset : offset + 4])[0]
-            offset += 4
-
-            # Header.frame_id (string: uint32 length + chars + null)
-            str_len = struct.unpack("<I", data[offset : offset + 4])[0]
-            offset += 4
-            msg.header.frame_id = data[offset : offset + str_len - 1].decode("utf-8")
-            offset += str_len
-
-            # Align to 4 bytes
-            offset = (offset + 3) & ~3
-
-            # format (string)
-            str_len = struct.unpack("<I", data[offset : offset + 4])[0]
-            offset += 4
-            msg.format = data[offset : offset + str_len - 1].decode("utf-8")
-            offset += str_len
-
-            # Align to 4 bytes
-            offset = (offset + 3) & ~3
-
-            # data (sequence<uint8>: uint32 length + bytes)
-            data_len = struct.unpack("<I", data[offset : offset + 4])[0]
-            offset += 4
-            msg.data = list(data[offset : offset + data_len])
-
+            self._read_header(r, msg)
+            msg.format = r.string()
+            msg.data = list(r.bytes_seq())
             return msg
         except Exception as e:
             self.get_logger().error(f"Failed to parse CompressedImage: {e}")
             return None
 
     def _parse_image(self, cdr_data: bytes) -> Image | None:
-        """Parse CDR-encoded Image."""
         try:
-            data = cdr_data[4:]  # Skip CDR header
-            offset = 0
-
+            r = CdrReader(cdr_data)
             msg = Image()
-
-            # Header
-            msg.header.stamp.sec = struct.unpack("<i", data[offset : offset + 4])[0]
-            offset += 4
-            msg.header.stamp.nanosec = struct.unpack("<I", data[offset : offset + 4])[0]
-            offset += 4
-            str_len = struct.unpack("<I", data[offset : offset + 4])[0]
-            offset += 4
-            msg.header.frame_id = data[offset : offset + str_len - 1].decode("utf-8")
-            offset += str_len
-            offset = (offset + 3) & ~3
-
-            # height, width
-            msg.height = struct.unpack("<I", data[offset : offset + 4])[0]
-            offset += 4
-            msg.width = struct.unpack("<I", data[offset : offset + 4])[0]
-            offset += 4
-
-            # encoding
-            str_len = struct.unpack("<I", data[offset : offset + 4])[0]
-            offset += 4
-            msg.encoding = data[offset : offset + str_len - 1].decode("utf-8")
-            offset += str_len
-            offset = (offset + 3) & ~3
-
-            # is_bigendian, step
-            msg.is_bigendian = data[offset]
-            offset += 1
-            offset = (offset + 3) & ~3
-            msg.step = struct.unpack("<I", data[offset : offset + 4])[0]
-            offset += 4
-
-            # data
-            data_len = struct.unpack("<I", data[offset : offset + 4])[0]
-            offset += 4
-            msg.data = list(data[offset : offset + data_len])
-
+            self._read_header(r, msg)
+            msg.height = r.uint32()
+            msg.width = r.uint32()
+            msg.encoding = r.string()
+            msg.is_bigendian = r.uint8()
+            msg.step = r.uint32()
+            msg.data = list(r.bytes_seq())
             return msg
         except Exception as e:
             self.get_logger().error(f"Failed to parse Image: {e}")
             return None
 
     def _parse_imu(self, cdr_data: bytes) -> Imu | None:
-        """Parse CDR-encoded Imu message."""
         try:
-            data = cdr_data[4:]  # Skip CDR header
-            offset = 0
-
+            r = CdrReader(cdr_data)
             msg = Imu()
-
-            # Header
-            msg.header.stamp.sec = struct.unpack("<i", data[offset : offset + 4])[0]
-            offset += 4
-            msg.header.stamp.nanosec = struct.unpack("<I", data[offset : offset + 4])[0]
-            offset += 4
-            str_len = struct.unpack("<I", data[offset : offset + 4])[0]
-            offset += 4
-            msg.header.frame_id = data[offset : offset + str_len - 1].decode("utf-8")
-            offset += str_len
-            offset = (offset + 7) & ~7  # Align to 8 for doubles
-
-            # Orientation quaternion (x, y, z, w)
-            msg.orientation.x = struct.unpack("<d", data[offset : offset + 8])[0]
-            offset += 8
-            msg.orientation.y = struct.unpack("<d", data[offset : offset + 8])[0]
-            offset += 8
-            msg.orientation.z = struct.unpack("<d", data[offset : offset + 8])[0]
-            offset += 8
-            msg.orientation.w = struct.unpack("<d", data[offset : offset + 8])[0]
-            offset += 8
-
-            # Orientation covariance (9 doubles)
-            for i in range(9):
-                msg.orientation_covariance[i] = struct.unpack("<d", data[offset : offset + 8])[0]
-                offset += 8
-
-            # Angular velocity
-            msg.angular_velocity.x = struct.unpack("<d", data[offset : offset + 8])[0]
-            offset += 8
-            msg.angular_velocity.y = struct.unpack("<d", data[offset : offset + 8])[0]
-            offset += 8
-            msg.angular_velocity.z = struct.unpack("<d", data[offset : offset + 8])[0]
-            offset += 8
-
-            # Angular velocity covariance
-            for i in range(9):
-                msg.angular_velocity_covariance[i] = struct.unpack("<d", data[offset : offset + 8])[
-                    0
-                ]
-                offset += 8
-
-            # Linear acceleration
-            msg.linear_acceleration.x = struct.unpack("<d", data[offset : offset + 8])[0]
-            offset += 8
-            msg.linear_acceleration.y = struct.unpack("<d", data[offset : offset + 8])[0]
-            offset += 8
-            msg.linear_acceleration.z = struct.unpack("<d", data[offset : offset + 8])[0]
-            offset += 8
-
-            # Linear acceleration covariance
-            for i in range(9):
-                msg.linear_acceleration_covariance[i] = struct.unpack(
-                    "<d", data[offset : offset + 8]
-                )[0]
-                offset += 8
-
+            self._read_header(r, msg)
+            self._read_quaternion(r, msg.orientation)
+            msg.orientation_covariance = r.float64_array(9)
+            self._read_vector3(r, msg.angular_velocity)
+            msg.angular_velocity_covariance = r.float64_array(9)
+            self._read_vector3(r, msg.linear_acceleration)
+            msg.linear_acceleration_covariance = r.float64_array(9)
             return msg
         except Exception as e:
             self.get_logger().error(f"Failed to parse Imu: {e}")
             return None
 
     def _parse_pointcloud2(self, cdr_data: bytes) -> PointCloud2 | None:
-        """Parse CDR-encoded PointCloud2."""
-        # PointCloud2 is complex - for now just log that we received it
-        _ = cdr_data  # unused for now
+        _ = cdr_data
         self.get_logger().info("Received PointCloud2 (parsing not yet implemented)")
         return None
 
     def _parse_vector3_stamped(self, cdr_data: bytes) -> Vector3Stamped | None:
-        """Parse CDR-encoded Vector3Stamped."""
         try:
-            data = cdr_data[4:]  # Skip CDR header
-            offset = 0
-
+            r = CdrReader(cdr_data)
             msg = Vector3Stamped()
-
-            # Header
-            msg.header.stamp.sec = struct.unpack("<i", data[offset : offset + 4])[0]
-            offset += 4
-            msg.header.stamp.nanosec = struct.unpack("<I", data[offset : offset + 4])[0]
-            offset += 4
-            str_len = struct.unpack("<I", data[offset : offset + 4])[0]
-            offset += 4
-            msg.header.frame_id = data[offset : offset + str_len - 1].decode("utf-8")
-            offset += str_len
-            offset = (offset + 7) & ~7  # Align to 8 for doubles
-
-            # Vector3
-            msg.vector.x = struct.unpack("<d", data[offset : offset + 8])[0]
-            offset += 8
-            msg.vector.y = struct.unpack("<d", data[offset : offset + 8])[0]
-            offset += 8
-            msg.vector.z = struct.unpack("<d", data[offset : offset + 8])[0]
-
+            self._read_header(r, msg)
+            self._read_vector3(r, msg.vector)
             return msg
         except Exception as e:
             self.get_logger().error(f"Failed to parse Vector3Stamped: {e}")
             return None
 
     def _parse_camera_info(self, cdr_data: bytes) -> CameraInfo | None:
-        """Parse CDR-encoded CameraInfo."""
         try:
-            data = cdr_data[4:]  # Skip CDR header
-            offset = 0
-
+            r = CdrReader(cdr_data)
             msg = CameraInfo()
-
-            # Header
-            msg.header.stamp.sec = struct.unpack("<i", data[offset : offset + 4])[0]
-            offset += 4
-            msg.header.stamp.nanosec = struct.unpack("<I", data[offset : offset + 4])[0]
-            offset += 4
-            str_len = struct.unpack("<I", data[offset : offset + 4])[0]
-            offset += 4
-            msg.header.frame_id = data[offset : offset + str_len - 1].decode("utf-8")
-            offset += str_len
-            offset = (offset + 3) & ~3  # Align to 4
-
-            # height, width
-            msg.height = struct.unpack("<I", data[offset : offset + 4])[0]
-            offset += 4
-            msg.width = struct.unpack("<I", data[offset : offset + 4])[0]
-            offset += 4
-
-            # distortion_model (string)
-            str_len = struct.unpack("<I", data[offset : offset + 4])[0]
-            offset += 4
-            msg.distortion_model = data[offset : offset + str_len - 1].decode("utf-8")
-            offset += str_len
-            offset = (offset + 7) & ~7  # Align to 8 for doubles
-
-            # D (sequence of doubles)
-            d_len = struct.unpack("<I", data[offset : offset + 4])[0]
-            offset += 4
-            offset = (offset + 7) & ~7  # Align to 8
-            msg.d = [
-                struct.unpack("<d", data[offset + i * 8 : offset + (i + 1) * 8])[0]
-                for i in range(d_len)
-            ]
-            offset += d_len * 8
-
-            # K (9 doubles)
-            msg.k = [
-                struct.unpack("<d", data[offset + i * 8 : offset + (i + 1) * 8])[0]
-                for i in range(9)
-            ]
-            offset += 72
-
-            # R (9 doubles)
-            msg.r = [
-                struct.unpack("<d", data[offset + i * 8 : offset + (i + 1) * 8])[0]
-                for i in range(9)
-            ]
-            offset += 72
-
-            # P (12 doubles)
-            msg.p = [
-                struct.unpack("<d", data[offset + i * 8 : offset + (i + 1) * 8])[0]
-                for i in range(12)
-            ]
-            offset += 96
-
-            # binning_x, binning_y
-            msg.binning_x = struct.unpack("<I", data[offset : offset + 4])[0]
-            offset += 4
-            msg.binning_y = struct.unpack("<I", data[offset : offset + 4])[0]
-
+            self._read_header(r, msg)
+            msg.height = r.uint32()
+            msg.width = r.uint32()
+            msg.distortion_model = r.string()
+            d_len = r.uint32()
+            msg.d = r.float64_array(d_len)
+            msg.k = r.float64_array(9)
+            msg.r = r.float64_array(9)
+            msg.p = r.float64_array(12)
+            msg.binning_x = r.uint32()
+            msg.binning_y = r.uint32()
             return msg
         except Exception as e:
             self.get_logger().error(f"Failed to parse CameraInfo: {e}")
             return None
 
     def _parse_tf_message(self, cdr_data: bytes) -> TFMessage | None:
-        """Parse CDR-encoded TFMessage."""
         try:
-            data = cdr_data[4:]  # Skip CDR header
-            offset = 0
-
+            r = CdrReader(cdr_data)
             msg = TFMessage()
-
-            # transforms (sequence)
-            num_transforms = struct.unpack("<I", data[offset : offset + 4])[0]
-            offset += 4
-
+            num_transforms = r.uint32()
             for _ in range(num_transforms):
                 tf = TransformStamped()
-
-                # Header
-                tf.header.stamp.sec = struct.unpack("<i", data[offset : offset + 4])[0]
-                offset += 4
-                tf.header.stamp.nanosec = struct.unpack("<I", data[offset : offset + 4])[0]
-                offset += 4
-                str_len = struct.unpack("<I", data[offset : offset + 4])[0]
-                offset += 4
-                tf.header.frame_id = data[offset : offset + str_len - 1].decode("utf-8")
-                offset += str_len
-                offset = (offset + 3) & ~3
-
-                # child_frame_id
-                str_len = struct.unpack("<I", data[offset : offset + 4])[0]
-                offset += 4
-                tf.child_frame_id = data[offset : offset + str_len - 1].decode("utf-8")
-                offset += str_len
-                offset = (offset + 7) & ~7  # Align to 8 for doubles
-
-                # Transform: translation (Vector3)
-                tf.transform.translation.x = struct.unpack("<d", data[offset : offset + 8])[0]
-                offset += 8
-                tf.transform.translation.y = struct.unpack("<d", data[offset : offset + 8])[0]
-                offset += 8
-                tf.transform.translation.z = struct.unpack("<d", data[offset : offset + 8])[0]
-                offset += 8
-
-                # Transform: rotation (Quaternion)
-                tf.transform.rotation.x = struct.unpack("<d", data[offset : offset + 8])[0]
-                offset += 8
-                tf.transform.rotation.y = struct.unpack("<d", data[offset : offset + 8])[0]
-                offset += 8
-                tf.transform.rotation.z = struct.unpack("<d", data[offset : offset + 8])[0]
-                offset += 8
-                tf.transform.rotation.w = struct.unpack("<d", data[offset : offset + 8])[0]
-                offset += 8
-
+                self._read_header(r, tf)
+                tf.child_frame_id = r.string()
+                self._read_vector3(r, tf.transform.translation)
+                self._read_quaternion(r, tf.transform.rotation)
                 msg.transforms.append(tf)
-
             return msg
         except Exception as e:
             self.get_logger().error(f"Failed to parse TFMessage: {e}")
             return None
 
     def _parse_navsatfix(self, cdr_data: bytes) -> NavSatFix | None:
-        """Parse CDR-encoded NavSatFix."""
         try:
-            data = cdr_data[4:]  # Skip CDR header
-            offset = 0
-
+            r = CdrReader(cdr_data)
             msg = NavSatFix()
-
-            # Header
-            msg.header.stamp.sec = struct.unpack("<i", data[offset : offset + 4])[0]
-            offset += 4
-            msg.header.stamp.nanosec = struct.unpack("<I", data[offset : offset + 4])[0]
-            offset += 4
-            str_len = struct.unpack("<I", data[offset : offset + 4])[0]
-            offset += 4
-            msg.header.frame_id = data[offset : offset + str_len - 1].decode("utf-8")
-            offset += str_len
-            offset = (offset + 7) & ~7  # Align to 8
-
-            # NavSatStatus
-            msg.status.status = struct.unpack("<b", data[offset : offset + 1])[0]
-            offset += 1
-            offset = (offset + 1) & ~1  # Align to 2
-            msg.status.service = struct.unpack("<H", data[offset : offset + 2])[0]
-            offset += 2
-            offset = (offset + 7) & ~7  # Align to 8
-
-            # latitude, longitude, altitude (doubles)
-            msg.latitude = struct.unpack("<d", data[offset : offset + 8])[0]
-            offset += 8
-            msg.longitude = struct.unpack("<d", data[offset : offset + 8])[0]
-            offset += 8
-            msg.altitude = struct.unpack("<d", data[offset : offset + 8])[0]
-            offset += 8
-
-            # position_covariance (9 doubles)
-            for i in range(9):
-                msg.position_covariance[i] = struct.unpack("<d", data[offset : offset + 8])[0]
-                offset += 8
-
-            # position_covariance_type
-            msg.position_covariance_type = data[offset]
-
+            self._read_header(r, msg)
+            msg.status.status = r.int8()
+            msg.status.service = r.uint16()
+            msg.latitude = r.float64()
+            msg.longitude = r.float64()
+            msg.altitude = r.float64()
+            msg.position_covariance = r.float64_array(9)
+            msg.position_covariance_type = r.uint8()
             return msg
         except Exception as e:
             self.get_logger().error(f"Failed to parse NavSatFix: {e}")
             return None
 
     def _parse_twist_stamped(self, cdr_data: bytes) -> TwistStamped | None:
-        """Parse CDR-encoded TwistStamped."""
         try:
-            data = cdr_data[4:]  # Skip CDR header
-            offset = 0
-
+            r = CdrReader(cdr_data)
             msg = TwistStamped()
-
-            # Header
-            msg.header.stamp.sec = struct.unpack("<i", data[offset : offset + 4])[0]
-            offset += 4
-            msg.header.stamp.nanosec = struct.unpack("<I", data[offset : offset + 4])[0]
-            offset += 4
-            str_len = struct.unpack("<I", data[offset : offset + 4])[0]
-            offset += 4
-            msg.header.frame_id = data[offset : offset + str_len - 1].decode("utf-8")
-            offset += str_len
-            offset = (offset + 7) & ~7  # Align to 8 for doubles
-
-            # Twist: linear (Vector3)
-            msg.twist.linear.x = struct.unpack("<d", data[offset : offset + 8])[0]
-            offset += 8
-            msg.twist.linear.y = struct.unpack("<d", data[offset : offset + 8])[0]
-            offset += 8
-            msg.twist.linear.z = struct.unpack("<d", data[offset : offset + 8])[0]
-            offset += 8
-
-            # Twist: angular (Vector3)
-            msg.twist.angular.x = struct.unpack("<d", data[offset : offset + 8])[0]
-            offset += 8
-            msg.twist.angular.y = struct.unpack("<d", data[offset : offset + 8])[0]
-            offset += 8
-            msg.twist.angular.z = struct.unpack("<d", data[offset : offset + 8])[0]
-
+            self._read_header(r, msg)
+            self._read_vector3(r, msg.twist.linear)
+            self._read_vector3(r, msg.twist.angular)
             return msg
         except Exception as e:
             self.get_logger().error(f"Failed to parse TwistStamped: {e}")
             return None
 
     def _parse_float64(self, cdr_data: bytes) -> Float64 | None:
-        """Parse CDR-encoded Float64."""
         try:
-            data = cdr_data[4:]  # Skip CDR header
+            r = CdrReader(cdr_data)
             msg = Float64()
-            msg.data = struct.unpack("<d", data[:8])[0]
+            msg.data = r.float64()
             return msg
         except Exception as e:
             self.get_logger().error(f"Failed to parse Float64: {e}")
             return None
 
     def _parse_magnetic_field(self, cdr_data: bytes) -> MagneticField | None:
-        """Parse CDR-encoded MagneticField."""
         try:
-            data = cdr_data[4:]  # Skip CDR header
-            offset = 0
-
+            r = CdrReader(cdr_data)
             msg = MagneticField()
-
-            # Header
-            msg.header.stamp.sec = struct.unpack("<i", data[offset : offset + 4])[0]
-            offset += 4
-            msg.header.stamp.nanosec = struct.unpack("<I", data[offset : offset + 4])[0]
-            offset += 4
-            str_len = struct.unpack("<I", data[offset : offset + 4])[0]
-            offset += 4
-            msg.header.frame_id = data[offset : offset + str_len - 1].decode("utf-8")
-            offset += str_len
-            offset = (offset + 7) & ~7  # Align to 8 for doubles
-
-            # magnetic_field (Vector3)
-            msg.magnetic_field.x = struct.unpack("<d", data[offset : offset + 8])[0]
-            offset += 8
-            msg.magnetic_field.y = struct.unpack("<d", data[offset : offset + 8])[0]
-            offset += 8
-            msg.magnetic_field.z = struct.unpack("<d", data[offset : offset + 8])[0]
-            offset += 8
-
-            # magnetic_field_covariance (9 doubles)
-            for i in range(9):
-                msg.magnetic_field_covariance[i] = struct.unpack("<d", data[offset : offset + 8])[0]
-                offset += 8
-
+            self._read_header(r, msg)
+            self._read_vector3(r, msg.magnetic_field)
+            msg.magnetic_field_covariance = r.float64_array(9)
             return msg
         except Exception as e:
             self.get_logger().error(f"Failed to parse MagneticField: {e}")
             return None
 
     def _parse_fluid_pressure(self, cdr_data: bytes) -> FluidPressure | None:
-        """Parse CDR-encoded FluidPressure."""
         try:
-            data = cdr_data[4:]  # Skip CDR header
-            offset = 0
-
+            r = CdrReader(cdr_data)
             msg = FluidPressure()
-
-            # Header
-            msg.header.stamp.sec = struct.unpack("<i", data[offset : offset + 4])[0]
-            offset += 4
-            msg.header.stamp.nanosec = struct.unpack("<I", data[offset : offset + 4])[0]
-            offset += 4
-            str_len = struct.unpack("<I", data[offset : offset + 4])[0]
-            offset += 4
-            msg.header.frame_id = data[offset : offset + str_len - 1].decode("utf-8")
-            offset += str_len
-            offset = (offset + 7) & ~7  # Align to 8 for doubles
-
-            # fluid_pressure, variance (doubles)
-            msg.fluid_pressure = struct.unpack("<d", data[offset : offset + 8])[0]
-            offset += 8
-            msg.variance = struct.unpack("<d", data[offset : offset + 8])[0]
-
+            self._read_header(r, msg)
+            msg.fluid_pressure = r.float64()
+            msg.variance = r.float64()
             return msg
         except Exception as e:
             self.get_logger().error(f"Failed to parse FluidPressure: {e}")
             return None
 
     def _parse_battery_state(self, cdr_data: bytes) -> BatteryState | None:
-        """Parse CDR-encoded BatteryState."""
         try:
-            data = cdr_data[4:]  # Skip CDR header
-            offset = 0
-
+            r = CdrReader(cdr_data)
             msg = BatteryState()
-
-            # Header
-            msg.header.stamp.sec = struct.unpack("<i", data[offset : offset + 4])[0]
-            offset += 4
-            msg.header.stamp.nanosec = struct.unpack("<I", data[offset : offset + 4])[0]
-            offset += 4
-            str_len = struct.unpack("<I", data[offset : offset + 4])[0]
-            offset += 4
-            msg.header.frame_id = data[offset : offset + str_len - 1].decode("utf-8")
-            offset += str_len
-            offset = (offset + 3) & ~3  # Align to 4 for floats
-
-            # voltage, temperature, current, charge, capacity, design_capacity (floats)
-            msg.voltage = struct.unpack("<f", data[offset : offset + 4])[0]
-            offset += 4
-            msg.temperature = struct.unpack("<f", data[offset : offset + 4])[0]
-            offset += 4
-            msg.current = struct.unpack("<f", data[offset : offset + 4])[0]
-            offset += 4
-            msg.charge = struct.unpack("<f", data[offset : offset + 4])[0]
-            offset += 4
-            msg.capacity = struct.unpack("<f", data[offset : offset + 4])[0]
-            offset += 4
-            msg.design_capacity = struct.unpack("<f", data[offset : offset + 4])[0]
-            offset += 4
-
-            # percentage (float)
-            msg.percentage = struct.unpack("<f", data[offset : offset + 4])[0]
-            offset += 4
-
-            # power_supply_status, health, technology (uint8)
-            msg.power_supply_status = data[offset]
-            offset += 1
-            msg.power_supply_health = data[offset]
-            offset += 1
-            msg.power_supply_technology = data[offset]
-            offset += 1
-
-            # present (bool as uint8)
-            msg.present = bool(data[offset])
-
+            self._read_header(r, msg)
+            msg.voltage = r.float32()
+            msg.temperature = r.float32()
+            msg.current = r.float32()
+            msg.charge = r.float32()
+            msg.capacity = r.float32()
+            msg.design_capacity = r.float32()
+            msg.percentage = r.float32()
+            msg.power_supply_status = r.uint8()
+            msg.power_supply_health = r.uint8()
+            msg.power_supply_technology = r.uint8()
+            msg.present = r.bool()
             return msg
         except Exception as e:
             self.get_logger().error(f"Failed to parse BatteryState: {e}")
             return None
 
     def _parse_int32(self, cdr_data: bytes) -> Int32 | None:
-        """Parse CDR-encoded Int32."""
         try:
-            data = cdr_data[4:]  # Skip CDR header
+            r = CdrReader(cdr_data)
             msg = Int32()
-            msg.data = struct.unpack("<i", data[:4])[0]
+            msg.data = r.int32()
             return msg
         except Exception as e:
             self.get_logger().error(f"Failed to parse Int32: {e}")
             return None
 
     def _parse_bool(self, cdr_data: bytes) -> Bool | None:
-        """Parse CDR-encoded Bool."""
         try:
-            data = cdr_data[4:]  # Skip CDR header
+            r = CdrReader(cdr_data)
             msg = Bool()
-            msg.data = bool(data[0])
+            msg.data = r.bool()
             return msg
         except Exception as e:
             self.get_logger().error(f"Failed to parse Bool: {e}")
