@@ -342,7 +342,7 @@ class IOSBridge(Node):  # type: ignore[misc]
 
     def _publish_decompressed(self, compressed_topic: str, msg: CompressedImage) -> None:
         """Decompress JPEG and publish as raw Image."""
-        raw_topic = compressed_topic.replace("/image/compressed", "/image/raw")
+        raw_topic = compressed_topic.replace("/image/compressed", "/image")
         if raw_topic not in self._topic_publishers:
             self._topic_publishers[raw_topic] = self.create_publisher(
                 Image, raw_topic, self._sensor_qos

@@ -45,7 +45,7 @@ Visualization Manager:
       Name: Charlie Camera
       Enabled: true
       Topic:
-        Value: /iphone_charlie/camera/back_wide/image/raw
+        Value: /iphone_charlie/camera/back_wide/image
         Depth: 10
         History Policy: Keep Last
         Reliability Policy: Best Effort
@@ -78,7 +78,7 @@ Visualization Manager:
       Name: Barrett Camera
       Enabled: true
       Topic:
-        Value: /iphone_barrett/camera/back_wide/image/raw
+        Value: /iphone_barrett/camera/back_wide/image
         Depth: 10
         History Policy: Keep Last
         Reliability Policy: Best Effort
