@@ -44,7 +44,8 @@ public final class MotionManager: ObservableObject {
 
     private let motionManager = CMMotionManager()
     private let operationQueue: OperationQueue
-    private let frameId = "iphone_imu"
+    public var framePrefix = "iphone"
+    private var frameId: String { "\(framePrefix)_imu" }
 
     // Estimated covariance values for iPhone sensors
     private let accelCovariance: Covariance3x3 = [0.01, 0, 0, 0, 0.01, 0, 0, 0, 0.01]

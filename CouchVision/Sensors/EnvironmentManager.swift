@@ -45,8 +45,9 @@ public final class EnvironmentManager: ObservableObject {
     private let motionManager = CMMotionManager()
     private let altimeter = CMAltimeter()
     private let operationQueue: OperationQueue
-    private let magnetometerFrameId = "iphone_magnetometer"
-    private let barometerFrameId = "iphone_barometer"
+    public var framePrefix = "iphone"
+    private var magnetometerFrameId: String { "\(framePrefix)_magnetometer" }
+    private var barometerFrameId: String { "\(framePrefix)_barometer" }
 
     // Magnetometer covariance (estimated)
     private let magCovariance: [Double] = [0.0001, 0, 0, 0, 0.0001, 0, 0, 0, 0.0001]

@@ -122,7 +122,8 @@ class IOSBridge(Node):  # type: ignore[misc]
         super().__init__("ios_bridge")
         self.port = port
         self.server_socket: socket.socket | None = None
-        self.client_socket: socket.socket | None = None
+        self.clients: dict[str, socket.socket] = {}
+        self._clients_lock = threading.Lock()
         self.running = False
 
         self._sensor_qos = QoSProfile(
@@ -192,7 +193,11 @@ class IOSBridge(Node):  # type: ignore[misc]
                 self.get_logger().warn(f"Unknown topic type for: {topic}, skipping")
                 return None
 
-            qos = self._reliable_qos if topic in self._reliable_topics else self._sensor_qos
+            qos = (
+                self._reliable_qos
+                if any(topic == rt or topic.endswith(rt) for rt in self._reliable_topics)
+                else self._sensor_qos
+            )
             self.get_logger().info(f"Creating publisher for {topic} ({msg_type.__name__})")
             self._topic_publishers[topic] = self.create_publisher(msg_type, topic, qos)
 
@@ -203,19 +208,30 @@ class IOSBridge(Node):  # type: ignore[misc]
         self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.server_socket.bind(("0.0.0.0", self.port))
-        self.server_socket.listen(1)
+        self.server_socket.listen(5)
         self.running = True
 
         self.get_logger().info(f"Listening on 0.0.0.0:{self.port}")
-        self.get_logger().info("Waiting for iOS device to connect...")
+        self.get_logger().info("Waiting for iOS devices to connect...")
 
         while self.running:
             try:
                 self.server_socket.settimeout(1.0)
                 try:
                     client, addr = self.server_socket.accept()
-                    self.get_logger().info(f"iOS device connected from {addr}")
-                    self.handle_client(client)
+                    addr_key = f"{addr[0]}:{addr[1]}"
+                    with self._clients_lock:
+                        self.clients[addr_key] = client
+                    self.get_logger().info(
+                        f"iOS device connected from {addr} "
+                        f"({len(self.clients)} client(s) connected)"
+                    )
+                    thread = threading.Thread(
+                        target=self._client_thread,
+                        args=(client, addr_key),
+                        daemon=True,
+                    )
+                    thread.start()
                 except TimeoutError:
                     continue
             except Exception as e:
@@ -223,9 +239,19 @@ class IOSBridge(Node):  # type: ignore[misc]
                     self.get_logger().error(f"Server error: {e}")
                 break
 
+    def _client_thread(self, client: socket.socket, addr_key: str) -> None:
+        """Thread entry point for a single client connection."""
+        try:
+            self.handle_client(client)
+        finally:
+            with self._clients_lock:
+                self.clients.pop(addr_key, None)
+            self.get_logger().info(
+                f"Client {addr_key} removed ({len(self.clients)} client(s) connected)"
+            )
+
     def handle_client(self, client: socket.socket) -> None:
         """Handle incoming data from iOS client."""
-        self.client_socket = client
         client.settimeout(5.0)
 
         buffer = b""
@@ -269,7 +295,6 @@ class IOSBridge(Node):  # type: ignore[misc]
                 break
 
         client.close()
-        self.client_socket = None
 
     def _publish_message(self, topic: str, cdr_data: bytes) -> None:
         """Publish CDR-encoded message to ROS2."""
@@ -487,8 +512,10 @@ class IOSBridge(Node):  # type: ignore[misc]
     def stop(self) -> None:
         """Stop the bridge."""
         self.running = False
-        if self.client_socket:
-            self.client_socket.close()
+        with self._clients_lock:
+            for client in self.clients.values():
+                client.close()
+            self.clients.clear()
         if self.server_socket:
             self.server_socket.close()
 

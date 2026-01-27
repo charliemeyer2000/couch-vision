@@ -79,7 +79,7 @@ public enum CameraType: String, CaseIterable {
         self == .front ? .front : .back
     }
 
-    var frameId: String { "iphone_camera_\(rawValue)" }
+    func frameId(prefix: String) -> String { "\(prefix)_camera_\(rawValue)" }
 }
 
 public final class CameraManager: NSObject, ObservableObject {
@@ -87,6 +87,7 @@ public final class CameraManager: NSObject, ObservableObject {
     @Published public private(set) var state: SensorState = .unknown
     @Published public private(set) var activeCamera: CameraType?
     @Published public var isEnabled: Bool = false
+    public var framePrefix = "iphone"
 
     private let dataSubject = PassthroughSubject<TimestampedData<CameraFrame>, Never>()
     public var dataPublisher: AnyPublisher<TimestampedData<CameraFrame>, Never> {
@@ -289,7 +290,7 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
         let timestamp = TimeUtils.toUnixTimestamp(CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(sampleBuffer)))
         let width = CVPixelBufferGetWidth(pixelBuffer)
         let height = CVPixelBufferGetHeight(pixelBuffer)
-        let frameId = activeCamera?.frameId ?? "iphone_camera"
+        let frameId = activeCamera?.frameId(prefix: framePrefix) ?? "\(framePrefix)_camera"
 
         let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
         guard let cgImage = CIContext().createCGImage(ciImage, from: ciImage.extent),

@@ -43,7 +43,8 @@ public final class LocationManager: NSObject, ObservableObject {
     }
 
     private let locationManager = CLLocationManager()
-    private let frameId = "iphone_gps"
+    public var framePrefix = "iphone"
+    private var frameId: String { "\(framePrefix)_gps" }
 
     public let sensorId = "location"
     public let displayName = "GPS Location"
