@@ -46,7 +46,7 @@ Visualization Manager:
       Enabled: true
       Topic:
         Value: /iphone_charlie/camera/arkit/image
-        Depth: 10
+        Depth: 1
         History Policy: Keep Last
         Reliability Policy: Best Effort
 

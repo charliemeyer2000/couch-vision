@@ -353,6 +353,13 @@ class IOSBridge(Node):  # type: ignore[misc]
         if bgr is None:
             return
 
+        # Downscale to max 640px wide so rviz can keep up
+        h, w = bgr.shape[:2]
+        max_w = 640
+        if w > max_w:
+            scale = max_w / w
+            bgr = cv2.resize(bgr, (max_w, int(h * scale)), interpolation=cv2.INTER_AREA)
+
         raw = Image()
         raw.header = msg.header
         raw.height, raw.width = bgr.shape[:2]
