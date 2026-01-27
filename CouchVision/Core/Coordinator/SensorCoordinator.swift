@@ -404,7 +404,7 @@ public final class SensorCoordinator: ObservableObject {
     }
 
     private func publishTransform(_ data: TimestampedData<TransformStamped>) async {
-        await publish(CDREncoder.encode(TFMessage(transforms: [data.data])), to: "\(config.topicPrefix)/tf")
+        await publish(CDREncoder.encode(TFMessage(transforms: [data.data])), to: "/tf")
     }
 
     private func publishIMU(_ data: TimestampedData<ImuMessage>) async {

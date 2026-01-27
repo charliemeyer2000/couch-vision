@@ -17,11 +17,13 @@ Visualization Manager:
       Update Interval: 0
       Frame Timeout: 15
 
+    # -- Charlie --
+
     - Class: rviz_default_plugins/PointCloud2
-      Name: LiDAR Points
+      Name: Charlie LiDAR Points
       Enabled: true
       Topic:
-        Value: /iphone/lidar/points
+        Value: /iphone_charlie/lidar/points
         Depth: 10
         History Policy: Keep Last
         Reliability Policy: Best Effort
@@ -31,19 +33,48 @@ Visualization Manager:
       Use Fixed Frame: true
 
     - Class: rviz_default_plugins/Image
-      Name: Depth Image
+      Name: Charlie Depth
       Enabled: true
       Topic:
-        Value: /iphone/lidar/depth/image
+        Value: /iphone_charlie/lidar/depth/image
         Depth: 10
         History Policy: Keep Last
         Reliability Policy: Best Effort
 
     - Class: rviz_default_plugins/Image
-      Name: Camera
+      Name: Charlie Camera
       Enabled: true
       Topic:
-        Value: /iphone/camera/back_wide/image/raw
+        Value: /iphone_charlie/camera/back_wide/image/raw
+        Depth: 10
+        History Policy: Keep Last
+        Reliability Policy: Best Effort
+
+    # -- Barrett --
+
+    - Class: rviz_default_plugins/PointCloud2
+      Name: Barrett LiDAR Points
+      Enabled: true
+      Topic:
+        Value: /iphone_barrett/lidar/points
+        Depth: 10
+        History Policy: Keep Last
+        Reliability Policy: Best Effort
+
+    - Class: rviz_default_plugins/Image
+      Name: Barrett Depth
+      Enabled: true
+      Topic:
+        Value: /iphone_barrett/lidar/depth/image
+        Depth: 10
+        History Policy: Keep Last
+        Reliability Policy: Best Effort
+
+    - Class: rviz_default_plugins/Image
+      Name: Barrett Camera
+      Enabled: true
+      Topic:
+        Value: /iphone_barrett/camera/back_wide/image/raw
         Depth: 10
         History Policy: Keep Last
         Reliability Policy: Best Effort
