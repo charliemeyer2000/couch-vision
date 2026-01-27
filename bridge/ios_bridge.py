@@ -122,7 +122,7 @@ class IOSBridge(Node):  # type: ignore[misc]
         super().__init__("ios_bridge")
         self.port = port
         self.server_socket: socket.socket | None = None
-        self.clients: dict[str, socket.socket] = {}
+        self._clients: dict[str, socket.socket] = {}
         self._clients_lock = threading.Lock()
         self.running = False
 
@@ -227,10 +227,10 @@ class IOSBridge(Node):  # type: ignore[misc]
                     client, addr = self.server_socket.accept()
                     addr_key = f"{addr[0]}:{addr[1]}"
                     with self._clients_lock:
-                        self.clients[addr_key] = client
+                        self._clients[addr_key] = client
                     self.get_logger().info(
                         f"iOS device connected from {addr} "
-                        f"({len(self.clients)} client(s) connected)"
+                        f"({len(self._clients)} client(s) connected)"
                     )
                     thread = threading.Thread(
                         target=self._client_thread,
@@ -251,9 +251,9 @@ class IOSBridge(Node):  # type: ignore[misc]
             self.handle_client(client)
         finally:
             with self._clients_lock:
-                self.clients.pop(addr_key, None)
+                self._clients.pop(addr_key, None)
             self.get_logger().info(
-                f"Client {addr_key} removed ({len(self.clients)} client(s) connected)"
+                f"Client {addr_key} removed ({len(self._clients)} client(s) connected)"
             )
 
     def handle_client(self, client: socket.socket) -> None:
@@ -519,9 +519,9 @@ class IOSBridge(Node):  # type: ignore[misc]
         """Stop the bridge."""
         self.running = False
         with self._clients_lock:
-            for client in self.clients.values():
+            for client in self._clients.values():
                 client.close()
-            self.clients.clear()
+            self._clients.clear()
         if self.server_socket:
             self.server_socket.close()
 
