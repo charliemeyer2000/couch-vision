@@ -143,6 +143,40 @@ public final class CDREncoder {
 
     public func encode(_ msg: Vector3Stamped) { encode(msg.header); encode(msg.vector) }
 
+    public func encode(_ msg: NavSatStatus) { encode(msg.status); encode(msg.service) }
+
+    public func encode(_ msg: NavSatFix) {
+        encode(msg.header); encode(msg.status)
+        encode(msg.latitude); encode(msg.longitude); encode(msg.altitude)
+        encodeFixed(msg.positionCovariance); encode(msg.positionCovarianceType)
+    }
+
+    public func encode(_ msg: Twist) { encode(msg.linear); encode(msg.angular) }
+    public func encode(_ msg: TwistStamped) { encode(msg.header); encode(msg.twist) }
+
+    public func encode(_ msg: MagneticField) {
+        encode(msg.header); encode(msg.magneticField); encodeFixed(msg.magneticFieldCovariance)
+    }
+
+    public func encode(_ msg: FluidPressure) {
+        encode(msg.header); encode(msg.fluidPressure); encode(msg.variance)
+    }
+
+    public func encode(_ msg: Float64Msg) { encode(msg.data) }
+    public func encode(_ msg: Int32Msg) { encode(msg.data) }
+    public func encode(_ msg: BoolMsg) { encode(msg.data) }
+
+    public func encode(_ msg: BatteryState) {
+        encode(msg.header)
+        encode(msg.voltage); encode(msg.temperature); encode(msg.current)
+        encode(msg.charge); encode(msg.capacity); encode(msg.designCapacity)
+        encode(msg.percentage)
+        encode(msg.powerSupplyStatus); encode(msg.powerSupplyHealth); encode(msg.powerSupplyTechnology)
+        encode(msg.present)
+        encode(msg.cellVoltage); encode(msg.cellTemperature)
+        encode(msg.location); encode(msg.serialNumber)
+    }
+
     public func encode(_ msg: CameraInfo) {
         encode(msg.header); encode(msg.height); encode(msg.width)
         encode(msg.distortionModel); encode(msg.d)
@@ -159,4 +193,11 @@ public final class CDREncoder {
     public static func encode(_ msg: PointCloud2) -> Data { let e = CDREncoder(); e.encode(msg); return e.encodedData }
     public static func encode(_ msg: ROSImage) -> Data { let e = CDREncoder(); e.encode(msg); return e.encodedData }
     public static func encode(_ msg: CameraInfo) -> Data { let e = CDREncoder(); e.encode(msg); return e.encodedData }
+    public static func encode(_ msg: NavSatFix) -> Data { let e = CDREncoder(); e.encode(msg); return e.encodedData }
+    public static func encode(_ msg: TwistStamped) -> Data { let e = CDREncoder(); e.encode(msg); return e.encodedData }
+    public static func encode(_ msg: MagneticField) -> Data { let e = CDREncoder(); e.encode(msg); return e.encodedData }
+    public static func encode(_ msg: FluidPressure) -> Data { let e = CDREncoder(); e.encode(msg); return e.encodedData }
+    public static func encode(_ msg: Float64Msg) -> Data { let e = CDREncoder(); e.encode(msg); return e.encodedData }
+    public static func encode(_ msg: Int32Msg) -> Data { let e = CDREncoder(); e.encode(msg); return e.encodedData }
+    public static func encode(_ msg: BatteryState) -> Data { let e = CDREncoder(); e.encode(msg); return e.encodedData }
 }

@@ -121,6 +121,33 @@ struct ContentView: View {
                     set: { coordinator.motionManager.isEnabled = $0 }
                 )
             )
+
+            SensorToggleRow(
+                name: "GPS Location",
+                state: coordinator.locationManager.state,
+                isEnabled: Binding(
+                    get: { coordinator.locationManager.isEnabled },
+                    set: { coordinator.locationManager.isEnabled = $0 }
+                )
+            )
+
+            SensorToggleRow(
+                name: "Magnetometer/Barometer",
+                state: coordinator.environmentManager.state,
+                isEnabled: Binding(
+                    get: { coordinator.environmentManager.isEnabled },
+                    set: { coordinator.environmentManager.isEnabled = $0 }
+                )
+            )
+
+            SensorToggleRow(
+                name: "Device Status",
+                state: coordinator.deviceStatusManager.state,
+                isEnabled: Binding(
+                    get: { coordinator.deviceStatusManager.isEnabled },
+                    set: { coordinator.deviceStatusManager.isEnabled = $0 }
+                )
+            )
         }
         .padding()
         .background(Color(.systemGray6))

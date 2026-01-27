@@ -1,3 +1,4 @@
+import AVFoundation
 import Combine
 import Foundation
 
@@ -56,7 +57,10 @@ public final class SensorCoordinator: ObservableObject {
     @Published public private(set) var stats: [String: TopicStats] = [:]
     @Published public private(set) var isInBackground: Bool = false
 
-    private var sensorsRunningBeforeBackground = (camera: false, lidar: false, motion: false)
+    private var sensorsRunningBeforeBackground = (
+        camera: false, lidar: false, motion: false,
+        location: false, environment: false, deviceStatus: false
+    )
 
     @Published public var config: CoordinatorConfig {
         didSet {
@@ -73,6 +77,11 @@ public final class SensorCoordinator: ObservableObject {
     public let cameraManager: CameraManager
     public let lidarManager: LiDARManager
     public let motionManager: MotionManager
+    public let locationManager: LocationManager
+    public let environmentManager: EnvironmentManager
+    public let deviceStatusManager: DeviceStatusManager
+
+    private var backgroundAudioPlayer: AVAudioPlayer?
 
     public init(config: CoordinatorConfig? = nil) {
         self.config = config ?? CoordinatorConfig(
@@ -99,8 +108,23 @@ public final class SensorCoordinator: ObservableObject {
             imuRate: SensorRateConfig(frequencyHz: Double(SettingsStorage.imuRate))
         )
 
+        locationManager = LocationManager()
+        environmentManager = EnvironmentManager()
+        deviceStatusManager = DeviceStatusManager()
+
         setupSubscriptions()
         forwardManagerChanges()
+        setupBackgroundAudio()
+    }
+
+    private func setupBackgroundAudio() {
+        do {
+            let audioSession = AVAudioSession.sharedInstance()
+            try audioSession.setCategory(.playback, mode: .default, options: .mixWithOthers)
+            try audioSession.setActive(true)
+        } catch {
+            Log.app.error("Failed to setup background audio: \(error.localizedDescription)")
+        }
     }
 
     private func forwardManagerChanges() {
@@ -115,6 +139,21 @@ public final class SensorCoordinator: ObservableObject {
             .store(in: &cancellables)
 
         motionManager.objectWillChange
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &cancellables)
+
+        locationManager.objectWillChange
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &cancellables)
+
+        environmentManager.objectWillChange
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &cancellables)
+
+        deviceStatusManager.objectWillChange
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &cancellables)
@@ -169,6 +208,15 @@ public final class SensorCoordinator: ObservableObject {
         if motionManager.isEnabled {
             try? motionManager.start()
         }
+        if locationManager.isEnabled {
+            try? locationManager.start()
+        }
+        if environmentManager.isEnabled {
+            try? environmentManager.start()
+        }
+        if deviceStatusManager.isEnabled {
+            deviceStatusManager.start()
+        }
         LiveActivityManager.shared.startActivity(coordinator: self)
     }
 
@@ -176,6 +224,9 @@ public final class SensorCoordinator: ObservableObject {
         cameraManager.stop()
         lidarManager.stop()
         motionManager.stop()
+        locationManager.stop()
+        environmentManager.stop()
+        deviceStatusManager.stop()
         LiveActivityManager.shared.endActivity()
     }
 
@@ -184,15 +235,19 @@ public final class SensorCoordinator: ObservableObject {
         sensorsRunningBeforeBackground = (
             camera: cameraManager.state == .running,
             lidar: lidarManager.state == .running,
-            motion: motionManager.state == .running
+            motion: motionManager.state == .running,
+            location: locationManager.state == .running,
+            environment: environmentManager.state == .running,
+            deviceStatus: deviceStatusManager.state == .running
         )
+        // Stop camera and LiDAR (ARKit doesn't work in background)
         if sensorsRunningBeforeBackground.lidar {
             lidarManager.stop()
         }
         if sensorsRunningBeforeBackground.camera {
             cameraManager.stop()
         }
-        // IMU continues - CoreMotion works in background
+        // IMU, GPS, environment sensors, and device status continue in background
     }
 
     public func enterForeground() {
@@ -209,8 +264,11 @@ public final class SensorCoordinator: ObservableObject {
         async let camera = cameraManager.requestPermissions()
         async let lidar = lidarManager.requestPermissions()
         async let motion = motionManager.requestPermissions()
+        async let location = locationManager.requestPermissions()
+        async let environment = environmentManager.requestPermissions()
+        async let deviceStatus = deviceStatusManager.requestPermissions()
 
-        let results = await [camera, lidar, motion]
+        let results = await [camera, lidar, motion, location, environment, deviceStatus]
         return results.allSatisfy { $0 }
     }
 
@@ -230,6 +288,48 @@ public final class SensorCoordinator: ObservableObject {
         motionManager.imuPublisher
             .sink { [weak self] data in
                 Task { await self?.publishIMU(data) }
+            }
+            .store(in: &cancellables)
+
+        locationManager.locationPublisher
+            .sink { [weak self] data in
+                Task { await self?.publishLocation(data) }
+            }
+            .store(in: &cancellables)
+
+        locationManager.velocityPublisher
+            .sink { [weak self] data in
+                Task { await self?.publishVelocity(data) }
+            }
+            .store(in: &cancellables)
+
+        environmentManager.magneticFieldPublisher
+            .sink { [weak self] data in
+                Task { await self?.publishMagneticField(data) }
+            }
+            .store(in: &cancellables)
+
+        environmentManager.pressurePublisher
+            .sink { [weak self] data in
+                Task { await self?.publishPressure(data) }
+            }
+            .store(in: &cancellables)
+
+        environmentManager.altitudePublisher
+            .sink { [weak self] data in
+                Task { await self?.publishAltitude(data) }
+            }
+            .store(in: &cancellables)
+
+        deviceStatusManager.batteryPublisher
+            .sink { [weak self] data in
+                Task { await self?.publishBattery(data) }
+            }
+            .store(in: &cancellables)
+
+        deviceStatusManager.thermalPublisher
+            .sink { [weak self] data in
+                Task { await self?.publishThermal(data) }
             }
             .store(in: &cancellables)
     }
@@ -291,6 +391,104 @@ public final class SensorCoordinator: ObservableObject {
             updateStats(topic: topic, bytes: encoded.count)
         } catch {
             Log.ros.error("Failed to publish IMU: \(error.localizedDescription)")
+        }
+    }
+
+    private func publishLocation(_ data: TimestampedData<NavSatFix>) async {
+        guard isConnected, let publisher else { return }
+
+        let topic = "\(config.topicPrefix)/gps/fix"
+        let encoded = CDREncoder.encode(data.data)
+
+        do {
+            try await publisher.publish(encoded, to: topic)
+            updateStats(topic: topic, bytes: encoded.count)
+        } catch {
+            Log.ros.error("Failed to publish GPS: \(error.localizedDescription)")
+        }
+    }
+
+    private func publishVelocity(_ data: TimestampedData<TwistStamped>) async {
+        guard isConnected, let publisher else { return }
+
+        let topic = "\(config.topicPrefix)/gps/velocity"
+        let encoded = CDREncoder.encode(data.data)
+
+        do {
+            try await publisher.publish(encoded, to: topic)
+            updateStats(topic: topic, bytes: encoded.count)
+        } catch {
+            Log.ros.error("Failed to publish velocity: \(error.localizedDescription)")
+        }
+    }
+
+    private func publishMagneticField(_ data: TimestampedData<MagneticField>) async {
+        guard isConnected, let publisher else { return }
+
+        let topic = "\(config.topicPrefix)/magnetic_field"
+        let encoded = CDREncoder.encode(data.data)
+
+        do {
+            try await publisher.publish(encoded, to: topic)
+            updateStats(topic: topic, bytes: encoded.count)
+        } catch {
+            Log.ros.error("Failed to publish magnetic field: \(error.localizedDescription)")
+        }
+    }
+
+    private func publishPressure(_ data: TimestampedData<FluidPressure>) async {
+        guard isConnected, let publisher else { return }
+
+        let topic = "\(config.topicPrefix)/pressure"
+        let encoded = CDREncoder.encode(data.data)
+
+        do {
+            try await publisher.publish(encoded, to: topic)
+            updateStats(topic: topic, bytes: encoded.count)
+        } catch {
+            Log.ros.error("Failed to publish pressure: \(error.localizedDescription)")
+        }
+    }
+
+    private func publishAltitude(_ data: TimestampedData<Float64Msg>) async {
+        guard isConnected, let publisher else { return }
+
+        let topic = "\(config.topicPrefix)/altitude"
+        let encoded = CDREncoder.encode(data.data)
+
+        do {
+            try await publisher.publish(encoded, to: topic)
+            updateStats(topic: topic, bytes: encoded.count)
+        } catch {
+            Log.ros.error("Failed to publish altitude: \(error.localizedDescription)")
+        }
+    }
+
+    private func publishBattery(_ data: TimestampedData<BatteryState>) async {
+        guard isConnected, let publisher else { return }
+
+        let topic = "\(config.topicPrefix)/battery"
+        let encoded = CDREncoder.encode(data.data)
+
+        do {
+            try await publisher.publish(encoded, to: topic)
+            updateStats(topic: topic, bytes: encoded.count)
+        } catch {
+            Log.ros.error("Failed to publish battery: \(error.localizedDescription)")
+        }
+    }
+
+    private func publishThermal(_ data: TimestampedData<Int32Msg>) async {
+        guard isConnected, let publisher else { return }
+
+        let topic = "\(config.topicPrefix)/thermal"
+        let encoded = CDREncoder.encode(data.data)
+
+        do {
+            try await publisher.publish(encoded, to: topic)
+            updateStats(topic: topic, bytes: encoded.count)
+        } catch {
+            Log.ros.error("Failed to publish thermal: \(error.localizedDescription)")
         }
     }
 
