@@ -389,7 +389,9 @@ public final class SensorCoordinator: ObservableObject {
     }
 
     private func publishCameraInfo(_ data: TimestampedData<CameraInfo>) async {
-        await publish(CDREncoder.encode(data.data), to: "\(config.topicPrefix)/camera/\(data.frameId)/camera_info")
+        // frameId is e.g. "iphone_front_camera_back_wide" — extract camera ID after last "camera_"
+        let cameraId = data.frameId.components(separatedBy: "camera_").last ?? data.frameId
+        await publish(CDREncoder.encode(data.data), to: "\(config.topicPrefix)/camera/\(cameraId)/camera_info")
     }
 
     private func publishLiDARData(_ data: TimestampedData<LiDARData>) async {
