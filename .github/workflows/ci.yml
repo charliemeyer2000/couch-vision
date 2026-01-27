@@ -59,19 +59,22 @@ jobs:
       - name: Generate Xcode project
         run: xcodegen generate
 
-      - name: Install certificate and provisioning profile
+      - name: Install certificate and provisioning profiles
         env:
           BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
           P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
           BUILD_PROVISION_PROFILE_BASE64: ${{ secrets.BUILD_PROVISION_PROFILE_BASE64 }}
+          BUILD_PROVISION_PROFILE_WIDGETS_BASE64: ${{ secrets.BUILD_PROVISION_PROFILE_WIDGETS_BASE64 }}
           KEYCHAIN_PASSWORD: ${{ github.run_id }}
         run: |
           CERTIFICATE_PATH=$RUNNER_TEMP/build_certificate.p12
           PP_PATH=$RUNNER_TEMP/build_pp.mobileprovision
+          PP_WIDGETS_PATH=$RUNNER_TEMP/build_pp_widgets.mobileprovision
           KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
 
           echo -n "$BUILD_CERTIFICATE_BASE64" | base64 --decode > $CERTIFICATE_PATH
           echo -n "$BUILD_PROVISION_PROFILE_BASE64" | base64 --decode > $PP_PATH
+          echo -n "$BUILD_PROVISION_PROFILE_WIDGETS_BASE64" | base64 --decode > $PP_WIDGETS_PATH
 
           security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
           security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
@@ -83,6 +86,7 @@ jobs:
 
           mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
           cp $PP_PATH ~/Library/MobileDevice/Provisioning\ Profiles
+          cp $PP_WIDGETS_PATH ~/Library/MobileDevice/Provisioning\ Profiles
 
       - name: Build archive
         run: |
@@ -94,7 +98,6 @@ jobs:
             DEVELOPMENT_TEAM=9778KTLRXB \
             CODE_SIGN_STYLE=Manual \
             CODE_SIGN_IDENTITY="Apple Distribution" \
-            PROVISIONING_PROFILE_SPECIFIER="CouchVision GitHub Action Distribution" \
             archive
 
       - name: Export IPA
@@ -114,6 +117,8 @@ jobs:
             <dict>
               <key>com.couchvision.CouchVision</key>
               <string>CouchVision GitHub Action Distribution</string>
+              <key>com.couchvision.CouchVision.Widgets</key>
+              <string>CouchVision Widgets GitHub Action Distribution</string>
             </dict>
             <key>uploadSymbols</key>
             <true/>

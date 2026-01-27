@@ -69,8 +69,10 @@ public final class LocationManager: NSObject, ObservableObject {
         let status = locationManager.authorizationStatus
         if status == .notDetermined {
             return await withCheckedContinuation { continuation in
+                self.continuationLock.lock()
                 self.permissionContinuation = continuation
-                locationManager.requestAlwaysAuthorization()
+                self.continuationLock.unlock()
+                self.locationManager.requestAlwaysAuthorization()
             }
         }
 
@@ -80,6 +82,7 @@ public final class LocationManager: NSObject, ObservableObject {
     }
 
     private var permissionContinuation: CheckedContinuation<Bool, Never>?
+    private let continuationLock = NSLock()
 
     public func start() throws {
         let status = locationManager.authorizationStatus
@@ -167,10 +170,14 @@ extension LocationManager: CLLocationManagerDelegate {
         let status = manager.authorizationStatus
         updateStateFromAuthStatus(status)
 
-        if let continuation = permissionContinuation {
+        continuationLock.lock()
+        let continuation = permissionContinuation
+        permissionContinuation = nil
+        continuationLock.unlock()
+
+        if let continuation {
             let granted = status == .authorizedAlways || status == .authorizedWhenInUse
             continuation.resume(returning: granted)
-            permissionContinuation = nil
         }
     }
 }

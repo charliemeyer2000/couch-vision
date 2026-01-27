@@ -13,6 +13,10 @@ settings:
     INFOPLIST_FILE: CouchVision/Resources/Info.plist
     DEVELOPMENT_TEAM: ""
     CODE_SIGN_STYLE: Automatic
+  configs:
+    Release:
+      CODE_SIGN_STYLE: Manual
+      DEVELOPMENT_TEAM: 9778KTLRXB
 
 targets:
   CouchVision:
@@ -28,6 +32,9 @@ targets:
         INFOPLIST_FILE: CouchVision/Resources/Info.plist
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ENABLE_PREVIEWS: YES
+      configs:
+        Release:
+          PROVISIONING_PROFILE_SPECIFIER: "CouchVision GitHub Action Distribution"
     info:
       path: CouchVision/Resources/Info.plist
       properties:
@@ -71,6 +78,9 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.couchvision.CouchVision.Widgets
         INFOPLIST_FILE: CouchVisionWidgets/Info.plist
         SKIP_INSTALL: YES
+      configs:
+        Release:
+          PROVISIONING_PROFILE_SPECIFIER: "CouchVision Widgets GitHub Action Distribution"
     info:
       path: CouchVisionWidgets/Info.plist
       properties:
