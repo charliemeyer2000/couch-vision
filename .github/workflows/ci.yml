@@ -40,7 +40,7 @@ jobs:
           xcodebuild -project CouchVision.xcodeproj \
             -scheme CouchVision \
             -sdk iphonesimulator \
-            -destination 'platform=iOS Simulator,name=iPhone 16 Pro' \
+            -destination 'generic/platform=iOS Simulator' \
             build
 
   deploy:
