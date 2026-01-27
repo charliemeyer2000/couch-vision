@@ -11,6 +11,7 @@ All integers are little-endian uint32.
 from __future__ import annotations
 
 import argparse
+import queue
 import socket
 import struct
 import threading
@@ -139,7 +140,8 @@ class IOSBridge(Node):  # type: ignore[misc]
         self._reliable_topics = {"/tf"}
 
         self._topic_publishers: dict[str, Publisher[Any]] = {}
-        self._publishers_lock = threading.Lock()
+        self._publish_queue: queue.Queue[tuple[str, bytes]] = queue.Queue()
+        self.create_timer(0.001, self._drain_publish_queue)
 
         self._topic_types: dict[str, type[Any]] = {
             "/image/compressed": CompressedImage,
@@ -181,33 +183,43 @@ class IOSBridge(Node):  # type: ignore[misc]
 
         self.get_logger().info(f"iOS Bridge initialized, will listen on port {port}")
 
-    def get_publisher(self, topic: str) -> Publisher[Any] | None:
-        """Get or create a publisher for the given topic."""
-        with self._publishers_lock:
-            if topic in self._topic_publishers:
-                return self._topic_publishers[topic]
+    def _drain_publish_queue(self) -> None:
+        """Process queued messages on the main thread (timer callback)."""
+        while not self._publish_queue.empty():
+            try:
+                topic, cdr_data = self._publish_queue.get_nowait()
+            except queue.Empty:
+                break
+            publisher = self._get_or_create_publisher(topic)
+            if publisher is None:
+                continue
+            self._do_publish(publisher, topic, cdr_data)
 
-            msg_type: type[Any] | None = None
-            for pattern, mtype in self._topic_types.items():
-                if topic == pattern or topic.endswith("/" + pattern.lstrip("/")):
-                    msg_type = mtype
-                    break
-
-            if msg_type is None:
-                self.get_logger().warn(f"Unknown topic type for: {topic}, skipping")
-                return None
-
-            qos = (
-                self._reliable_qos
-                if any(
-                    topic == rt or topic.endswith("/" + rt.lstrip("/"))
-                    for rt in self._reliable_topics
-                )
-                else self._sensor_qos
-            )
-            self.get_logger().info(f"Creating publisher for {topic} ({msg_type.__name__})")
-            self._topic_publishers[topic] = self.create_publisher(msg_type, topic, qos)
+    def _get_or_create_publisher(self, topic: str) -> Publisher[Any] | None:
+        """Get or create a publisher for the given topic. Must be called from main thread."""
+        if topic in self._topic_publishers:
             return self._topic_publishers[topic]
+
+        msg_type: type[Any] | None = None
+        for pattern, mtype in self._topic_types.items():
+            if topic == pattern or topic.endswith("/" + pattern.lstrip("/")):
+                msg_type = mtype
+                break
+
+        if msg_type is None:
+            self.get_logger().warn(f"Unknown topic type for: {topic}, skipping")
+            return None
+
+        qos = (
+            self._reliable_qos
+            if any(
+                topic == rt or topic.endswith("/" + rt.lstrip("/")) for rt in self._reliable_topics
+            )
+            else self._sensor_qos
+        )
+        self.get_logger().info(f"Creating publisher for {topic} ({msg_type.__name__})")
+        self._topic_publishers[topic] = self.create_publisher(msg_type, topic, qos)
+        return self._topic_publishers[topic]
 
     def start_server(self) -> None:
         """Start TCP server to accept iOS connections."""
@@ -303,11 +315,11 @@ class IOSBridge(Node):  # type: ignore[misc]
         client.close()
 
     def _publish_message(self, topic: str, cdr_data: bytes) -> None:
-        """Publish CDR-encoded message to ROS2."""
-        publisher = self.get_publisher(topic)
-        if publisher is None:
-            return
+        """Queue a message for publishing on the main thread."""
+        self._publish_queue.put((topic, cdr_data))
 
+    def _do_publish(self, publisher: Publisher[Any], topic: str, cdr_data: bytes) -> None:
+        """Parse and publish a CDR message. Must be called from main thread."""
         msg_type = type(publisher.msg_type())
         parser = self._parsers.get(msg_type)
         if parser is None:
