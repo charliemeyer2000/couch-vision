@@ -298,13 +298,15 @@ public final class SensorCoordinator: ObservableObject {
 
         lidarManager.cameraFramePublisher
             .sink { [weak self] data in
-                Task { await self?.publishCameraFrame(data) }
+                guard let self, cameraManager.isEnabled else { return }
+                Task { await self.publishCameraFrame(data) }
             }
             .store(in: &cancellables)
 
         lidarManager.cameraInfoPublisher
             .sink { [weak self] data in
-                Task { await self?.publishCameraInfo(data) }
+                guard let self, cameraManager.isEnabled else { return }
+                Task { await self.publishCameraInfo(data) }
             }
             .store(in: &cancellables)
 

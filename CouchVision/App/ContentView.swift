@@ -141,9 +141,12 @@ struct ContentView: View {
             Text("Sensors")
                 .font(.headline)
 
+            let cameraViaLidar = coordinator.cameraManager.isEnabled && coordinator.lidarManager.isEnabled && coordinator.lidarManager
+                .state == .running
+
             SensorToggleRow(
-                name: "Camera (Back Wide)",
-                state: coordinator.cameraManager.state,
+                name: cameraViaLidar ? "Camera (via LiDAR)" : "Camera (Back Wide)",
+                state: cameraViaLidar ? coordinator.lidarManager.state : coordinator.cameraManager.state,
                 isEnabled: Binding(
                     get: { coordinator.cameraManager.isEnabled },
                     set: { coordinator.cameraManager.isEnabled = $0 }
