@@ -66,6 +66,14 @@ public final class LiDARManager: NSObject, ObservableObject {
         cameraInfoSubject.eraseToAnyPublisher()
     }
 
+    private let odometrySubject = PassthroughSubject<TimestampedData<OdometryMessage>, Never>()
+    public var odometryPublisher: AnyPublisher<TimestampedData<OdometryMessage>, Never> {
+        odometrySubject.eraseToAnyPublisher()
+    }
+
+    private var previousPose: Transform?
+    private var previousTimestamp: TimeInterval?
+
     public var config = LiDARConfig()
     public var jpegQuality: CGFloat = 0.8
 
@@ -134,6 +142,8 @@ public final class LiDARManager: NSObject, ObservableObject {
     }
 
     public func stop() {
+        previousPose = nil
+        previousTimestamp = nil
         state = .ready
         arSession?.delegate = nil
         arSession?.pause()
@@ -177,6 +187,35 @@ public final class LiDARManager: NSObject, ObservableObject {
             transform: simdToROSTransform(frame.camera.transform)
         )
         transformSubject.send(TimestampedData(data: transformStamped, timestamp: timestamp, frameId: "world"))
+
+        let currentTransform = transformStamped.transform
+        var twist = Twist()
+        var twistCovariance = OdometryMessage.unknownTwistCovariance
+
+        if let prevPose = previousPose, let prevTime = previousTimestamp {
+            let dt = timestamp - prevTime
+            if dt > 0.001 {
+                let vx = (currentTransform.translation.x - prevPose.translation.x) / dt
+                let vy = (currentTransform.translation.y - prevPose.translation.y) / dt
+                let vz = (currentTransform.translation.z - prevPose.translation.z) / dt
+                let omega = angularVelocity(from: prevPose.rotation, to: currentTransform.rotation, dt: dt)
+                twist = Twist(linear: Vector3(x: vx, y: vy, z: vz), angular: omega)
+                twistCovariance = OdometryMessage.defaultTwistCovariance
+            }
+        }
+        previousPose = currentTransform
+        previousTimestamp = timestamp
+
+        let odom = OdometryMessage(
+            header: ROSHeader(timeInterval: timestamp, frameId: "odom"),
+            childFrameId: baseLink,
+            pose: PoseWithCovariance(
+                pose: Pose(position: currentTransform.translation, orientation: currentTransform.rotation),
+                covariance: OdometryMessage.defaultPoseCovariance
+            ),
+            twist: TwistWithCovariance(twist: twist, covariance: twistCovariance)
+        )
+        odometrySubject.send(TimestampedData(data: odom, timestamp: timestamp, frameId: "odom"))
 
         // Static identity transforms so rviz2 can resolve sensor frame_ids
         let lidarTf = TransformStamped(
@@ -279,6 +318,14 @@ public final class LiDARManager: NSObject, ObservableObject {
             memcpy(dest, src, height * bytesPerRow)
         }
         return copy
+    }
+
+    private func angularVelocity(from q1: Quaternion, to q2: Quaternion, dt: Double) -> Vector3 {
+        let q1Inv = Quaternion(x: -q1.x, y: -q1.y, z: -q1.z, w: q1.w)
+        let dx = q2.w * q1Inv.x + q2.x * q1Inv.w + q2.y * q1Inv.z - q2.z * q1Inv.y
+        let dy = q2.w * q1Inv.y - q2.x * q1Inv.z + q2.y * q1Inv.w + q2.z * q1Inv.x
+        let dz = q2.w * q1Inv.z + q2.x * q1Inv.y - q2.y * q1Inv.x + q2.z * q1Inv.w
+        return Vector3(x: 2.0 * dx / dt, y: 2.0 * dy / dt, z: 2.0 * dz / dt)
     }
 
     private func simdToROSTransform(_ m: simd_float4x4) -> Transform {

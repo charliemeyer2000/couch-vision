@@ -296,6 +296,13 @@ public final class SensorCoordinator: ObservableObject {
             }
             .store(in: &cancellables)
 
+        lidarManager.odometryPublisher
+            .sink { [weak self] data in
+                guard let self else { return }
+                Task { await self.publishOdometry(data) }
+            }
+            .store(in: &cancellables)
+
         lidarManager.cameraFramePublisher
             .sink { [weak self] data in
                 guard let self, cameraManager.isEnabled else { return }
@@ -468,6 +475,10 @@ public final class SensorCoordinator: ObservableObject {
 
     private func publishProximity(_ data: TimestampedData<BoolMsg>) async {
         await publish(CDREncoder.encode(data.data), to: "\(config.topicPrefix)/proximity")
+    }
+
+    private func publishOdometry(_ data: TimestampedData<OdometryMessage>) async {
+        await publish(CDREncoder.encode(data.data), to: "\(config.topicPrefix)/odom")
     }
 
     private func updateStats(topic: String, bytes: Int) {

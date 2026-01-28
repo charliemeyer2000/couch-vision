@@ -7,6 +7,23 @@ on:
     branches: [main]
 
 jobs:
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      ios: ${{ steps.filter.outputs.ios }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            ios:
+              - 'CouchVision/**'
+              - 'CouchVisionWidgets/**'
+              - 'project.yml'
+              - '.github/workflows/ci.yml'
+
   lint:
     name: Lint
     runs-on: macos-26
@@ -25,8 +42,8 @@ jobs:
   build:
     name: Build iOS
     runs-on: macos-26
-    needs: lint
-    if: github.event_name == 'pull_request'
+    needs: [lint, changes]
+    if: github.event_name == 'pull_request' && needs.changes.outputs.ios == 'true'
     steps:
       - uses: actions/checkout@v4
 
@@ -49,8 +66,8 @@ jobs:
   deploy:
     name: Deploy to TestFlight
     runs-on: macos-26
-    needs: lint
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [lint, changes]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.ios == 'true'
     steps:
       - uses: actions/checkout@v4
 

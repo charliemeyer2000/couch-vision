@@ -204,6 +204,13 @@ public final class CDREncoder {
         }
     }
 
+    public func encode(_ msg: Pose) { encode(msg.position); encode(msg.orientation) }
+    public func encode(_ msg: PoseWithCovariance) { encode(msg.pose); encodeFixed(msg.covariance) }
+    public func encode(_ msg: TwistWithCovariance) { encode(msg.twist); encodeFixed(msg.covariance) }
+    public func encode(_ msg: OdometryMessage) {
+        encode(msg.header); encode(msg.childFrameId); encode(msg.pose); encode(msg.twist)
+    }
+
     // MARK: - Factory
 
     public static func encode(_ msg: CompressedImage) -> Data { let e = CDREncoder(); e.encode(msg); return e.encodedData }
@@ -221,4 +228,5 @@ public final class CDREncoder {
     public static func encode(_ msg: BoolMsg) -> Data { let e = CDREncoder(); e.encode(msg); return e.encodedData }
     public static func encode(_ msg: Vector3Stamped) -> Data { let e = CDREncoder(); e.encode(msg); return e.encodedData }
     public static func encode(_ msg: TFMessage) -> Data { let e = CDREncoder(); e.encode(msg); return e.encodedData }
+    public static func encode(_ msg: OdometryMessage) -> Data { let e = CDREncoder(); e.encode(msg); return e.encodedData }
 }

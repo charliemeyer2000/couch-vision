@@ -22,6 +22,7 @@ import cv2
 import numpy as np
 import rclpy
 from geometry_msgs.msg import TransformStamped, TwistStamped, Vector3Stamped
+from nav_msgs.msg import Odometry
 from rclpy.node import Node
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import (
@@ -161,6 +162,7 @@ class IOSBridge(Node):  # type: ignore[misc]
             "/battery": BatteryState,
             "/thermal": Int32,
             "/proximity": Bool,
+            "/odom": Odometry,
         }
 
         self._parsers: dict[type[Any], Callable[[bytes], Any | None]] = {
@@ -179,6 +181,7 @@ class IOSBridge(Node):  # type: ignore[misc]
             BatteryState: self._parse_battery_state,
             Int32: self._parse_int32,
             Bool: self._parse_bool,
+            Odometry: self._parse_odometry,
         }
 
         self.get_logger().info(f"iOS Bridge initialized, will listen on port {port}")
@@ -526,6 +529,19 @@ class IOSBridge(Node):  # type: ignore[misc]
         r = CdrReader(cdr_data)
         msg = Int32()
         msg.data = r.int32()
+        return msg
+
+    def _parse_odometry(self, cdr_data: bytes) -> Odometry:
+        r = CdrReader(cdr_data)
+        msg = Odometry()
+        self._read_header(r, msg)
+        msg.child_frame_id = r.string()
+        self._read_vector3(r, msg.pose.pose.position)
+        self._read_quaternion(r, msg.pose.pose.orientation)
+        msg.pose.covariance = r.float64_array(36)
+        self._read_vector3(r, msg.twist.twist.linear)
+        self._read_vector3(r, msg.twist.twist.angular)
+        msg.twist.covariance = r.float64_array(36)
         return msg
 
     def _parse_bool(self, cdr_data: bytes) -> Bool:
