@@ -133,6 +133,13 @@ Runs on commit: SwiftFormat, SwiftLint, ruff (Python).
 
 Manual: `pre-commit run --all-files`
 
+**Important:** The Swift hooks use your system-installed SwiftFormat/SwiftLint. CI uses the latest Homebrew versions, so your local versions must match. Run `make setup` periodically to stay in sync — it upgrades these tools automatically. If CI fails on formatting but local hooks pass, this version mismatch is likely the cause:
+
+```bash
+make setup        # upgrades swiftformat/swiftlint to latest
+swiftformat .     # reformat with new version
+```
+
 ## Architecture
 
 ```

@@ -57,19 +57,13 @@ if [[ "$PLATFORM" == "macos" ]]; then
     # 4. Check for SwiftLint
     echo ""
     echo "[4/8] Checking SwiftLint..."
-    if ! command -v swiftlint &>/dev/null; then
-        echo "  Installing SwiftLint..."
-        brew install swiftlint
-    fi
+    brew upgrade swiftlint 2>/dev/null || brew install swiftlint
     echo "  SwiftLint OK: $(swiftlint version)"
 
     # 5. Check for SwiftFormat
     echo ""
     echo "[5/8] Checking SwiftFormat..."
-    if ! command -v swiftformat &>/dev/null; then
-        echo "  Installing SwiftFormat..."
-        brew install swiftformat
-    fi
+    brew upgrade swiftformat 2>/dev/null || brew install swiftformat
     echo "  SwiftFormat OK: $(swiftformat --version)"
 
     # 6. Set up Python bridge
