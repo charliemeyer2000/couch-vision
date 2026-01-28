@@ -41,6 +41,15 @@ Central `SensorCoordinator` manages all sensors and routes data to publishers.
 ### Message Serialization
 Using CDR (Common Data Representation) for ROS2 compatibility. Custom `CDREncoder` class handles serialization.
 
+### Data Pipeline: iOS App → Bridge → ROS2
+The iOS app does NOT publish directly to ROS2. Data flows through **three layers that must all be updated when adding a new topic/message type:**
+
+1. **iOS app** — Swift message struct (`CouchVision/ROS/Messages/`), CDR encoder overload + factory (`CDREncoder.swift`), sensor manager subject/publisher, SensorCoordinator subscription + publish method
+2. **Python bridge** (`bridge/ios_bridge.py`) — import the ROS2 message type, add topic suffix → type mapping in `_topic_types`, add CDR parser method in `_parsers`, implement the `_parse_*` method
+3. **rviz config** (`rviz/couchvision.rviz`) — add display if you want it visible by default
+
+**If you skip the bridge, messages will be silently dropped** with a warning log. The bridge does topic matching by suffix (e.g. `/odom`, `/imu`) and needs an explicit parser for each message type because it manually deserializes CDR bytes into ROS2 Python message objects.
+
 ## Code Review Notes (Jan 2026)
 
 **Fixed issues:**
@@ -83,20 +92,27 @@ Using CDR (Common Data Representation) for ROS2 compatibility. Custom `CDREncode
 
 ```bash
 # Build iOS project from command line
-xcodebuild -project CouchVision.xcodeproj -scheme CouchVision -sdk iphoneos build
+make build-ios
+# or: xcodebuild -project CouchVision.xcodeproj -scheme CouchVision -sdk iphoneos build
 
-# List available simulators
-xcrun simctl list devices
+# Open Xcode
+make xcode
 
-# Check ROS2 topics (on Mac with ROS2)
-ros2 topic list
-ros2 topic echo /iphone/imu
+# Start the TCP bridge (must be running for iPhone → ROS2 data flow)
+make bridge
 
-# Zenoh router (if testing Zenoh)
-zenohd
+# Show Mac IP addresses (needed for iPhone endpoint config)
+make ip
 
-# Check USB network interfaces
-ifconfig | grep -A5 "en"
+# ROS2 tools
+make topics              # List all ROS2 topics
+make hz T=/iphone/imu    # Check topic frequency
+make echo T=/iphone/odom # Echo topic messages
+make rviz                # Launch RViz2 with project config
+make rqt                 # Launch RQT dashboard
+
+# Full quick start guide
+make quickstart
 ```
 
 ## File Structure
