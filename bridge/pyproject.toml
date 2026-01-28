@@ -2,12 +2,12 @@
 name = "couch-vision-bridge"
 version = "0.1.0"
 description = "ROS2 bridge for CouchVision iOS app"
-requires-python = ">=3.12,<3.13"
+requires-python = ">=3.10"
 # ROS2 packages (rclpy, sensor_msgs, geometry_msgs) come from the ROS2 system install.
 # This project uses --system-site-packages to access them.
 # Only add pure-Python pip dependencies here if needed.
 dependencies = [
-    "numpy>=2.4.1",
+    "numpy>=1.24",
     "opencv-python-headless>=4.10",
     "pyyaml>=6.0.3",
 ]
@@ -20,7 +20,7 @@ ios-bridge = "ios_bridge:main"
 # to access ROS2 Python packages from the system installation.
 
 [tool.ruff]
-target-version = "py312"
+target-version = "py310"
 line-length = 100
 
 [tool.ruff.lint]
@@ -50,7 +50,7 @@ indent-style = "space"
 skip-magic-trailing-comma = false
 
 [tool.mypy]
-python_version = "3.12"
+python_version = "3.10"
 strict = true
 warn_return_any = true
 warn_unused_configs = true
