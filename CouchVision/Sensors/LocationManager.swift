@@ -50,7 +50,9 @@ public final class LocationManager: NSObject, ObservableObject {
         set { _framePrefixLock.withLock { _framePrefix = newValue } }
     }
 
-    private var frameId: String { "\(framePrefix)_gps" }
+    private var frameId: String {
+        "\(framePrefix)_gps"
+    }
 
     public let sensorId = "location"
     public let displayName = "GPS Location"

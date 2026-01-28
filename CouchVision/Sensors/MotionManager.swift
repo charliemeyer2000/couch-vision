@@ -51,7 +51,9 @@ public final class MotionManager: ObservableObject {
         set { _framePrefixLock.withLock { _framePrefix = newValue } }
     }
 
-    private var frameId: String { "\(framePrefix)_imu" }
+    private var frameId: String {
+        "\(framePrefix)_imu"
+    }
 
     // Estimated covariance values for iPhone sensors
     private let accelCovariance: Covariance3x3 = [0.01, 0, 0, 0, 0.01, 0, 0, 0, 0.01]

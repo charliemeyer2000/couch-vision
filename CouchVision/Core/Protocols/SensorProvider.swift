@@ -35,7 +35,9 @@ public enum SensorState: Equatable {
 /// Configuration for sensor update rates
 public struct SensorRateConfig {
     public let interval: TimeInterval
-    public var frequencyHz: Double { 1.0 / interval }
+    public var frequencyHz: Double {
+        1.0 / interval
+    }
 
     public static let hz100 = SensorRateConfig(interval: 1.0 / 100.0)
     public static let hz50 = SensorRateConfig(interval: 1.0 / 50.0)

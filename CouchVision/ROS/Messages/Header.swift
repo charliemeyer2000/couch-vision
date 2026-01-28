@@ -16,7 +16,9 @@ public struct ROSTime: Equatable {
         nanosec = UInt32((timeInterval - wholeSec) * 1_000_000_000)
     }
 
-    public static var now: ROSTime { ROSTime(timeInterval: Date().timeIntervalSince1970) }
+    public static var now: ROSTime {
+        ROSTime(timeInterval: Date().timeIntervalSince1970)
+    }
 }
 
 /// ROS2 std_msgs/msg/Header

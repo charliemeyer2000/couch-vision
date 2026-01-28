@@ -52,10 +52,15 @@ public final class EnvironmentManager: ObservableObject {
         set { _framePrefixLock.withLock { _framePrefix = newValue } }
     }
 
-    private var magnetometerFrameId: String { "\(framePrefix)_magnetometer" }
-    private var barometerFrameId: String { "\(framePrefix)_barometer" }
+    private var magnetometerFrameId: String {
+        "\(framePrefix)_magnetometer"
+    }
 
-    // Magnetometer covariance (estimated)
+    private var barometerFrameId: String {
+        "\(framePrefix)_barometer"
+    }
+
+    /// Magnetometer covariance (estimated)
     private let magCovariance: [Double] = [0.0001, 0, 0, 0, 0.0001, 0, 0, 0, 0.0001]
 
     public let sensorId = "environment"

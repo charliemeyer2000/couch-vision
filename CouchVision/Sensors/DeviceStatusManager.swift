@@ -48,7 +48,9 @@ public final class DeviceStatusManager: ObservableObject {
         set { _framePrefixLock.withLock { _framePrefix = newValue } }
     }
 
-    private var frameId: String { "\(framePrefix)_device" }
+    private var frameId: String {
+        "\(framePrefix)_device"
+    }
 
     public let sensorId = "device_status"
     public let displayName = "Device Status"

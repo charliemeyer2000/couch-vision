@@ -79,7 +79,9 @@ public enum CameraType: String, CaseIterable {
         self == .front ? .front : .back
     }
 
-    func frameId(prefix: String) -> String { "\(prefix)_camera_\(rawValue)" }
+    func frameId(prefix: String) -> String {
+        "\(prefix)_camera_\(rawValue)"
+    }
 }
 
 public final class CameraManager: NSObject, ObservableObject {

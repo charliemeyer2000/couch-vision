@@ -88,7 +88,9 @@ public final class LiDARManager: NSObject, ObservableObject {
         set { _framePrefixLock.withLock { _framePrefix = newValue } }
     }
 
-    private var frameId: String { "\(framePrefix)_lidar" }
+    private var frameId: String {
+        "\(framePrefix)_lidar"
+    }
 
     public let sensorId = "lidar"
     public let displayName = "LiDAR"
