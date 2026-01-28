@@ -66,6 +66,9 @@ cd ~/couch_ws && colcon build --symlink-install
 # Source workspace
 source ~/couch_ws/install/setup.bash
 
+# Deploy latest code to Jetson
+make deploy-jetson
+
 # SSH to Jetson
 ssh jetson-nano
 
@@ -77,6 +80,9 @@ ros2 run teleop_twist_keyboard teleop_twist_keyboard
 
 # Check TF tree
 ros2 run tf2_tools view_frames
+
+# Foxglove visualization (Linux/Jetson only)
+make foxglove  # WebSocket bridge on port 8765, connect from Foxglove app
 
 # Echo topics
 ros2 topic echo /cmd_vel
@@ -289,7 +295,7 @@ The iOS app is already built and streaming. This phase is about deploying, mount
   - [ ] `/iphone/camera/back_wide/camera_info` — verify intrinsics
   - [ ] `/iphone/imu` — check ~100Hz
   - [ ] `/tf` — verify ARKit pose transforms
-- [ ] Visualize in RViz2 on Mac (via `ssh -X jetson-nano` or local ROS2)
+- [ ] Visualize via Foxglove on Mac (connect to `ws://jetson-nano:8765` — `make foxglove` on Jetson)
 - [ ] Measure end-to-end latency
 
 #### Required iOS App Changes (before Phase 2)
@@ -711,6 +717,7 @@ sudo apt install ros-jazzy-image-transport-plugins    # for compressed ↔ raw
 # Visualization
 sudo apt install ros-jazzy-rviz2
 sudo apt install ros-jazzy-rqt*
+sudo apt install ros-jazzy-foxglove-bridge  # WebSocket bridge for Foxglove app
 
 # Control
 sudo apt install ros-jazzy-ros2-control
@@ -875,6 +882,18 @@ This section is for Claude Code instances and other agents to record learnings, 
 
 ### Helpful Commands
 <!-- Agents: add useful commands here -->
+- `make foxglove` — starts Foxglove WebSocket bridge on port 8765 (Linux/Jetson only). Connect from Foxglove desktop app at `ws://<jetson-ip>:8765`. Preferred over RViz2 for remote visualization — supports compressed images natively, has GPS map panel, runs on any OS.
+
+### foxglove_bridge Build (Jetson)
+
+foxglove_bridge is built from source on the Jetson at `~/ros2_jazzy/`. It requires:
+
+1. **rosx_introspection** — cloned to `~/ros2_jazzy/src/rosx_introspection`. Requires a patch for Jazzy: `rosbag2_cpp/typesupport_helpers.hpp` moved to `rclcpp/typesupport_helpers.hpp`, and namespace changed from `rosbag2_cpp::` to `rclcpp::` (functions: `get_typesupport_library`, `get_message_typesupport_handle`). The `get_message_typesupport_handle` takes `SharedLibrary&` not `shared_ptr`, so dereference with `*`.
+2. **foxglove-sdk** — cloned to `~/ros2_jazzy/src/foxglove-sdk`. The bridge is at `ros/src/foxglove_bridge/`.
+3. **System deps:** `rapidjson-dev`, `nlohmann-json3-dev`, `libasio-dev` (all via apt).
+4. **Build:** `colcon build --packages-select rosx_introspection foxglove_bridge --symlink-install --cmake-args -DBUILD_TESTING=OFF`
+
+**Does NOT build on macOS** — the foxglove SDK ships precompiled binaries for Linux only (x86_64 and aarch64). macOS/ARM64 is not supported.
 
 ### Architecture Decisions
 <!-- Agents: record decisions and rationale here -->
@@ -892,5 +911,5 @@ This section is for Claude Code instances and other agents to record learnings, 
 
 ---
 
-*Last updated: 2026-01-27*
-*Current phase: 0/1 (hardware not started, iOS app built, odometry topic added)*
+*Last updated: 2026-01-28*
+*Current phase: 0/1 (hardware not started, iOS app built, odometry topic added, foxglove_bridge on Jetson)*

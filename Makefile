@@ -16,8 +16,8 @@ ROS2_SETUP := export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp; \
 
 .PHONY: help setup setup-ros2 setup-bridge \
         build-ios build-sim xcode regen \
-        bridge topics echo hz rviz rqt image \
-        ip check-ros2 clean \
+        bridge foxglove topics echo hz rviz rqt image \
+        deploy-jetson ip check-ros2 clean \
         lint lint-fix format
 
 # === Help ===
@@ -38,6 +38,10 @@ help:
 	@echo ""
 	@echo "ROS2 Bridge:"
 	@echo "  make bridge         Run iOS bridge (PORT=$(BRIDGE_PORT))"
+	@echo "  make foxglove       Start Foxglove WebSocket bridge (Jetson only)"
+	@echo ""
+	@echo "Jetson Deployment:"
+	@echo "  make deploy-jetson  Pull latest code on Jetson via SSH"
 	@echo ""
 	@echo "ROS2 Tools:"
 	@echo "  make topics         List ROS2 topics"
@@ -93,6 +97,12 @@ bridge:
 	@echo ""
 	@$(ROS2_SETUP) && cd bridge && ([ -f .venv/pyvenv.cfg ] && grep -q "include-system-site-packages = true" .venv/pyvenv.cfg || uv venv --system-site-packages) && uv sync --quiet && uv run python ios_bridge.py --port $(BRIDGE_PORT)
 
+foxglove:
+	@echo "Starting Foxglove WebSocket bridge on port 8765..."
+	@echo "Connect from Foxglove app: ws://localhost:8765"
+	@echo ""
+	@$(ROS2_SETUP) && ros2 launch foxglove_bridge foxglove_bridge_launch.xml port:=8765
+
 # === ROS2 Tools ===
 
 topics:
@@ -122,6 +132,15 @@ image:
 	@$(ROS2_SETUP) && ros2 run image_tools showimage --ros-args \
 		-r image:=/iphone/camera/back_wide/image/raw \
 		-p reliability:=best_effort
+
+# === Jetson Deployment ===
+
+deploy-jetson:
+	@echo "Deploying latest code to Jetson..."
+	ssh jetson-nano 'cd ~/couch-vision && git pull'
+	@echo ""
+	@echo "Done. To run the bridge on Jetson:"
+	@echo "  ssh jetson-nano 'cd ~/couch-vision && make bridge'"
 
 # === Utilities ===
 

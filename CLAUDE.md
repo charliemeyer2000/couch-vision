@@ -105,11 +105,15 @@ make bridge
 make ip
 
 # ROS2 tools
+make foxglove            # Start Foxglove WebSocket bridge (Linux/Jetson only)
 make topics              # List all ROS2 topics
 make hz T=/iphone/imu    # Check topic frequency
 make echo T=/iphone/odom # Echo topic messages
 make rviz                # Launch RViz2 with project config
 make rqt                 # Launch RQT dashboard
+
+# Deploy to Jetson (pulls latest code via SSH)
+make deploy-jetson
 
 # Full quick start guide
 make quickstart
