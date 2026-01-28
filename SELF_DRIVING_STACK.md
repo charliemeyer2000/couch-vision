@@ -44,15 +44,19 @@ Building a self-driving couch using iPhones as the primary sensor platform, with
 ## Development Environment
 
 ### Machines
-- **Mac (local):** ROS2 Jazzy installed, used for development and local testing. This is where Claude Code runs.
-- **Jetson Orin Nano:** Accessible via `ssh jetson-nano` (Tailscale VPN). Has ROS2 Jazzy. This is the target compute platform on the couch.
+- **Mac (local):** iOS development (Xcode/Swift), Claude Code, and visualization (Foxglove app). ROS2 Jazzy installed for local testing but Jetson is the primary ROS2 host.
+- **Jetson Orin Nano:** Accessible via `ssh jetson-nano` (Tailscale). Has ROS2 Jazzy (built from source at `~/ros2_jazzy/`). Runs the TCP bridge, foxglove_bridge, and all ROS2 nodes. This repo is cloned at `~/couch-vision/`. This is the target compute platform on the couch.
 - **iPhone 12 Pro+:** Single phone. Can connect to Mac (USB-C or WiFi) or directly to Jetson (USB-C).
+
+All contributors on the tailnet can `ssh jetson-nano` and access the Jetson.
 
 ### Connectivity Options
 ```
-Option A (development):   iPhone --USB-C--> Mac --tailnet--> Jetson
-Option B (deployment):    iPhone --USB-C--> Jetson (direct, lowest latency)
-Option C (wireless):      iPhone --WiFi--> Jetson (higher latency, no cable)
+Option A (development):   iPhone --USB-C--> Mac (bridge) --tailnet--> Jetson
+Option B (deployment):    iPhone --USB-C--> Jetson (bridge, lowest latency)
+Option C (wireless):      iPhone --WiFi--> Jetson (bridge, higher latency)
+
+Visualization:            Jetson (foxglove_bridge:8765) --tailnet--> Mac (Foxglove app)
 ```
 
 ### Key Commands
