@@ -87,13 +87,10 @@ public final class SensorCoordinator: ObservableObject {
     private var consecutivePublishFailures = 0
     private let maxConsecutiveFailures = 5
 
-    // Backpressure: per-topic send gates to prevent unbounded memory growth.
-    // When a send is in flight, new frames for that topic are dropped (latest-wins).
+    // Backpressure: tracks which topic keys have an in-flight send.
+    // When a send is in flight, new frames for that key are dropped (latest-wins).
     // On fast connections the gate is always open; only slow connections see drops.
-    private var sendingCamera = false
-    private var sendingLiDAR = false
-    private var sendingPointCloud = false
-    private var sendingOdom = false
+    private var inFlightSends: Set<String> = []
 
     public init(config: CoordinatorConfig? = nil) {
         self.config = config ?? CoordinatorConfig(
@@ -409,16 +406,25 @@ public final class SensorCoordinator: ObservableObject {
         }
     }
 
+    /// Publish with backpressure gating. If a send with the same `key` is already
+    /// in flight, the call returns immediately (dropping the frame). This prevents
+    /// unbounded memory growth on slow connections while having zero impact on fast ones.
+    private func publishGated(key: String, _ work: () async -> Void) async {
+        guard !inFlightSends.contains(key) else { return }
+        inFlightSends.insert(key)
+        await work()
+        inFlightSends.remove(key)
+    }
+
     private func publishCameraFrame(_ frame: TimestampedData<CameraFrame>) async {
-        guard !sendingCamera else { return }
-        sendingCamera = true
-        defer { sendingCamera = false }
-        let msg = CompressedImage.jpeg(
-            data: frame.data.jpegData,
-            frameId: frame.frameId,
-            timestamp: frame.timestamp
-        )
-        await publish(CDREncoder.encode(msg), to: "\(config.topicPrefix)/camera/\(frame.data.cameraId)/image/compressed")
+        await publishGated(key: "camera") {
+            let msg = CompressedImage.jpeg(
+                data: frame.data.jpegData,
+                frameId: frame.frameId,
+                timestamp: frame.timestamp
+            )
+            await publish(CDREncoder.encode(msg), to: "\(config.topicPrefix)/camera/\(frame.data.cameraId)/image/compressed")
+        }
     }
 
     private func publishCameraInfo(_ data: TimestampedData<CameraInfo>) async {
@@ -428,15 +434,15 @@ public final class SensorCoordinator: ObservableObject {
     }
 
     private func publishLiDARData(_ data: TimestampedData<LiDARData>) async {
-        if let depthImage = data.data.depthImage, !sendingLiDAR {
-            sendingLiDAR = true
-            await publish(CDREncoder.encode(depthImage), to: "\(config.topicPrefix)/lidar/depth/image")
-            sendingLiDAR = false
+        if let depthImage = data.data.depthImage {
+            await publishGated(key: "lidar_depth") {
+                await publish(CDREncoder.encode(depthImage), to: "\(config.topicPrefix)/lidar/depth/image")
+            }
         }
-        if let pointCloud = data.data.pointCloud, !sendingPointCloud {
-            sendingPointCloud = true
-            await publish(CDREncoder.encode(pointCloud), to: "\(config.topicPrefix)/lidar/points")
-            sendingPointCloud = false
+        if let pointCloud = data.data.pointCloud {
+            await publishGated(key: "lidar_points") {
+                await publish(CDREncoder.encode(pointCloud), to: "\(config.topicPrefix)/lidar/points")
+            }
         }
     }
 
@@ -493,10 +499,9 @@ public final class SensorCoordinator: ObservableObject {
     }
 
     private func publishOdometry(_ data: TimestampedData<OdometryMessage>) async {
-        guard !sendingOdom else { return }
-        sendingOdom = true
-        defer { sendingOdom = false }
-        await publish(CDREncoder.encode(data.data), to: "\(config.topicPrefix)/odom")
+        await publishGated(key: "odom") {
+            await publish(CDREncoder.encode(data.data), to: "\(config.topicPrefix)/odom")
+        }
     }
 
     private func updateStats(topic: String, bytes: Int) {
