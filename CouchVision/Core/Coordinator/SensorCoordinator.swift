@@ -87,6 +87,14 @@ public final class SensorCoordinator: ObservableObject {
     private var consecutivePublishFailures = 0
     private let maxConsecutiveFailures = 5
 
+    // Backpressure: per-topic send gates to prevent unbounded memory growth.
+    // When a send is in flight, new frames for that topic are dropped (latest-wins).
+    // On fast connections the gate is always open; only slow connections see drops.
+    private var sendingCamera = false
+    private var sendingLiDAR = false
+    private var sendingPointCloud = false
+    private var sendingOdom = false
+
     public init(config: CoordinatorConfig? = nil) {
         self.config = config ?? CoordinatorConfig(
             topicPrefix: SettingsStorage.topicPrefix,
@@ -402,6 +410,9 @@ public final class SensorCoordinator: ObservableObject {
     }
 
     private func publishCameraFrame(_ frame: TimestampedData<CameraFrame>) async {
+        guard !sendingCamera else { return }
+        sendingCamera = true
+        defer { sendingCamera = false }
         let msg = CompressedImage.jpeg(
             data: frame.data.jpegData,
             frameId: frame.frameId,
@@ -417,11 +428,15 @@ public final class SensorCoordinator: ObservableObject {
     }
 
     private func publishLiDARData(_ data: TimestampedData<LiDARData>) async {
-        if let depthImage = data.data.depthImage {
+        if let depthImage = data.data.depthImage, !sendingLiDAR {
+            sendingLiDAR = true
             await publish(CDREncoder.encode(depthImage), to: "\(config.topicPrefix)/lidar/depth/image")
+            sendingLiDAR = false
         }
-        if let pointCloud = data.data.pointCloud {
+        if let pointCloud = data.data.pointCloud, !sendingPointCloud {
+            sendingPointCloud = true
             await publish(CDREncoder.encode(pointCloud), to: "\(config.topicPrefix)/lidar/points")
+            sendingPointCloud = false
         }
     }
 
@@ -478,6 +493,9 @@ public final class SensorCoordinator: ObservableObject {
     }
 
     private func publishOdometry(_ data: TimestampedData<OdometryMessage>) async {
+        guard !sendingOdom else { return }
+        sendingOdom = true
+        defer { sendingOdom = false }
         await publish(CDREncoder.encode(data.data), to: "\(config.topicPrefix)/odom")
     }
 
