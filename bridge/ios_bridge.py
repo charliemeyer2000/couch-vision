@@ -36,8 +36,9 @@ from sensor_msgs.msg import (
     NavSatFix,
     PointCloud2,
 )
-from std_msgs.msg import Bool, Float64, Int32
+from std_msgs.msg import Bool, ColorRGBA, Float64, Int32
 from tf2_msgs.msg import TFMessage
+from visualization_msgs.msg import Marker
 
 if TYPE_CHECKING:
     from rclpy.publisher import Publisher
@@ -183,6 +184,10 @@ class IOSBridge(Node):  # type: ignore[misc]
             Bool: self._parse_bool,
             Odometry: self._parse_odometry,
         }
+
+        # Couch bounding box marker (placeholder dimensions — adjust in Phase 0)
+        self._marker_pub = self.create_publisher(Marker, "/couch/marker", self._reliable_qos)
+        self.create_timer(1.0, self._publish_couch_marker)
 
         self.get_logger().info(f"iOS Bridge initialized, will listen on port {port}")
 
@@ -549,6 +554,24 @@ class IOSBridge(Node):  # type: ignore[misc]
         msg = Bool()
         msg.data = r.bool()
         return msg
+
+    def _publish_couch_marker(self) -> None:
+        """Publish a box marker representing the couch footprint."""
+        m = Marker()
+        m.header.frame_id = "base_link"
+        m.header.stamp = self.get_clock().now().to_msg()
+        m.ns = "couch"
+        m.id = 0
+        m.type = Marker.CUBE
+        m.action = Marker.ADD
+        m.pose.position.z = 0.4
+        m.pose.orientation.w = 1.0
+        m.scale.x = 1.5  # length (meters) — adjust when measured
+        m.scale.y = 0.7  # width
+        m.scale.z = 0.8  # height
+        m.color = ColorRGBA(r=0.4, g=0.3, b=0.2, a=0.6)
+        m.lifetime.sec = 2
+        self._marker_pub.publish(m)
 
     def stop(self) -> None:
         """Stop the bridge."""
