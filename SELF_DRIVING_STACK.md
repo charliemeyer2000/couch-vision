@@ -9,8 +9,14 @@ This is the **master tracking document** for the self-driving couch project. It 
 3. **Plan a chunk of work** — scope a reasonable unit (e.g. one phase, one critical gap, one subsystem). Enter plan mode, explore the codebase, and propose your implementation.
 4. **Implement it** — write the code, test it (locally on Mac or via `ssh jetson-nano`).
 5. **Update this document** — check off completed items `[x]`, add notes to the "Agent Notes & Learnings" section, record any gotchas or commands discovered.
-6. **Commit with a descriptive message** — the git log is our changelog. Include what phase/task was completed.
-7. **Repeat** — the next agent (or next session) re-reads this doc and picks up where you left off.
+6. **Create a pull request** — never commit directly to `main`. Create a feature branch, commit there, and open a PR. Label the PR with the phase/task it completes (e.g. `phase-1`, `phase-2-gps`). Only once the PR is merged into `main` should the next task begin.
+7. **Repeat** — the next agent (or next session) re-reads this doc from `main` and picks up where the last merged PR left off.
+
+**Branch & PR rules:**
+- **Never commit directly to `main`.** All work goes through pull requests.
+- Branch naming: `phase-N/short-description` (e.g. `phase-1/foxglove-layout`, `phase-2/gps-waypoints`)
+- A task is only considered complete when its PR is merged into `main`.
+- Do not start dependent work until the blocking PR is merged.
 
 **Important for agents:**
 - Always re-read `CLAUDE.md` for iOS app conventions and `SELF_DRIVING_STACK.md` for overall project state before starting work.
@@ -22,22 +28,25 @@ This is the **master tracking document** for the self-driving couch project. It 
 
 ## Project Overview
 
-Building a self-driving couch using iPhones as the primary sensor platform, with a Jetson Orin Nano for computation, Nav2 for navigation, and GPU-accelerated SLAM.
+Building a self-driving couch using iPhones as the primary sensor platform, with a Jetson Orin Nano for computation, Nav2 for navigation, and GPU-accelerated perception.
 
 **Hardware Platform:**
 - Compute: NVIDIA Jetson Orin Nano (8GB shared GPU/CPU memory)
+- Workstation: Desktop with RTX 5090 (32GB VRAM) — accessible via `ssh workstation`. For heavier ML models if needed.
 - Sensors: iPhone 12 Pro+ (1 phone currently, expandable)
 - Drive: Differential drive (two powered wheels, varying left/right speeds to turn)
 - Motor Controllers: TBD (ODrive, VESC, or similar)
 
 **Software Stack:**
 - ROS2 Jazzy
-- Nav2 for planning and control
+- Nav2 for planning and control (including GPS waypoint navigation)
+- Perception: YOLOv8 on Jetson (DeepStream + TensorRT) for object detection
 - SLAM: RTAB-Map (primary) or Isaac ROS Visual SLAM (stretch — tight on Orin Nano memory)
 - iPhone sensor streaming via CouchVision iOS app (this repo)
 - Transport: Zenoh (rmw_zenoh_cpp) over USB-C wired or WiFi
+- Visualization: Foxglove (remote from Mac, bridge on Jetson)
 
-**Environment:** Indoor + outdoor
+**Environment:** Indoor + outdoor (GPS-based outdoor waypoint navigation planned)
 
 ---
 
@@ -46,6 +55,7 @@ Building a self-driving couch using iPhones as the primary sensor platform, with
 ### Machines
 - **Mac (local):** iOS development (Xcode/Swift), Claude Code, and visualization (Foxglove app). ROS2 Jazzy installed for local testing but Jetson is the primary ROS2 host.
 - **Jetson Orin Nano:** Accessible via `ssh jetson-nano` (Tailscale). Has ROS2 Jazzy (built from source at `~/ros2_jazzy/`). Runs the TCP bridge, foxglove_bridge, and all ROS2 nodes. This repo is cloned at `~/couch-vision/`. This is the target compute platform on the couch.
+- **Workstation:** Accessible via `ssh workstation` (Tailscale). RTX 5090 (32GB VRAM). For running larger ML models (VLAs, large detection models) if needed. Not part of the critical path.
 - **iPhone 12 Pro+:** Single phone. Can connect to Mac (USB-C or WiFi) or directly to Jetson (USB-C).
 
 All contributors on the tailnet can `ssh jetson-nano` and access the Jetson.
@@ -128,10 +138,6 @@ The iOS app publishes these topics. The topic prefix is configurable in-app (def
 | `{prefix}/proximity` | std_msgs/Bool | DeviceStatusManager | On change | |
 | `{prefix}/odom` | nav_msgs/Odometry | LiDARManager | ~30 Hz | ARKit VIO pose + velocity from pose differencing. Covariance included. |
 
-### ~~Critical Gap: No Odometry Topic~~ (RESOLVED)
-
-The app now publishes `nav_msgs/Odometry` on `{prefix}/odom` from LiDARManager. Velocity is computed via pose differencing at ~30Hz. First frame after start has unknown twist covariance (`covariance[0] = -1`). The bridge (`ios_bridge.py`) has the corresponding CDR parser.
-
 ### Critical Gap: Compressed vs Raw Images
 
 The app publishes **JPEG CompressedImage**, but SLAM nodes (RTAB-Map, Isaac ROS) expect raw `sensor_msgs/Image`. Options:
@@ -164,8 +170,8 @@ Option 3 is simplest for RTAB-Map. For Isaac ROS, option 1 is needed.
 │  │  /iphone/lidar/points                       (PointCloud2 XYZI)      │  │
 │  │  /iphone/imu                                (100Hz, with covariance)│  │
 │  │  /iphone/gps/fix                            (NavSatFix)             │  │
-│  │  /tf                                        (ARKit 6DOF pose)       │  │
 │  │  /iphone/odom                               (nav_msgs/Odometry)     │  │
+│  │  /tf                                        (ARKit 6DOF pose)       │  │
 │  └──────────────────────────────┬────────────────────────────────────────┘  │
 │                                 │ USB-C / WiFi / Zenoh                      │
 └─────────────────────────────────┼──────────────────────────────────────────┘
@@ -178,13 +184,34 @@ Option 3 is simplest for RTAB-Map. For Isaac ROS, option 1 is needed.
 │  │                    BRIDGE / PREPROCESSING LAYER                        │ │
 │  │                                                                        │ │
 │  │  ┌──────────────────────┐    ┌──────────────────────────────────────┐  │ │
-│  │  │ image_transport      │    │ TF → Odom bridge (if needed)        │  │ │
-│  │  │ republish node       │    │ /tf world→iphone_base_link          │  │ │
-│  │  │                      │    │        ↓                            │  │ │
-│  │  │ compressed → raw     │    │ /iphone/odom (nav_msgs/Odometry)   │  │ │
-│  │  │ (only if SLAM needs  │    │ (only if iOS app doesn't add this) │  │ │
-│  │  │  raw images)         │    │                                    │  │ │
-│  │  └──────────────────────┘    └──────────────────────────────────────┘  │ │
+│  │  │ image_transport      │    │ navsat_transform_node               │  │ │
+│  │  │ republish node       │    │ /iphone/gps/fix → UTM local frame  │  │ │
+│  │  │                      │    │ Datum: first GPS fix or configured  │  │ │
+│  │  │ compressed → raw     │    │                                    │  │ │
+│  │  │ (only if SLAM needs  │    └──────────────────────────────────────┘  │ │
+│  │  │  raw images)         │                                              │ │
+│  │  └──────────────────────┘                                              │ │
+│  └────────────────────────────────────────────────────────────────────────┘ │
+│                                                                              │
+│  ┌────────────────────────────────────────────────────────────────────────┐ │
+│  │                      PERCEPTION LAYER                                  │ │
+│  │                                                                        │ │
+│  │  ┌──────────────────┐    ┌─────────────────────────────────────────┐  │ │
+│  │  │ YOLOv8n (INT8)   │    │ pointcloud_to_laserscan                │  │ │
+│  │  │ DeepStream +     │    │ /iphone/lidar/points → /scan           │  │ │
+│  │  │ TensorRT         │    │ (LaserScan for Nav2 costmap)           │  │ │
+│  │  │                  │    └─────────────────────────────────────────┘  │ │
+│  │  │ Detects:         │                                                  │ │
+│  │  │ - pedestrians    │                                                  │ │
+│  │  │ - vehicles       │                                                  │ │
+│  │  │ - stop signs     │                                                  │ │
+│  │  │ - lanes          │                                                  │ │
+│  │  │                  │                                                  │ │
+│  │  │ Output:          │                                                  │ │
+│  │  │ /detections      │                                                  │ │
+│  │  │ (Detection2D     │                                                  │ │
+│  │  │  Array)          │                                                  │ │
+│  │  └──────────────────┘                                                  │ │
 │  └────────────────────────────────────────────────────────────────────────┘ │
 │                                                                              │
 │  ┌────────────────────────────────────────────────────────────────────────┐ │
@@ -197,14 +224,10 @@ Option 3 is simplest for RTAB-Map. For Isaac ROS, option 1 is needed.
 │  │  │ - odom→base_link │    │ - /iphone/odom (ARKit VIO)              │  │ │
 │  │  │ - base_link→     │    │ - /wheel_odom (from encoders)           │  │ │
 │  │  │   iphone_link    │    │ - /iphone/imu                           │  │ │
-│  │  └──────────────────┘    │                                         │  │ │
+│  │  └──────────────────┘    │ - /iphone/gps/fix (via navsat)          │  │ │
+│  │                          │                                         │  │ │
 │  │                          │ Output: /odometry/filtered               │  │ │
 │  │                          └─────────────────────────────────────────┘  │ │
-│  │                                                                        │ │
-│  │  ┌─────────────────────────────────────────────────────────────────┐  │ │
-│  │  │ pointcloud_to_laserscan                                         │  │ │
-│  │  │ /iphone/lidar/points → /scan (LaserScan for Nav2 costmap)      │  │ │
-│  │  └─────────────────────────────────────────────────────────────────┘  │ │
 │  └────────────────────────────────────────────────────────────────────────┘ │
 │                                                                              │
 │  ┌────────────────────────────────────────────────────────────────────────┐ │
@@ -223,7 +246,10 @@ Option 3 is simplest for RTAB-Map. For Isaac ROS, option 1 is needed.
 │  ┌────────────────────────────────────────────────────────────────────────┐ │
 │  │                         NAV2 LAYER                                     │ │
 │  │                                                                        │ │
-│  │  Costmap2D → BT Navigator → SmacPlanner → DWB Controller              │ │
+│  │  Two modes:                                                            │ │
+│  │  1. Indoor: Costmap2D → SmacPlanner → DWB Controller                  │ │
+│  │  2. Outdoor GPS: GPS waypoint follower → nav_msgs/Path                │ │
+│  │     navsat_transform_node converts WGS84 → UTM local frame            │ │
 │  │                                                                        │ │
 │  │  Output: /cmd_vel (Twist)                                              │ │
 │  │    linear.x  = forward velocity                                        │ │
@@ -248,10 +274,12 @@ Option 3 is simplest for RTAB-Map. For Isaac ROS, option 1 is needed.
 
 ## Implementation Phases
 
-### Phase 0: Hardware Setup
+Phases are ordered so software work can proceed in parallel with hardware procurement. Phases 1-3 are **software-only** and unblocked right now. Phase 0 (hardware) can happen in parallel whenever parts arrive.
+
+### Phase 0: Hardware Setup ⚙️
 **Goal:** Couch drives manually via teleop
 
-**Status:** Not Started
+**Status:** Not Started — can proceed in parallel with software phases
 
 #### Tasks
 - [ ] Select and purchase motors, wheels, motor controllers, encoders
@@ -277,34 +305,37 @@ Couch drives with keyboard control, `/wheel_odom` publishes from encoders
 
 ---
 
-### Phase 1: iPhone Streaming → ROS2
-**Goal:** CouchVision data visible in RViz2 on Jetson
+### Phase 1: Sensor Verification & Visualization 📱
+**Goal:** iPhone data streaming end-to-end, visualized in Foxglove
 
-**Status:** In Progress (iOS app built, needs deployment + verification)
+**Status:** In Progress — streaming works, Foxglove connected, layout needed
 
-The iOS app is already built and streaming. This phase is about deploying, mounting, and verifying data flows end-to-end.
+The iOS app is built and streaming 18 topics. The bridge and foxglove_bridge are running on Jetson. This phase is about verifying data quality and building a proper visualization layout.
 
 #### Tasks
-- [ ] Deploy CouchVision app to iPhone via Xcode
-- [ ] Connect iPhone to Jetson Orin Nano via USB-C
-- [ ] Configure Zenoh bridge / TCP bridge on Jetson to receive CouchVision data
-- [ ] Set app topic prefix to `/iphone` (or `/iphone1` for multi-phone future)
+- [x] Deploy CouchVision app to iPhone
+- [x] TCP bridge running on Jetson (`make bridge`)
+- [x] Foxglove bridge running on Jetson (`make foxglove`)
+- [x] Foxglove app on Mac connects to Jetson (`ws://jetson-nano:8765`)
+- [x] Backpressure handling for slow connections (publishGated pattern)
+- [x] **Create Foxglove layout** (`foxglove/couch_layout.json`) with panels for:
+  - [x] 3D panel — point cloud (`/iphone/lidar/points`), TF tree, couch bounding box
+  - [x] Image panel — camera feed (`/iphone/camera/back_wide/image/compressed`)
+  - [x] Map panel — GPS position (`/iphone/gps/fix`)
+  - [x] IMU/diagnostics plots (orientation, velocity)
+  - [x] Topic graph panel
+- [x] **Publish couch bounding box marker** — `visualization_msgs/Marker` from bridge on `/couch/marker` at `base_link`
+- [ ] Verify topic data quality:
+  - [ ] `/iphone/camera/back_wide/image/compressed` — check Hz and image quality
+  - [ ] `/iphone/lidar/points` — PointCloud2 looks correct in 3D view
+  - [ ] `/iphone/imu` — ~100Hz, orientation looks reasonable
+  - [ ] `/iphone/gps/fix` — position shows on map panel
+  - [ ] `/tf` — ARKit pose transforms visible in 3D panel
+  - [ ] `/iphone/odom` — odometry trail visible
+- [ ] Measure end-to-end latency
 - [ ] Mount iPhone rigidly on couch (front-facing)
 - [ ] Measure iPhone mount position/orientation relative to base_link
 - [ ] Configure static TF: `base_link → iphone_link` on Jetson
-- [ ] Verify topics visible on Jetson:
-  - [ ] `/iphone/camera/back_wide/image/compressed` — `ros2 topic hz`
-  - [ ] `/iphone/lidar/depth/image` — check 256×192 32FC1
-  - [ ] `/iphone/lidar/points` — PointCloud2 XYZI
-  - [ ] `/iphone/camera/back_wide/camera_info` — verify intrinsics
-  - [ ] `/iphone/imu` — check ~100Hz
-  - [ ] `/tf` — verify ARKit pose transforms
-- [ ] Visualize via Foxglove on Mac (connect to `ws://jetson-nano:8765` — `make foxglove` on Jetson)
-- [ ] Measure end-to-end latency
-
-#### Required iOS App Changes (before Phase 2)
-- [x] **Add Odometry publisher** — `LiDARManager` now publishes `nav_msgs/Odometry` on `{prefix}/odom` with pose + velocity from ARKit VIO pose differencing. Bridge parser added in `ios_bridge.py`.
-- [ ] Consider adding raw image publishing mode (toggle in settings) for SLAM compatibility
 
 #### iPhone Mount Transform (Fill in)
 ```yaml
@@ -318,27 +349,72 @@ yaw: _____
 ```
 
 #### Deliverable
-Live camera, depth, point cloud, and IMU visible in RViz2
+Foxglove layout showing live camera, point cloud, GPS on map, IMU plots, and couch bounding box. Saved as a reusable `.json` layout file.
 
 ---
 
-### Phase 2: Sensor Fusion
-**Goal:** Unified odometry and obstacle detection
+### Phase 2: GPS Waypoint Navigation 🗺️
+**Goal:** Given two GPS coordinates (start, destination), plan and visualize a path
 
-**Status:** Not Started
+**Status:** In Progress — `nav/basic_nav_node.py` generates Google Maps routes and publishes to Foxglove
 
-**Prerequisites:** Phase 0 (wheel odom) + Phase 1 (iPhone streaming + odom topic)
+**Prerequisites:** Phase 1 (GPS streaming verified in Foxglove)
+
+**Does NOT require hardware** — path planning and visualization can be tested without motors. The couch just won't move yet.
+
+#### Existing Work: `nav/basic_nav_node.py` (PR #3, @wkaisertexas)
+A standalone path generator already exists. It:
+- Calls Google Maps Directions API for a driving route between two GPS points
+- Snaps the route to roads via Google Roads API
+- Projects to local ENU frame (origin: UVA Rotunda `38.035853,-78.503307`)
+- Resamples with spline interpolation at 0.5m spacing
+- Publishes to Foxglove directly via `foxglove-sdk` (NOT ROS2):
+  - `/gps_path` (GeoJSON LineString), `/path_points` (PointCloud), `/location` (origin)
+- Requires `GOOGLE_MAPS_API_KEY` env var (stored in `.env`, gitignored)
+
+This handles path generation and visualization. Remaining work is integrating with ROS2 Nav2 for actual navigation (publishing `nav_msgs/Path`, feeding into the Nav2 planner/controller).
+
+#### Architecture
+```
+/iphone/gps/fix (NavSatFix)
+       │
+       ▼
+navsat_transform_node          ← converts WGS84 → UTM local frame
+       │                         uses a GPS datum as world origin
+       ▼
+robot_localization (EKF)       ← fuses GPS + IMU + ARKit odom
+       │
+       ▼
+/odometry/filtered             ← couch position in local frame
+       │
+       ▼
+Nav2 GPS waypoint follower     ← accepts GPS waypoints, converts to local goals
+       │
+       ▼
+/plan (nav_msgs/Path)          ← visualized in Foxglove 3D panel
+       │
+       ▼
+/cmd_vel (Twist)               ← drives motors (Phase 0 needed for actual motion)
+```
 
 #### Tasks
-- [ ] Install robot_localization: `sudo apt install ros-jazzy-robot-localization`
-- [ ] Create EKF config file (see below)
-- [ ] Test EKF with ARKit VIO odom + wheel odometry
-- [ ] Verify `/odometry/filtered` is smooth and doesn't drift wildly
-- [ ] Point cloud is already published from iOS app (`/iphone/lidar/points`) — no conversion needed
-- [ ] Install pointcloud_to_laserscan: `sudo apt install ros-jazzy-pointcloud-to-laserscan`
-- [ ] Configure pointcloud → LaserScan for Nav2 costmap
-- [ ] Verify `/scan` topic publishes correctly
-- [ ] Test obstacle detection in RViz2
+- [ ] Install `robot_localization`: `sudo apt install ros-jazzy-robot-localization`
+- [ ] Configure `navsat_transform_node`:
+  - [ ] Set datum (world origin GPS point) — either first fix or a configured point
+  - [ ] Map `/iphone/gps/fix` → UTM local frame
+  - [ ] Verify UTM output makes sense (position moves when phone moves)
+- [ ] Configure EKF (see config below):
+  - [ ] Fuse ARKit VIO odom + IMU + GPS
+  - [ ] Verify `/odometry/filtered` is smooth
+- [ ] Set up TF tree on Jetson:
+  - [ ] `map` → `odom` (from SLAM or identity initially)
+  - [ ] `odom` → `base_link` (from EKF)
+  - [ ] `base_link` → `iphone_link` (static, from mount measurement)
+- [ ] Install Nav2: `sudo apt install ros-jazzy-navigation2 ros-jazzy-nav2-bringup`
+- [ ] Configure Nav2 GPS waypoint follower
+- [ ] Test: send two GPS points, verify `nav_msgs/Path` is published
+- [ ] Visualize path in Foxglove 3D panel (overlay on map)
+- [ ] Add path visualization to Foxglove layout
 
 #### EKF Configuration
 ```yaml
@@ -365,35 +441,80 @@ ekf_filter_node:
                   true, true, true,         # angular velocities
                   true, true, false]        # linear accelerations (not z)
 
-    # Wheel encoders
-    odom1: /wheel_odom
-    odom1_config: [false, false, false,
-                   false, false, false,
-                   true, false, false,      # vx only
-                   false, false, true,      # vyaw
-                   false, false, false]
-    odom1_differential: false
+    # Wheel encoders (enable once Phase 0 complete)
+    # odom1: /wheel_odom
+    # odom1_config: [false, false, false,
+    #                false, false, false,
+    #                true, false, false,      # vx only
+    #                false, false, true,      # vyaw
+    #                false, false, false]
+    # odom1_differential: false
 ```
 
-#### Pointcloud to LaserScan Config
+#### navsat_transform_node Configuration
 ```yaml
-min_height: 0.1       # ignore ground
-max_height: 1.5       # ignore ceiling
-angle_min: -1.57      # -90 degrees
-angle_max: 1.57       # +90 degrees
-range_min: 0.1
-range_max: 5.0        # iPhone LiDAR max range
+# File: ~/couch_ws/src/couch_bringup/config/navsat_params.yaml
+navsat_transform_node:
+  ros__parameters:
+    frequency: 30.0
+    delay: 3.0
+    magnetic_declination_radians: 0.0  # look up for your location
+    yaw_offset: 0.0
+    zero_altitude: true
+    broadcast_utm_transform: true
+    publish_filtered_gps: true
+    use_odometry_yaw: true
+    wait_for_datum: false  # use first GPS fix as datum
 ```
 
 #### Deliverable
-Stable fused odometry, obstacle detection visible in RViz2
+Given two GPS coordinates, a `nav_msgs/Path` is planned and visible in Foxglove. The path updates as the couch (phone) moves.
 
 ---
 
-### Phase 3: SLAM
+### Phase 3: Perception — Object Detection 👁️
+**Goal:** Detect pedestrians, vehicles, stop signs, and lanes in real-time on Jetson
+
+**Status:** Not Started
+
+**Prerequisites:** Phase 1 (camera streaming verified)
+
+**Does NOT require hardware** — detection runs on camera frames regardless of whether the couch moves.
+
+#### Approach
+- **YOLOv8n with INT8 quantization** via DeepStream + TensorRT on Jetson Orin Nano
+- Expected: ~10-17 FPS end-to-end (sufficient for a slow-moving couch)
+- Publishes `vision_msgs/Detection2DArray` on `/detections`
+- Detection classes: pedestrian, vehicle, stop sign, traffic light, lane markings
+- Later: feed detections into Nav2 costmap for obstacle avoidance
+
+#### Alternative Approaches (if YOLOv8 doesn't fit)
+- `jetson-inference` + `ros_deep_learning` — simpler setup, built-in ROS2 node, has Vehicle/Person/RoadSign
+- DeepStream reference app — more complex but better optimized for multi-stream
+- Fine-tuned model on Roboflow — if default COCO classes aren't sufficient
+
+#### Tasks
+- [ ] Install DeepStream on Jetson (if not already)
+- [ ] Export YOLOv8n to TensorRT INT8 engine for Jetson
+- [ ] Create ROS2 node: subscribe to `/iphone/camera/back_wide/image/compressed`, run inference, publish `/detections`
+- [ ] Test detection on live camera feed
+- [ ] Verify FPS is acceptable (~10+ FPS)
+- [ ] Add detection overlay to Foxglove layout (image panel with bounding boxes)
+- [ ] Evaluate detection quality for target classes (pedestrians, stop signs, vehicles)
+- [ ] If COCO classes insufficient, fine-tune on custom dataset (Roboflow)
+- [ ] Integrate detections into Nav2 costmap (obstacle layer from detections)
+
+#### Deliverable
+Live bounding boxes on camera feed in Foxglove. `/detections` topic publishing `Detection2DArray` at 10+ FPS.
+
+---
+
+### Phase 4: SLAM 🗺️
 **Goal:** Build and localize in a map
 
 **Status:** Not Started
+
+**Prerequisites:** Phase 1 (camera + depth streaming), Phase 2 (EKF odometry)
 
 #### Approach Decision
 - [x] **Primary: RTAB-Map** — mature, works with RGB-D, supports compressed images via image_transport, well-documented
@@ -403,8 +524,8 @@ Stable fused odometry, obstacle detection visible in RViz2
 - [ ] Install: `sudo apt install ros-jazzy-rtabmap-ros`
 - [ ] Set up image_transport compressed subscriber (RTAB-Map supports this natively)
 - [ ] Create launch file with correct topic remapping (see below)
-- [ ] Test SLAM with manual driving (teleop)
-- [ ] Verify map quality in RViz2
+- [ ] Test SLAM with manual driving (teleop or carry phone around)
+- [ ] Verify map quality in Foxglove
 - [ ] Test loop closure
 - [ ] Save map
 
@@ -416,7 +537,6 @@ Stable fused odometry, obstacle detection visible in RViz2
 
 #### RTAB-Map Launch
 ```bash
-# RTAB-Map can subscribe to compressed images via image_transport
 ros2 launch rtabmap_launch rtabmap.launch.py \
   rgb_topic:=/iphone/camera/back_wide/image/compressed \
   depth_topic:=/iphone/lidar/depth/image \
@@ -433,36 +553,45 @@ ros2 run image_transport republish compressed raw \
   -r in/compressed:=/iphone/camera/back_wide/image/compressed \
   -r out:=/iphone/camera/back_wide/image_raw
 ```
-Then point RTAB-Map at `/iphone/camera/back_wide/image_raw`.
-
-#### Isaac ROS Visual SLAM (Stretch)
-If attempting on Orin Nano:
-- Requires raw images (must decompress JPEG first)
-- Monitor GPU memory usage — may need to reduce resolution or framerate
-- May not fit alongside Nav2 in 8GB shared memory
 
 #### Deliverable
 2D occupancy grid map of operating space, working localization
 
 ---
 
-### Phase 4: Nav2 Integration
-**Goal:** Autonomous point-to-point navigation
+### Phase 5: Nav2 Full Integration 🚗
+**Goal:** Autonomous point-to-point navigation with obstacle avoidance
 
 **Status:** Not Started
 
+**Prerequisites:** Phase 0 (motors), Phase 2 (GPS/EKF), Phase 3 (perception), Phase 4 (SLAM)
+
+This is where everything comes together. The couch can navigate autonomously.
+
 #### Tasks
-- [ ] Install Nav2: `sudo apt install ros-jazzy-navigation2 ros-jazzy-nav2-bringup`
-- [ ] Create Nav2 params file (see below)
 - [ ] Create couch URDF/Xacro with correct dimensions
+- [ ] Install pointcloud_to_laserscan: `sudo apt install ros-jazzy-pointcloud-to-laserscan`
+- [ ] Configure pointcloud → LaserScan for Nav2 costmap
+- [ ] Create Nav2 params file (see config below)
 - [ ] Launch Nav2 with map
-- [ ] Test sending goal via RViz2 "2D Goal Pose" button
-- [ ] Watch planning and execution
+- [ ] Test sending goal via Foxglove or CLI
+- [ ] Integrate `/detections` into costmap (pedestrian/vehicle avoidance)
 - [ ] Tune costmap inflation radius for couch size
 - [ ] Tune velocity limits for comfortable/safe operation
 - [ ] Tune acceleration limits
 - [ ] Test recovery behaviors (what happens when stuck)
 - [ ] Test with dynamic obstacles (walk in front of couch)
+- [ ] Test outdoor GPS waypoint following end-to-end
+
+#### Pointcloud to LaserScan Config
+```yaml
+min_height: 0.1       # ignore ground
+max_height: 1.5       # ignore ceiling
+angle_min: -1.57      # -90 degrees
+angle_max: 1.57       # +90 degrees
+range_min: 0.1
+range_max: 5.0        # iPhone LiDAR max range
+```
 
 #### Nav2 Parameters
 ```yaml
@@ -652,11 +781,11 @@ wheel_radius: _____ m
 ```
 
 #### Deliverable
-Couch navigates to clicked goal in RViz2, avoiding obstacles
+Couch navigates autonomously to goals (indoor via map, outdoor via GPS waypoints), avoiding obstacles including detected pedestrians/vehicles.
 
 ---
 
-### Phase 5: Multi-iPhone Support (Future)
+### Phase 6: Multi-iPhone Support (Future)
 **Goal:** 360° perception coverage
 
 **Status:** Not Started
@@ -678,7 +807,7 @@ Full surround obstacle detection with no blind spots
 
 ---
 
-### Phase 6: Safety & Polish
+### Phase 7: Safety & Polish 🛡️
 **Goal:** Reliable, safe operation
 
 **Status:** Not Started
@@ -689,10 +818,9 @@ Full surround obstacle detection with no blind spots
 - [ ] Add velocity smoother for comfortable acceleration
 - [ ] Implement collision detection (if obstacle <0.3m, hard stop)
 - [ ] Create unified launch file
-- [ ] Create RViz2 config with all displays
 - [ ] Test full system restart and recovery
 - [ ] Test with dynamic obstacles (people walking)
-- [ ] Outdoor testing with GPS
+- [ ] Outdoor testing with GPS waypoint following
 - [ ] Optional: voice commands, web interface
 
 #### Deliverable
@@ -727,6 +855,10 @@ sudo apt install ros-jazzy-foxglove-bridge  # WebSocket bridge for Foxglove app
 sudo apt install ros-jazzy-ros2-control
 sudo apt install ros-jazzy-ros2-controllers
 
+# Perception
+# DeepStream: follow NVIDIA docs for Jetson
+# YOLOv8: pip install ultralytics
+
 # Utilities
 sudo apt install ros-jazzy-teleop-twist-keyboard
 sudo apt install ros-jazzy-joint-state-publisher
@@ -756,17 +888,19 @@ pip3 install numpy scipy transforms3d
 │   │   ├── config/
 │   │   │   ├── nav2_params.yaml
 │   │   │   ├── ekf_params.yaml
+│   │   │   ├── navsat_params.yaml
 │   │   │   └── slam_params.yaml
-│   │   └── rviz/
-│   │       └── couch.rviz
+│   │   └── foxglove/
+│   │       └── couch_layout.json
 │   │
-│   ├── couch_perception/           # Sensor processing nodes
+│   ├── couch_perception/           # Object detection + sensor processing
 │   │   ├── setup.py
 │   │   ├── package.xml
 │   │   ├── couch_perception/
 │   │   │   ├── __init__.py
-│   │   │   ├── pointcloud_merger.py    # Phase 5
-│   │   │   └── tf_to_odom.py          # If iOS odom not added
+│   │   │   ├── yolo_detector.py       # YOLOv8 inference node
+│   │   │   ├── pointcloud_merger.py   # Phase 6
+│   │   │   └── marker_publisher.py    # Couch bounding box marker
 │   │   └── launch/
 │   │       └── perception.launch.py
 │   │
@@ -868,11 +1002,14 @@ This section is for Claude Code instances and other agents to record learnings, 
 - **Config hot-reload:** Changing sensor config while running triggers reconfiguration without restart.
 - **Frame IDs:** `iphone_base_link`, `iphone_lidar`, `iphone_camera_arkit`, `iphone_camera_back_wide`, `world`
 - **ZenohPublisher:** Currently a placeholder TCP implementation, not actual Zenoh protocol. Sends `[topic_len:4][topic][data_len:4][data]` frames. Needs a bridge on the receiver side.
+- **Backpressure:** `SensorCoordinator.publishGated(key:)` uses a `Set<String>` to gate sends per topic. If a previous send is still in-flight, the frame is dropped. Zero impact on fast connections.
 
 ### Jetson Orin Nano
 - Access: `ssh jetson-nano` (via Tailscale)
 - 8GB shared GPU/CPU memory — monitor with `jtop`
-- ROS2 Jazzy installed
+- ROS2 Jazzy built from source at `~/ros2_jazzy/`
+- Python 3.10 (not 3.12 like Mac)
+- Tailscale iptables: port 8765 needs explicit allow rule for Foxglove access from other tailnet peers (`sudo iptables -I ts-input 3 -s 100.64.0.0/10 -p tcp --dport 8765 -j ACCEPT`). This rule is NOT persistent across reboots — needs to be made permanent.
 
 ### Open Questions
 - [ ] What motor controllers to use? (ODrive, VESC, or simpler PWM?)
@@ -901,6 +1038,9 @@ foxglove_bridge is built from source on the Jetson at `~/ros2_jazzy/`. It requir
 
 ### Architecture Decisions
 <!-- Agents: record decisions and rationale here -->
+- **No VLA for now.** Team considered NVIDIA Alpamayo but it requires 24GB+ VRAM (won't fit on Orin Nano's 8GB). Classical perception stack (YOLO + Nav2) is more debuggable and faster. VLA can be explored later on workstation as a parallel "advisor" that doesn't control the couch directly.
+- **GPS waypoint navigation** uses Nav2's built-in GPS waypoint follower + `navsat_transform_node` from `robot_localization`. No custom code needed for WGS84→UTM conversion.
+- **Perception on Jetson only.** YOLOv8n INT8 via DeepStream/TensorRT. Workstation (5090) reserved for experiments, not in the critical path.
 
 ---
 
@@ -916,4 +1056,4 @@ foxglove_bridge is built from source on the Jetson at `~/ros2_jazzy/`. It requir
 ---
 
 *Last updated: 2026-01-28*
-*Current phase: 0/1 (hardware not started, iOS app built, odometry topic added, foxglove_bridge on Jetson)*
+*Current phase: Phase 1 in progress (layout + marker done, data verification next). Phase 0 hardware unblocked in parallel.*
