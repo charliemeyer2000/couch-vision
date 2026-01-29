@@ -17,7 +17,7 @@ ROS2_SETUP := export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp; \
 
 .PHONY: help setup setup-ros2 setup-bridge \
         build-ios build-sim xcode regen \
-        bridge foxglove topics echo hz rviz rqt image \
+        bridge foxglove topics echo hz rviz rqt image bag bag-play \
         deploy-jetson ip check-ros2 clean \
         lint lint-fix format
 
@@ -51,6 +51,8 @@ help:
 	@echo "  make rviz           Launch RViz2"
 	@echo "  make rqt            Launch rqt"
 	@echo "  make image          View camera in rqt_image_view"
+	@echo "  make bag            Record all topics to bags/"
+	@echo "  make bag-play F=x   Play back a bag file"
 	@echo ""
 	@echo "Linting & Formatting:"
 	@echo "  make lint           Run all linters (via pre-commit)"
@@ -98,6 +100,13 @@ bridge:
 	@echo ""
 	@$(ROS2_SETUP) && cd bridge && ([ -f .venv/pyvenv.cfg ] && grep -q "include-system-site-packages = true" .venv/pyvenv.cfg || uv venv --system-site-packages) && uv sync --quiet && uv run python ios_bridge.py --port $(BRIDGE_PORT)
 
+bridge-docker:
+	@echo "Starting iOS bridge in Docker on port $(BRIDGE_PORT)..."
+	@echo "Connect from iPhone using one of these addresses:"
+	@ifconfig | grep "inet " | grep -v 127.0.0.1 | awk '{print "  tcp://" $$2 ":$(BRIDGE_PORT)"}'
+	@echo ""
+	cd bridge && docker compose up --build
+
 foxglove:
 	@echo "Starting Foxglove WebSocket bridge on port 8765..."
 	@echo "Connect from Foxglove app: ws://localhost:8765"
@@ -133,6 +142,15 @@ image:
 	@$(ROS2_SETUP) && ros2 run image_tools showimage --ros-args \
 		-r image:=/iphone/camera/back_wide/image/raw \
 		-p reliability:=best_effort
+
+BAG_DIR ?= bags
+
+bag:
+	@mkdir -p $(BAG_DIR)
+	@$(ROS2_SETUP) && ros2 bag record -a -o $(BAG_DIR)/$$(date +%Y-%m-%d_%H-%M-%S)
+
+bag-play:
+	@$(ROS2_SETUP) && ros2 bag play $(F)
 
 # === Jetson Deployment ===
 
