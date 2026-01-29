@@ -16,13 +16,22 @@ from .result import EkfResult
 def run_ekf(
     imu_samples: list[ImuSample],
     gps_fixes: list[GpsFix],
-    accel_noise: float = 2.0,
+    accel_noise: float = 50.0,
     gyro_noise: float = 0.05,
+    initial_pos_cov: float = 100.0,
+    use_imu: bool = True,
+    force_2d: bool = False,
 ) -> EkfResult:
     if not imu_samples or not gps_fixes:
         raise ValueError("Need both IMU and GPS data")
 
-    ekf = EKF(accel_noise=accel_noise, gyro_noise=gyro_noise)
+    ekf = EKF(
+        accel_noise=accel_noise,
+        gyro_noise=gyro_noise,
+        initial_pos_cov=initial_pos_cov,
+        use_imu=use_imu,
+        force_2d=force_2d,
+    )
 
     n_gps = len(gps_fixes)
     gps_enu = np.empty((n_gps, 3))
@@ -93,12 +102,15 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("bag", type=Path, help="Path to MCAP bag file")
     parser.add_argument("--output", "-o", type=Path, default=None, help="Output PNG path")
     parser.add_argument("--no-show", action="store_true", help="Don't show interactive plot")
-    parser.add_argument("--accel-noise", type=float, default=2.0)
+    parser.add_argument("--accel-noise", type=float, default=50.0)
     parser.add_argument("--gyro-noise", type=float, default=0.05)
+    parser.add_argument("--initial-pos-cov", type=float, default=100.0)
+    parser.add_argument("--no-imu", action="store_true", help="Disable IMU fusion (predict zero accel)")
+    parser.add_argument("--force-2d", action="store_true", help="Force 2D mode (zero vertical accel/vel)")
     args = parser.parse_args(argv)
 
     print(f"Reading bag: {args.bag}")
-    imu_samples, gps_fixes = read_bag(args.bag)
+    imu_samples, gps_fixes, _, _ = read_bag(args.bag)
     print(f"  IMU samples: {len(imu_samples)}")
     print(f"  GPS fixes:   {len(gps_fixes)}")
 
@@ -115,6 +127,9 @@ def main(argv: list[str] | None = None) -> None:
         imu_samples, gps_fixes,
         accel_noise=args.accel_noise,
         gyro_noise=args.gyro_noise,
+        initial_pos_cov=args.initial_pos_cov,
+        use_imu=not args.no_imu,
+        force_2d=args.force_2d,
     )
 
     final_pos = result.positions[-1]

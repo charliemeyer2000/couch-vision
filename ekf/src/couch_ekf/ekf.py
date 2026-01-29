@@ -11,21 +11,24 @@ ORI = slice(6, 9)   # roll, pitch, yaw (rad)
 BA = slice(9, 12)    # accelerometer bias
 BG = slice(12, 15)   # gyro bias
 
-GRAVITY = np.array([0.0, 0.0, 9.81])
+GRAVITY = np.array([0.0, 0.0, -9.81])
 STATE_DIM = 15
 
 
 class EKF:
     def __init__(
         self,
-        accel_noise: float = 2.0,
+        accel_noise: float = 50.0,
         gyro_noise: float = 0.05,
         accel_bias_noise: float = 1e-3,
         gyro_bias_noise: float = 1e-4,
+        initial_pos_cov: float = 0.1,
+        use_imu: bool = True,
+        force_2d: bool = False,
     ) -> None:
         self.x: NDArray[np.float64] = np.zeros(STATE_DIM)
         self.P: NDArray[np.float64] = np.eye(STATE_DIM)
-        self.P[POS, POS] *= 100.0
+        self.P[POS, POS] *= initial_pos_cov
         self.P[VEL, VEL] *= 10.0
         self.P[ORI, ORI] *= 0.1
         self.P[BA, BA] *= 1.0
@@ -35,6 +38,9 @@ class EKF:
         self.gyro_noise = gyro_noise
         self.accel_bias_noise = accel_bias_noise
         self.gyro_bias_noise = gyro_bias_noise
+        self.initial_pos_cov = initial_pos_cov
+        self.use_imu = use_imu
+        self.force_2d = force_2d
         self._initialized = False
 
     def initialize(
@@ -64,8 +70,15 @@ class EKF:
         R = rot.as_matrix()
         self.x[ORI] = rot.as_euler("xyz")
 
-        accel_corrected = accel - self.x[BA]
-        accel_enu = R @ accel_corrected - GRAVITY
+        if self.use_imu:
+            accel_corrected = accel - self.x[BA]
+            accel_enu = R @ accel_corrected - GRAVITY
+        else:
+            accel_enu = np.zeros(3)
+
+        if self.force_2d:
+            accel_enu[2] = 0.0
+            self.x[VEL][2] = 0.0
 
         self.x[VEL] += accel_enu * dt
         speed = np.linalg.norm(self.x[VEL])
@@ -84,6 +97,14 @@ class EKF:
         Q[ORI, ORI] = np.eye(3) * (self.gyro_noise * dt) ** 2
         Q[BA, BA] = np.eye(3) * (self.accel_bias_noise * dt) ** 2
         Q[BG, BG] = np.eye(3) * (self.gyro_bias_noise * dt) ** 2
+
+        if self.force_2d:
+            # Zero out Z components of Process Noise
+            Q[2, 2] = 0.0  # Pos Z
+            Q[5, 5] = 0.0  # Vel Z
+            # And maybe Roll/Pitch? Walking usually implies mostly Yaw changes, but phone can tilt.
+            # Keeping Roll/Pitch noise is probably fine as they are observed by IMU (if fused).
+            # But we aren't fusing orientation directly in update, just using it for projection.
 
         self.P = F @ self.P @ F.T + Q
 

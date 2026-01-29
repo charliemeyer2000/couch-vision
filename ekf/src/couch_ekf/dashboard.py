@@ -16,9 +16,10 @@ def plot_dashboard(
     t = result.times - result.times[0]
     gps_t = result.gps_times - result.times[0]
 
-    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    fig, axes = plt.subplots(3, 2, figsize=(14, 15))
     fig.suptitle("CouchVision EKF: IMU + GPS Fusion", fontsize=14, fontweight="bold")
 
+    # --- Row 0: Position ---
     ax = axes[0, 0]
     sc = ax.scatter(
         result.positions[:, 0], result.positions[:, 1],
@@ -43,7 +44,29 @@ def plot_dashboard(
     ax.set_title("Altitude")
     ax.legend()
 
+    # --- Row 1: States (Velocity, Biases) ---
     ax = axes[1, 0]
+    for i, label in enumerate(["vE", "vN", "vU"]):
+        ax.plot(t, result.velocities[:, i], linewidth=0.8, label=label)
+    ax.set_xlabel("Time (s)")
+    ax.set_ylabel("Velocity (m/s)")
+    ax.set_title("Velocity")
+    ax.legend()
+
+    ax = axes[1, 1]
+    colors = ['r', 'g', 'b']
+    for i, label in enumerate(["ax", "ay", "az"]):
+        ax.plot(t, result.bias_accel[:, i], linewidth=0.8, linestyle='--', color=colors[i], label=f"Bias {label}")
+    # Plot gyro bias on twin axis if needed, but let's keep it simple for now or just plot accel bias
+    # Or maybe plot both?
+    # Let's just plot Accel Bias as it's often more critical for position drift
+    ax.set_xlabel("Time (s)")
+    ax.set_ylabel("Bias (m/s^2)")
+    ax.set_title("Accelerometer Bias")
+    ax.legend()
+
+    # --- Row 2: Uncertainties ---
+    ax = axes[2, 0]
     for i, label in enumerate(["East", "North", "Up"]):
         sigma = np.sqrt(np.clip(result.pos_cov[:, i], 0, None))
         ax.plot(t, sigma, linewidth=0.8, label=f"\u03c3_{label}")
@@ -53,7 +76,7 @@ def plot_dashboard(
     ax.legend()
     ax.set_yscale("log")
 
-    ax = axes[1, 1]
+    ax = axes[2, 1]
     for i, label in enumerate(["vE", "vN", "vU"]):
         sigma = np.sqrt(np.clip(result.vel_cov[:, i], 0, None))
         ax.plot(t, sigma, linewidth=0.8, label=f"\u03c3_{label}")

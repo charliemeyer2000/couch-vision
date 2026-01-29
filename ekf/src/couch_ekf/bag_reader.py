@@ -37,6 +37,20 @@ class GpsFix:
     status: int
 
 
+@dataclass(slots=True)
+class GpsVel:
+    t: float
+    vx: float
+    vy: float
+    vz: float
+
+
+@dataclass(slots=True)
+class Heading:
+    t: float
+    yaw: float
+
+
 def _parse_stamp(r: CdrReader) -> float:
     sec = r.int32()
     nsec = r.uint32()
@@ -79,10 +93,32 @@ def _parse_gps(data: bytes) -> GpsFix:
     )
 
 
-def read_bag(path: str | Path) -> tuple[list[ImuSample], list[GpsFix]]:
-    """Read all IMU and GPS messages from an MCAP file, sorted by timestamp."""
+def _parse_gps_vel(data: bytes) -> GpsVel:
+    r = CdrReader(data)
+    t = _parse_stamp(r)
+    _ = r.string()  # frame_id
+    vx = r.float64()
+    vy = r.float64()
+    vz = r.float64()
+    # Skip angular
+    _ = r.float64()
+    _ = r.float64()
+    _ = r.float64()
+    return GpsVel(t=t, vx=vx, vy=vy, vz=vz)
+
+
+def _parse_heading(data: bytes, log_time: int) -> Heading:
+    r = CdrReader(data)
+    yaw = r.float64()
+    return Heading(t=log_time * 1e-9, yaw=yaw)
+
+
+def read_bag(path: str | Path) -> tuple[list[ImuSample], list[GpsFix], list[GpsVel], list[Heading]]:
+    """Read all IMU, GPS, GPS Velocity, and Heading messages from an MCAP file."""
     imu_samples: list[ImuSample] = []
     gps_fixes: list[GpsFix] = []
+    gps_vels: list[GpsVel] = []
+    headings: list[Heading] = []
 
     with open(path, "rb") as f:
         reader = make_reader(f)
@@ -94,7 +130,13 @@ def read_bag(path: str | Path) -> tuple[list[ImuSample], list[GpsFix]]:
                 imu_samples.append(_parse_imu(message.data))
             elif topic.endswith("/gps/fix"):
                 gps_fixes.append(_parse_gps(message.data))
+            elif topic.endswith("/gps/velocity"):
+                gps_vels.append(_parse_gps_vel(message.data))
+            elif topic.endswith("/heading"):
+                headings.append(_parse_heading(message.data, message.log_time))
 
     imu_samples.sort(key=lambda s: s.t)
     gps_fixes.sort(key=lambda s: s.t)
-    return imu_samples, gps_fixes
+    gps_vels.sort(key=lambda s: s.t)
+    headings.sort(key=lambda s: s.t)
+    return imu_samples, gps_fixes, gps_vels, headings
