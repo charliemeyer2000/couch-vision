@@ -50,12 +50,22 @@ def _has_non_index_updates(event):
     records = event.get("Records")
     if not records:
         return True
-    keys = []
+    saw_record = False
+    all_index_only = True
+    all_created = True
     for record in records:
         key = record.get("s3", {}).get("object", {}).get("key")
         if not key:
-            continue
-        keys.append(unquote_plus(key))
-    if not keys:
+            return True
+        saw_record = True
+        decoded_key = unquote_plus(key)
+        if decoded_key != "index.txt":
+            all_index_only = False
+        event_name = record.get("eventName", "")
+        if not event_name.startswith("ObjectCreated"):
+            all_created = False
+    if not saw_record:
         return True
-    return any(key != "index.txt" for key in keys)
+    if not all_index_only:
+        return True
+    return not all_created
