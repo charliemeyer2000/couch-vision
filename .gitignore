@@ -11,3 +11,9 @@ build/
 
 # Environment variables
 .env
+
+# bags
+bags/
+
+# MacOS
+.DS_Store

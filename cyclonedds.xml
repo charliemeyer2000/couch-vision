@@ -4,7 +4,8 @@
     <!-- When viewing this file in an editor, you may recieve schema errors. These settings are still applied, cyclone is just wining. I(william) checked these settings in wireshark and this configuration is correct -->
     <General>
         <Interfaces>
-            <NetworkInterface name="lo" />
+            <!-- TODO: this might need to be changed when we put this on the jetson  -->
+            <NetworkInterface address="127.0.0.1" />
         </Interfaces>
         <AllowMulticast>false</AllowMulticast>
     </General>
