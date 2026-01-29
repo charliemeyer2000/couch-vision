@@ -96,6 +96,59 @@ All ROS2 topics on the Jetson are visible in Foxglove — compressed images, poi
 
 > **Note:** `foxglove_bridge` only runs on the Jetson (Linux). The Foxglove *viewer* app runs on any OS. `make rviz` is available for local RViz2 on machines with ROS2 installed.
 
+## Bag Files
+
+Recorded ROS2 bag files are stored in a public S3 bucket:
+
+**https://couch-vision-bags.s3.amazonaws.com**
+
+Download a bag:
+```bash
+aws s3 cp s3://couch-vision-bags/<filename> .
+# or just curl/wget the URL directly
+```
+
+## Docker Images
+
+Both the iOS bridge and EKF are published to Docker Hub on every push to `main`. Images are built by CI (see `.github/workflows/ci.yml`).
+
+| Image | Docker Hub |
+|-------|------------|
+| iOS Bridge | [`charliemeyer2000/couch-vision-bridge`](https://hub.docker.com/r/charliemeyer2000/couch-vision-bridge) |
+| EKF | [`charliemeyer2000/couch-vision-ekf`](https://hub.docker.com/r/charliemeyer2000/couch-vision-ekf) |
+
+### iOS Bridge
+
+Runs the Python ROS2 TCP bridge that receives sensor data from the iPhone and publishes to ROS2 topics.
+
+```bash
+docker run --network host \
+  -v $(pwd)/cyclonedds.xml:/bridge/cyclonedds.xml:ro \
+  charliemeyer2000/couch-vision-bridge:latest
+```
+
+Or with docker compose from `bridge/`:
+```bash
+docker compose up
+```
+
+### EKF
+
+Runs the Extended Kalman Filter on recorded bag files and outputs a dashboard image.
+
+```bash
+docker run \
+  -v $(pwd)/bags:/bags:ro \
+  -v $(pwd)/output:/output \
+  charliemeyer2000/couch-vision-ekf:latest \
+  /bags/<bagfile>.mcap -o /output/dashboard.png --no-show
+```
+
+Or with docker compose from `ekf/`:
+```bash
+docker compose up
+```
+
 ## Development
 
 ### Project structure
