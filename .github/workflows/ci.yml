@@ -235,7 +235,7 @@ jobs:
 
       - name: Run tests
         working-directory: ekf
-        run: uv run pytest tests/ -v
+        run: uv run --extra dev pytest tests/ -v
 
   ekf-docker:
     name: Build & Publish EKF Docker Image
