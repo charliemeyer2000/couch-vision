@@ -8,3 +8,6 @@ xcuserdata/
 *.xcuserstate
 DerivedData/
 build/
+
+# Environment variables
+.env
