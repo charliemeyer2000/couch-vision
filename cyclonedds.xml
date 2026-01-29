@@ -6,7 +6,7 @@
         <Interfaces>
             <NetworkInterface name="lo" />
         </Interfaces>
-        <AllowMulticast>true</AllowMulticast>
+        <AllowMulticast>false</AllowMulticast>
     </General>
     <Discovery>
         <ParticipantIndex>auto</ParticipantIndex>
@@ -17,7 +17,7 @@
     </Discovery>
     <Domain id="any">
         <Internal>
-            <SocketReceiveBufferSize min="10MB"/>
+            <SocketReceiveBufferSize min="0kB"/>
         </Internal>
     </Domain>
 </CycloneDDS>
