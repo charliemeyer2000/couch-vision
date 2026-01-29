@@ -12,6 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       ios: ${{ steps.filter.outputs.ios }}
+      bridge: ${{ steps.filter.outputs.bridge }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -23,6 +24,12 @@ jobs:
               - 'CouchVisionWidgets/**'
               - 'project.yml'
               - '.github/workflows/ci.yml'
+            bridge:
+              - 'bridge/Dockerfile'
+              - 'bridge/pyproject.toml'
+              - 'bridge/uv.lock'
+              - 'bridge/ios_bridge.py'
+              - 'cyclonedds.xml'
 
   lint:
     name: Lint
@@ -158,3 +165,56 @@ jobs:
           issuer-id: ${{ secrets.APPSTORE_ISSUER_ID }}
           api-key-id: ${{ secrets.APPSTORE_API_KEY_ID }}
           api-private-key: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
+
+  bridge-docker:
+    name: Build & Publish Bridge Docker Image
+    runs-on: ubuntu-latest
+    needs: [lint, changes]
+    if: needs.changes.outputs.bridge == 'true'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Copy cyclonedds.xml into bridge context
+        run: cp cyclonedds.xml bridge/
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: charliemeyer2000/couch-vision-bridge
+          tags: |
+            type=sha
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: bridge
+          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Upload image as artifact
+        if: github.event_name == 'pull_request'
+        run: |
+          docker save charliemeyer2000/couch-vision-bridge:sha-${GITHUB_SHA::7} | gzip > bridge-image.tar.gz
+
+      - name: Upload artifact
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: bridge-docker-image
+          path: bridge-image.tar.gz
+          retention-days: 7

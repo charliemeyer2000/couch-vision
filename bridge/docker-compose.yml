@@ -1,0 +1,6 @@
+services:
+  bridge:
+    build: .
+    network_mode: host
+    volumes:
+      - ../cyclonedds.xml:/bridge/cyclonedds.xml:ro
