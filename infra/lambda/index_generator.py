@@ -1,9 +1,14 @@
 import os
-import boto3
 from datetime import datetime, timezone
+from urllib.parse import unquote_plus
+
+import boto3
 
 
 def handler(event, context):
+    if not _has_non_index_updates(event):
+        return {"statusCode": 200, "files": 0, "skipped": True}
+
     bucket = os.environ["BUCKET_NAME"]
     s3 = boto3.client("s3")
 
@@ -37,3 +42,20 @@ def _fmt_size(n):
         if n < 1024:
             return f"{n:.1f} {unit}"
         n /= 1024
+
+
+def _has_non_index_updates(event):
+    if not isinstance(event, dict):
+        return True
+    records = event.get("Records")
+    if not records:
+        return True
+    keys = []
+    for record in records:
+        key = record.get("s3", {}).get("object", {}).get("key")
+        if not key:
+            continue
+        keys.append(unquote_plus(key))
+    if not keys:
+        return True
+    return any(key != "index.txt" for key in keys)
