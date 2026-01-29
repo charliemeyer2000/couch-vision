@@ -305,7 +305,7 @@ Couch drives with keyboard control, `/wheel_odom` publishes from encoders
 
 ---
 
-### Phase 1: Sensor Verification & Visualization 📱
+### Phase 1: Sensor Verification & Visualization
 **Goal:** iPhone data streaming end-to-end, visualized in Foxglove
 
 **Status:** In Progress — streaming works, Foxglove connected, layout needed
@@ -398,23 +398,33 @@ Nav2 GPS waypoint follower     ← accepts GPS waypoints, converts to local goal
 ```
 
 #### Tasks
-- [ ] Install `robot_localization`: `sudo apt install ros-jazzy-robot-localization`
-- [ ] Configure `navsat_transform_node`:
-  - [ ] Set datum (world origin GPS point) — either first fix or a configured point
-  - [ ] Map `/iphone/gps/fix` → UTM local frame
-  - [ ] Verify UTM output makes sense (position moves when phone moves)
-- [ ] Configure EKF (see config below):
-  - [ ] Fuse ARKit VIO odom + IMU + GPS
-  - [ ] Verify `/odometry/filtered` is smooth
-- [ ] Set up TF tree on Jetson:
-  - [ ] `map` → `odom` (from SLAM or identity initially)
-  - [ ] `odom` → `base_link` (from EKF)
-  - [ ] `base_link` → `iphone_link` (static, from mount measurement)
-- [ ] Install Nav2: `sudo apt install ros-jazzy-navigation2 ros-jazzy-nav2-bringup`
-- [ ] Configure Nav2 GPS waypoint follower
-- [ ] Test: send two GPS points, verify `nav_msgs/Path` is published
-- [ ] Visualize path in Foxglove 3D panel (overlay on map)
-- [ ] Add path visualization to Foxglove layout
+
+
+HUMAN WRITTEN INSTRUCTIONS:
+
+---
+
+Make your own ekf using numpy in map frame
+Read the data from the bag file -> tell it the topics
+Convert navsat fix to enu relative to the rotunda
+Use imu and gps data for localization
+ROTUNDA = "38.035853,-78.503307"
+Output localization at 100 hertz
+Create a dashboard showing the covariance over time and the localized path using matplotlib
+
+we can test this locally on the macbook we don't need to do this using the `jetson-nano`, so let's get this going. we have some bags you can use to test this with, bags/university_intersect_gps_only.mcap is gps only good walk, and then we have bags/2026-01-29_12-10-44/walk_around_university_all_data.mcap that is the same one but all data (lidar, camera, etc).
+
+get this working please.
+
+---
+
+
+- [ ] Build custom EKF (numpy) fusing IMU + GPS in map frame
+- [ ] Convert NavSatFix to ENU relative to rotunda (38.035853, -78.503307)
+- [ ] Read from MCAP bag files for offline testing
+- [ ] Output localization at 100 Hz
+- [ ] Create matplotlib dashboard (covariance over time + localized path)
+- [ ] Test with `bags/university_intersect_gps_only.mcap` and `bags/2026-01-29_12-10-44/walk_around_university_all_data.mcap`
 
 #### EKF Configuration
 ```yaml
