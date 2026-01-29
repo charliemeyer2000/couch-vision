@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CycloneDDS xmlns="https://cdds.io/config" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="https://cdds.io/config https://raw.githubusercontent.com/eclipse-cyclonedds/cyclonedds/master/etc/cyclonedds.xsd">
+    <!-- When viewing this file in an editor, you may recieve schema errors. These settings are still applied, cyclone is just wining. I(william) checked these settings in wireshark and this configuration is correct -->
+    <General>
+        <Interfaces>
+            <NetworkInterface name="lo" />
+        </Interfaces>
+        <AllowMulticast>true</AllowMulticast>
+    </General>
+    <Discovery>
+        <ParticipantIndex>auto</ParticipantIndex>
+        <MaxAutoParticipantIndex>100</MaxAutoParticipantIndex>
+        <Peers>
+            <Peer address="localhost" />
+        </Peers>
+    </Discovery>
+    <Domain id="any">
+        <Internal>
+            <SocketReceiveBufferSize min="10MB"/>
+        </Internal>
+    </Domain>
+</CycloneDDS>

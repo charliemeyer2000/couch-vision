@@ -8,6 +8,7 @@ BRIDGE_PORT ?= 7447
 # ROS2 setup - searches common install locations (Jazzy and Humble)
 # Uses CycloneDDS as FastRTPS discovery hangs on macOS
 ROS2_SETUP := export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp; \
+			  export CYCLONEDDS_URI=file://$(realpath cyclonedds.xml); \
               source ~/ros2_jazzy/install/setup.bash 2>/dev/null || \
               source ~/ros2_ws/install/setup.bash 2>/dev/null || \
               source /opt/ros/jazzy/setup.bash 2>/dev/null || \
