@@ -489,17 +489,18 @@ Given two GPS coordinates, a `nav_msgs/Path` is planned and visible in Foxglove.
 ### Phase 3: Perception — Object Detection 👁️
 **Goal:** Detect pedestrians, vehicles, stop signs, and lanes in real-time on Jetson
 
-**Status:** Not Started
+**Status:** In Progress — offline bag processing (PR #10), ROS2 node + Docker implemented
 
 **Prerequisites:** Phase 1 (camera streaming verified)
 
 **Does NOT require hardware** — detection runs on camera frames regardless of whether the couch moves.
 
 #### Approach
-- **YOLOv8n with INT8 quantization** via DeepStream + TensorRT on Jetson Orin Nano
+- **YOLOv8n with INT8 quantization** via TensorRT on Jetson Orin Nano
 - Expected: ~10-17 FPS end-to-end (sufficient for a slow-moving couch)
-- Publishes `vision_msgs/Detection2DArray` on `/detections`
+- Publishes `vision_msgs/Detection2DArray` on `/perception/detections`
 - Detection classes: pedestrian, vehicle, stop sign, traffic light, lane markings
+- Optional YOLOP segmentation for drivable area + lane lines
 - Later: feed detections into Nav2 costmap for obstacle avoidance
 
 #### Alternative Approaches (if YOLOv8 doesn't fit)
@@ -509,8 +510,11 @@ Given two GPS coordinates, a `nav_msgs/Path` is planned and visible in Foxglove.
 
 #### Tasks
 - [ ] Install DeepStream on Jetson (if not already)
-- [ ] Export YOLOv8n to TensorRT INT8 engine for Jetson
-- [ ] Create ROS2 node: subscribe to `/iphone/camera/back_wide/image/compressed`, run inference, publish `/detections`
+- [ ] Export YOLOv8n to TensorRT INT8 engine for Jetson (`perception/scripts/export_tensorrt.py`)
+- [x] Create ROS2 perception node (`perception/src/couch_perception/ros_node.py`)
+- [x] Dockerized deployment (`perception/Dockerfile`, `perception/docker-compose.yml`)
+- [x] Offline bag processing with YOLOv8 + YOLOP (PR #10)
+- [x] Benchmark script (`perception/scripts/benchmark.py`)
 - [ ] Test detection on live camera feed
 - [ ] Verify FPS is acceptable (~10+ FPS)
 - [ ] Add detection overlay to Foxglove layout (image panel with bounding boxes)
@@ -1070,4 +1074,4 @@ foxglove_bridge is built from source on the Jetson at `~/ros2_jazzy/`. It requir
 ---
 
 *Last updated: 2026-01-29*
-*Current phase: Phase 2 EKF tasks complete (offline IMU+GPS fusion tested on bag files). Phase 1 data verification still open. Phase 0 hardware unblocked in parallel.*
+*Current phase: Phase 3 perception in progress (ROS2 node + Docker ready, offline bag processing merged). Phase 2 EKF complete. Phase 1 data verification still open. Phase 0 hardware unblocked in parallel.*

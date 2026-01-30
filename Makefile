@@ -19,7 +19,7 @@ ROS2_SETUP := export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp; \
         build-ios build-sim xcode regen \
         bridge foxglove topics echo hz rviz rqt image bag bag-play \
         deploy-jetson ip check-ros2 clean \
-        perception \
+        perception perception-node perception-docker \
         lint lint-fix format
 
 # === Help ===
@@ -57,6 +57,8 @@ help:
 	@echo ""
 	@echo "Perception:"
 	@echo "  make perception BAG=path/to/bag.mcap  Run YOLOv8+YOLOP on bag"
+	@echo "  make perception-node                  Run live perception ROS2 node"
+	@echo "  make perception-docker                Run perception in Docker"
 	@echo ""
 	@echo "Linting & Formatting:"
 	@echo "  make lint           Run all linters (via pre-commit)"
@@ -120,7 +122,7 @@ foxglove:
 # === ROS2 Tools ===
 
 topics:
-	@$(ROS2_SETUP) && ros2 topic list
+	@$(ROS2_SETUP) && ros2 topic list --no-daemon
 
 hz:
 ifndef T
@@ -144,7 +146,7 @@ rqt:
 
 image:
 	@$(ROS2_SETUP) && ros2 run image_tools showimage --ros-args \
-		-r image:=/iphone/camera/back_wide/image/raw \
+		-r image:=/iphone_charlie/camera/arkit/image \
 		-p reliability:=best_effort
 
 BAG_DIR ?= bags
@@ -209,6 +211,12 @@ quickstart:
 
 perception:
 	cd perception && uv run couch-perception --bag $(abspath $(BAG)) --output output/
+
+perception-node:
+	@$(ROS2_SETUP) && cd perception && ([ -f .venv/pyvenv.cfg ] && grep -q "include-system-site-packages = true" .venv/pyvenv.cfg || uv venv --python python3.12 --system-site-packages) && uv sync --quiet && uv run python -m couch_perception.ros_node $(ARGS)
+
+perception-docker:
+	cd perception && docker compose up --build
 
 # === Linting & Formatting ===
 
