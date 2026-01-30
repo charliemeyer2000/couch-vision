@@ -1,0 +1,35 @@
+[project]
+name = "couch-ekf"
+version = "0.1.0"
+description = "Offline EKF fusing iPhone IMU + GPS data from MCAP bags"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=1.26",
+    "matplotlib>=3.8",
+    "mcap>=1.1",
+    "scipy>=1.12",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+couch-ekf = "couch_ekf.runner:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/couch_ekf"]
+
+[tool.mypy]
+strict = true
+
+[[tool.mypy.overrides]]
+module = ["scipy", "scipy.*", "mcap", "mcap.*"]
+ignore_missing_imports = true
+follow_untyped_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
