@@ -95,7 +95,7 @@ public struct PointCloud2 {
         pointStep: UInt32,
         rowStep: UInt32,
         data: Data,
-        isDense: Bool = true
+        isDense: Bool = false
     ) {
         self.header = header
         self.height = height
@@ -123,12 +123,9 @@ public struct PointCloud2 {
 
         var data = Data(capacity: Int(numPoints * pointStep))
         for point in points {
-            var x = point.x
-            var y = point.y
-            var z = point.z
-            data.append(contentsOf: withUnsafeBytes(of: &x) { Array($0) })
-            data.append(contentsOf: withUnsafeBytes(of: &y) { Array($0) })
-            data.append(contentsOf: withUnsafeBytes(of: &z) { Array($0) })
+            withUnsafeBytes(of: point.x) { data.append(contentsOf: $0) }
+            withUnsafeBytes(of: point.y) { data.append(contentsOf: $0) }
+            withUnsafeBytes(of: point.z) { data.append(contentsOf: $0) }
         }
 
         return PointCloud2(
@@ -157,14 +154,10 @@ public struct PointCloud2 {
 
         var data = Data(capacity: Int(numPoints * pointStep))
         for point in points {
-            var x = point.x
-            var y = point.y
-            var z = point.z
-            var i = point.intensity
-            data.append(contentsOf: withUnsafeBytes(of: &x) { Array($0) })
-            data.append(contentsOf: withUnsafeBytes(of: &y) { Array($0) })
-            data.append(contentsOf: withUnsafeBytes(of: &z) { Array($0) })
-            data.append(contentsOf: withUnsafeBytes(of: &i) { Array($0) })
+            withUnsafeBytes(of: point.x) { data.append(contentsOf: $0) }
+            withUnsafeBytes(of: point.y) { data.append(contentsOf: $0) }
+            withUnsafeBytes(of: point.z) { data.append(contentsOf: $0) }
+            withUnsafeBytes(of: point.intensity) { data.append(contentsOf: $0) }
         }
 
         return PointCloud2(
