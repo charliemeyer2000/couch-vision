@@ -422,6 +422,7 @@ public final class LiDARManager: NSObject, ObservableObject {
                 if let confData {
                     let confValue = confData[index]
                     if confValue == 0 { continue }
+                    // ARKit confidence: 0=low, 1=medium, 2=high → normalize to [0.0, 1.0]
                     conf = Float(confValue) / 2.0
                 }
 
@@ -430,7 +431,7 @@ public final class LiDARManager: NSObject, ObservableObject {
                 let ptX = (u - cx) * depth / fx
                 let ptY = (v - cy) * depth / fy
 
-                // ARKit: (right, up, back) -> ROS: (forward, left, up)
+                // ARKit camera space: +X=right, +Y=up, -Z=forward → ROS: +X=forward, +Y=left, +Z=up
                 points.append((x: depth, y: -ptX, z: -ptY, intensity: conf))
             }
         }
