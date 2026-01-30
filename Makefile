@@ -19,6 +19,7 @@ ROS2_SETUP := export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp; \
         build-ios build-sim xcode regen \
         bridge foxglove topics echo hz rviz rqt image bag bag-play \
         deploy-jetson ip check-ros2 clean \
+        perception \
         lint lint-fix format
 
 # === Help ===
@@ -53,6 +54,9 @@ help:
 	@echo "  make image          View camera in rqt_image_view"
 	@echo "  make bag            Record all topics to bags/"
 	@echo "  make bag-play F=x   Play back a bag file"
+	@echo ""
+	@echo "Perception:"
+	@echo "  make perception BAG=path/to/bag.mcap  Run YOLOv8+YOLOP on bag"
 	@echo ""
 	@echo "Linting & Formatting:"
 	@echo "  make lint           Run all linters (via pre-commit)"
@@ -200,6 +204,11 @@ quickstart:
 	@echo "   make topics"
 	@echo "   make hz T=/iphone/imu"
 	@echo "   make image"
+
+# === Perception ===
+
+perception:
+	cd perception && uv run couch-perception --bag $(abspath $(BAG)) --output output/
 
 # === Linting & Formatting ===
 

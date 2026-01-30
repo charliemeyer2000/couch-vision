@@ -27,6 +27,10 @@ bags/
 output/
 verify_output/
 
+# Perception
+perception/output/
+perception/weights/
+
 # Terraform
 infra/.terraform/
 infra/*.tfstate
