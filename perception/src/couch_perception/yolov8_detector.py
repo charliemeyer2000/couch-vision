@@ -1,8 +1,10 @@
 """YOLOv8n object detection wrapper using ultralytics."""
 
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
+import torch
 from ultralytics import YOLO
 
 RELEVANT_CLASSES: dict[int, str] = {
@@ -15,6 +17,23 @@ RELEVANT_CLASSES: dict[int, str] = {
     9: "traffic_light",
     11: "stop_sign",
 }
+
+
+def _auto_device() -> str:
+    if torch.cuda.is_available():
+        return "cuda"
+    if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
+
+
+def _find_model(model_path: str) -> str:
+    """Prefer TensorRT engine over PyTorch weights if available."""
+    p = Path(model_path)
+    engine = p.with_suffix(".engine")
+    if engine.exists():
+        return str(engine)
+    return model_path
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,9 +49,10 @@ class Detection:
 
 class YOLOv8Detector:
     def __init__(self, model_path: str = "yolov8n.pt", conf_threshold: float = 0.3, device: str | None = None) -> None:
-        self.model = YOLO(model_path)
+        resolved = _find_model(model_path)
+        self.model = YOLO(resolved)
         self.conf_threshold = conf_threshold
-        self.device = device
+        self.device = device or _auto_device()
         self._relevant_class_ids = list(RELEVANT_CLASSES.keys())
 
     def detect(self, frame: np.ndarray) -> list[Detection]:

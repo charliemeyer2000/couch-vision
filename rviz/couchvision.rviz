@@ -83,6 +83,35 @@ Visualization Manager:
         History Policy: Keep Last
         Reliability Policy: Best Effort
 
+    # -- Perception --
+
+    - Class: rviz_default_plugins/Image
+      Name: Perception Overlay
+      Enabled: true
+      Topic:
+        Value: /perception/overlay/compressed
+        Depth: 1
+        History Policy: Keep Last
+        Reliability Policy: Best Effort
+
+    - Class: rviz_default_plugins/Image
+      Name: Drivable Mask
+      Enabled: false
+      Topic:
+        Value: /perception/drivable_mask
+        Depth: 1
+        History Policy: Keep Last
+        Reliability Policy: Best Effort
+
+    - Class: rviz_default_plugins/Image
+      Name: Lane Mask
+      Enabled: false
+      Topic:
+        Value: /perception/lane_mask
+        Depth: 1
+        History Policy: Keep Last
+        Reliability Policy: Best Effort
+
     - Class: rviz_default_plugins/Axes
       Name: World Origin
       Enabled: true
