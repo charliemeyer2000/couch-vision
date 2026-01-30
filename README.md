@@ -215,9 +215,22 @@ ROS2 Topics ← rclpy publishers ← ios_bridge.py ←←←←←←←←
 
 ## ROS2 Topics
 
-| Topic | Type | Rate |
-|-------|------|------|
-| `/iphone/camera/back_wide/image/compressed` | `sensor_msgs/CompressedImage` | 30 Hz |
-| `/iphone/lidar/depth/image` | `sensor_msgs/Image` | 60 Hz |
-| `/iphone/lidar/points` | `sensor_msgs/PointCloud2` | 60 Hz |
-| `/iphone/imu` | `sensor_msgs/Imu` | 100 Hz |
+Topic prefix is `/<device_name>/` (configured in the iOS app, e.g. `/iphone_charlie/`).
+
+| Topic suffix | Type | Rate |
+|-------------|------|------|
+| `camera/arkit/image` | `sensor_msgs/Image` | ~13 Hz |
+| `camera/arkit/image/compressed` | `sensor_msgs/CompressedImage` | ~11 Hz |
+| `camera/arkit/camera_info` | `sensor_msgs/CameraInfo` | ~30 Hz |
+| `lidar/depth/image` | `sensor_msgs/Image` | ~30 Hz |
+| `lidar/points` | `sensor_msgs/PointCloud2` | ~30 Hz |
+| `imu` | `sensor_msgs/Imu` | ~100 Hz |
+| `odom` | `nav_msgs/Odometry` | ~50 Hz |
+| `gps/fix` | `sensor_msgs/NavSatFix` | ~1 Hz |
+| `gps/velocity` | `geometry_msgs/TwistStamped` | ~1 Hz |
+| `heading` | `std_msgs/Float64` | ~17 Hz |
+| `magnetic_field` | `sensor_msgs/MagneticField` | ~100 Hz |
+| `pressure` | `sensor_msgs/FluidPressure` | ~1 Hz |
+| `altitude` | `std_msgs/Float64` | ~1 Hz |
+| `battery` | `sensor_msgs/BatteryState` | ~1 Hz |
+| `tf` | `tf2_msgs/TFMessage` | ~170 Hz |
