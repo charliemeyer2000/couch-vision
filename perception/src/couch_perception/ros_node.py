@@ -93,6 +93,7 @@ class PerceptionNode(Node):  # type: ignore[misc]
             det_array.detections.append(det)
         self._det_pub.publish(det_array)
 
+        yolop_result = None
         if self._yolop is not None:
             yolop_result = self._yolop.detect(bgr)
             self._publish_mask(
@@ -110,7 +111,7 @@ class PerceptionNode(Node):  # type: ignore[misc]
                 overlay, label, (d.x1, d.y1 - 6),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1,
             )
-        if self._yolop is not None:
+        if yolop_result is not None:
             da_color = np.zeros_like(overlay)
             da_color[yolop_result.drivable_mask == 1] = (0, 128, 0)
             overlay = cv2.addWeighted(overlay, 1.0, da_color, 0.3, 0)
