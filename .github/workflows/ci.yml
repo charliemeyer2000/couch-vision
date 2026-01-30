@@ -309,11 +309,6 @@ jobs:
         working-directory: infra
         run: terraform init
 
-      - name: Terraform Plan
-        if: github.event_name == 'pull_request'
-        working-directory: infra
-        run: terraform plan -no-color
-
       - name: Terraform Apply
         working-directory: infra
         run: terraform apply -auto-approve
