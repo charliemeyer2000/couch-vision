@@ -419,12 +419,16 @@ get this working please.
 ---
 
 
-- [ ] Build custom EKF (numpy) fusing IMU + GPS in map frame
-- [ ] Convert NavSatFix to ENU relative to rotunda (38.035853, -78.503307)
-- [ ] Read from MCAP bag files for offline testing
-- [ ] Output localization at 100 Hz
-- [ ] Create matplotlib dashboard (covariance over time + localized path)
-- [ ] Test with `bags/university_intersect_gps_only.mcap` and `bags/2026-01-29_12-10-44/walk_around_university_all_data.mcap`
+- [x] Build custom EKF (numpy) fusing IMU + GPS in map frame (`ekf/src/couch_ekf/ekf.py`)
+- [x] Build UKF variant for comparison (`ekf/src/couch_ekf/ukf.py`)
+- [x] Convert NavSatFix to ENU relative to rotunda (38.035853, -78.503307) (`ekf/src/couch_ekf/geo.py`)
+- [x] Read from MCAP bag files for offline testing (`ekf/src/couch_ekf/bag_reader.py`)
+- [x] Output localization at 100 Hz
+- [x] Create matplotlib dashboard (covariance over time + localized path) (`ekf/src/couch_ekf/dashboard.py`)
+- [x] Test with `bags/university_intersect_gps_only.mcap` and `bags/2026-01-29_12-10-44/walk_around_university_all_data.mcap`
+- [x] Grid search scripts for EKF/UKF parameter tuning (`ekf/grid_search.py`, `ekf/ukf_grid_search.py`)
+- [x] Dockerized with CI (Docker Hub: `charliemeyer2000/couch-vision-ekf`)
+- [x] Bag files uploaded to public S3 bucket (`s3://couch-vision-bags/`)
 
 #### EKF Configuration
 ```yaml
@@ -1065,5 +1069,5 @@ foxglove_bridge is built from source on the Jetson at `~/ros2_jazzy/`. It requir
 
 ---
 
-*Last updated: 2026-01-28*
-*Current phase: Phase 1 in progress (layout + marker done, data verification next). Phase 0 hardware unblocked in parallel.*
+*Last updated: 2026-01-29*
+*Current phase: Phase 2 EKF tasks complete (offline IMU+GPS fusion tested on bag files). Phase 1 data verification still open. Phase 0 hardware unblocked in parallel.*
