@@ -152,6 +152,10 @@ bag:
 bag-play:
 	@$(ROS2_SETUP) && ros2 bag play $(F)
 
+BAG ?= bags/2026-01-29_12-10-44/walk_around_university_all_data.mcap
+verify:
+	uv run --with mcap,numpy,matplotlib python verify_bag.py $(BAG)
+
 # === Jetson Deployment ===
 
 deploy-jetson:

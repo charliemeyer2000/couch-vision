@@ -325,13 +325,13 @@ The iOS app is built and streaming 18 topics. The bridge and foxglove_bridge are
   - [x] IMU/diagnostics plots (orientation, velocity)
   - [x] Topic graph panel
 - [x] **Publish couch bounding box marker** — `visualization_msgs/Marker` from bridge on `/couch/marker` at `base_link`
-- [ ] Verify topic data quality:
-  - [ ] `/iphone/camera/back_wide/image/compressed` — check Hz and image quality
-  - [ ] `/iphone/lidar/points` — PointCloud2 looks correct in 3D view
-  - [ ] `/iphone/imu` — ~100Hz, orientation looks reasonable
-  - [ ] `/iphone/gps/fix` — position shows on map panel
-  - [ ] `/tf` — ARKit pose transforms visible in 3D panel
-  - [ ] `/iphone/odom` — odometry trail visible
+- [x] Verify topic data quality (via `make verify`, see `verify_bag.py`):
+  - [x] `/iphone/camera/arkit/image/compressed` — 4.5 Hz effective, clear JPEG frames
+  - [ ] `/iphone/lidar/points` — PointCloud2 not recorded in current bags (0 messages)
+  - [x] `/iphone/imu` — 98.9 Hz effective, orientation/angular vel/linear accel all reasonable
+  - [x] `/iphone/gps/fix` — 1 Hz, 156 fixes, clear walk path on scatter plot
+  - [x] `/tf` — 27876 messages, ARKit pose transforms present
+  - [x] `/iphone/odom` — 22.7 Hz, ~100m walk trail visible
 - [ ] Measure end-to-end latency
 - [ ] Mount iPhone rigidly on couch (front-facing)
 - [ ] Measure iPhone mount position/orientation relative to base_link

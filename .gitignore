@@ -25,6 +25,7 @@ bags/
 
 # build outputs
 output/
+verify_output/
 
 # Terraform
 infra/.terraform/
