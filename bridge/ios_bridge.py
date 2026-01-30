@@ -35,6 +35,7 @@ from sensor_msgs.msg import (
     MagneticField,
     NavSatFix,
     PointCloud2,
+    PointField,
 )
 from std_msgs.msg import Bool, ColorRGBA, Float64, Int32
 from tf2_msgs.msg import TFMessage
@@ -429,10 +430,28 @@ class IOSBridge(Node):  # type: ignore[misc]
         msg.linear_acceleration_covariance = r.float64_array(9)
         return msg
 
-    def _parse_pointcloud2(self, cdr_data: bytes) -> PointCloud2 | None:
-        _ = cdr_data
-        self.get_logger().info("Received PointCloud2 (parsing not yet implemented)")
-        return None
+    def _parse_pointcloud2(self, cdr_data: bytes) -> PointCloud2:
+        r = CdrReader(cdr_data)
+        msg = PointCloud2()
+        self._read_header(r, msg)
+        msg.height = r.uint32()
+        msg.width = r.uint32()
+        num_fields = r.uint32()
+        fields = []
+        for _ in range(num_fields):
+            f = PointField()
+            f.name = r.string()
+            f.offset = r.uint32()
+            f.datatype = r.uint8()
+            f.count = r.uint32()
+            fields.append(f)
+        msg.fields = fields
+        msg.is_bigendian = bool(r.uint8())
+        msg.point_step = r.uint32()
+        msg.row_step = r.uint32()
+        msg.data = list(r.bytes_seq())
+        msg.is_dense = bool(r.uint8())
+        return msg
 
     def _parse_vector3_stamped(self, cdr_data: bytes) -> Vector3Stamped:
         r = CdrReader(cdr_data)
