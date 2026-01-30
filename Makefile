@@ -209,11 +209,20 @@ quickstart:
 
 # === Perception ===
 
+# Auto-detect platform for correct Python version
+UNAME_S := $(shell uname -s)
+UNAME_M := $(shell uname -m)
+ifeq ($(UNAME_S)-$(UNAME_M),Linux-aarch64)
+  PERC_PYTHON := python3.10
+else
+  PERC_PYTHON := python3.12
+endif
+
 perception:
 	cd perception && uv run couch-perception --bag $(abspath $(BAG)) --output output/
 
 perception-node:
-	@$(ROS2_SETUP) && cd perception && ([ -f .venv/pyvenv.cfg ] && grep -q "include-system-site-packages = true" .venv/pyvenv.cfg || uv venv --python python3.12 --system-site-packages) && uv sync --quiet && uv run python -m couch_perception.ros_node $(ARGS)
+	@$(ROS2_SETUP) && cd perception && ([ -f .venv/pyvenv.cfg ] && grep -q "include-system-site-packages = true" .venv/pyvenv.cfg || uv venv --python $(PERC_PYTHON) --system-site-packages) && uv sync --quiet && uv run python -m couch_perception.ros_node $(ARGS)
 
 perception-docker:
 	cd perception && docker compose up --build

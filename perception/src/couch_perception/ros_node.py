@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """ROS2 perception node — runs YOLOv8 + optional YOLOP on live camera frames."""
 
-from __future__ import annotations
-
 import argparse
 import time
 
@@ -37,8 +35,11 @@ class PerceptionNode(Node):  # type: ignore[misc]
     ) -> None:
         super().__init__("perception_node")
 
-        self.get_logger().info(f"Loading YOLOv8 (conf={conf}, device={device})...")
         self._yolo = YOLOv8Detector(conf_threshold=conf, device=device)
+        self.get_logger().info(
+            f"YOLOv8 loaded (conf={conf}, device={self._yolo.device}, "
+            f"model={self._yolo.model.model_name})"
+        )
 
         self._yolop = None
         if not skip_yolop:

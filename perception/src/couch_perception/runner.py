@@ -28,8 +28,8 @@ def main() -> None:
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    print("Loading YOLOv8n...")
     yolo = YOLOv8Detector(conf_threshold=args.conf, device=args.device)
+    print(f"YOLOv8 loaded (device={yolo.device})")
 
     yolop: YOLOPDetector | None = None
     if not args.skip_yolop:
