@@ -95,23 +95,23 @@ class _Listener(ServerListener):
 
 
 def _build_fov_mask() -> np.ndarray:
-    """Pre-compute a boolean mask where True = inside 70° FOV, False = outside.
+    """Pre-compute a boolean mask where True = inside FOV, False = outside.
 
-    The ego is at grid center. Forward direction is +X (row increases = further forward).
-    Grid layout: row 0 = max forward (top), row 99 = behind. Col 0 = left, col 99 = right.
-    World coords: x = forward, y = lateral (left positive).
+    Forward direction is -X (negated to align with ENU/Google Maps).
+    Grid layout: row 0 = most negative x (forward), row 99 = most positive x (behind).
+    Col 0 = min y (left), col 99 = max y (right).
     """
     mask = np.zeros((GRID_CELLS, GRID_CELLS), dtype=bool)
 
     for r in range(GRID_CELLS):
         for c in range(GRID_CELLS):
             # World coords relative to ego at center
-            x = GRID_ORIGIN + (GRID_CELLS - 1 - r) * GRID_RESOLUTION + GRID_RESOLUTION / 2
+            x = GRID_ORIGIN + r * GRID_RESOLUTION + GRID_RESOLUTION / 2
             y = GRID_ORIGIN + c * GRID_RESOLUTION + GRID_RESOLUTION / 2
 
-            # Only forward hemisphere and within FOV angle
-            if x > 0:
-                angle = abs(math.atan2(y, x))
+            # Forward is -X direction
+            if x < 0:
+                angle = abs(math.atan2(y, -x))
                 if angle <= FOV_HALF_RAD:
                     mask[r, c] = True
 
@@ -137,11 +137,11 @@ _EGO_DRIVABLE_MASK = _build_ego_drivable_mask()
 def _world_to_grid(x: np.ndarray, y: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Convert world coordinates (meters, ego at 0,0) to grid row/col indices.
 
-    Row 0 = max forward, row GRID_CELLS-1 = max behind.
-    Col 0 = max left, col GRID_CELLS-1 = max right.
+    Forward is -X, so row 0 = most negative x (forward), row GRID_CELLS-1 = most positive x (behind).
+    Col 0 = min y (left), col GRID_CELLS-1 = max y (right).
     """
     col = ((y - GRID_ORIGIN) / GRID_RESOLUTION).astype(np.int32)
-    row = (GRID_CELLS - 1 - ((x - GRID_ORIGIN) / GRID_RESOLUTION)).astype(np.int32)
+    row = ((x - GRID_ORIGIN) / GRID_RESOLUTION).astype(np.int32)
 
     valid = (row >= 0) & (row < GRID_CELLS) & (col >= 0) & (col < GRID_CELLS)
     return row, col, valid
@@ -193,10 +193,10 @@ def build_costmap(
             x_min, x_max = group_pts[:, 0].min(), group_pts[:, 0].max()
             y_min, y_max = group_pts[:, 1].min(), group_pts[:, 1].max()
             r_min, c_min, _ = _world_to_grid(
-                np.array([x_max]), np.array([y_min])
+                np.array([x_min]), np.array([y_min])
             )
             r_max, c_max, _ = _world_to_grid(
-                np.array([x_min]), np.array([y_max])
+                np.array([x_max]), np.array([y_max])
             )
             r0 = max(0, int(r_min[0]))
             r1 = min(GRID_CELLS - 1, int(r_max[0]))

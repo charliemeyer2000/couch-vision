@@ -137,8 +137,22 @@ def _route_to_enu(
     return xy
 
 
-def _resample_path(xy: np.ndarray, step_size: float = 0.5) -> np.ndarray:
-    """Resample an (N,2) path to uniform spacing via spline interpolation."""
+def _resample_path(xy: np.ndarray, step_size: float = 0.3, smoothing: float = 5.0) -> np.ndarray:
+    """Resample an (N,2) path to uniform spacing via smoothed spline interpolation.
+
+    Args:
+        xy: (N, 2) array of waypoints.
+        step_size: distance between resampled points (meters).
+        smoothing: spline smoothing factor (higher = smoother, 0 = exact interpolation).
+    """
+    if len(xy) < 2:
+        return xy
+
+    # Remove duplicate consecutive points
+    diffs = np.diff(xy, axis=0)
+    dists = np.linalg.norm(diffs, axis=1)
+    keep = np.concatenate(([True], dists > 1e-6))
+    xy = xy[keep]
     if len(xy) < 2:
         return xy
 
@@ -154,7 +168,7 @@ def _resample_path(xy: np.ndarray, step_size: float = 0.5) -> np.ndarray:
 
     try:
         k = min(3, len(xy) - 1)
-        tck, _ = splprep(xy.T, u=cumulative, s=0, k=k)
+        tck, _ = splprep(xy.T, u=cumulative, s=smoothing, k=k)
         new_points = splev(new_dists, tck)
         return np.column_stack(new_points)
     except Exception:
@@ -166,24 +180,34 @@ def _find_lookahead_goal(
     ego_enu: np.ndarray,
     lookahead_m: float = 15.0,
 ) -> tuple[float, float] | None:
-    """Find the point on the route that is lookahead_m ahead of ego.
+    """Find an interpolated point on the route exactly lookahead_m ahead of ego.
 
     Returns (east, north) in ENU or None if no valid point found.
+    Clamps lookahead to 20m max so the goal always falls within the costmap.
     """
     if len(route_enu) == 0:
         return None
+
+    lookahead_m = min(lookahead_m, 20.0)
 
     # Find closest point on route to ego
     dists = np.linalg.norm(route_enu - ego_enu[:2], axis=1)
     closest_idx = int(np.argmin(dists))
 
-    # Walk forward along the route until we've traveled lookahead_m
+    # Walk forward along the route until we've traveled lookahead_m,
+    # then interpolate to get the exact point at that distance.
     traveled = 0.0
     for i in range(closest_idx, len(route_enu) - 1):
         seg = np.linalg.norm(route_enu[i + 1] - route_enu[i])
+        if seg < 1e-9:
+            continue
+        if traveled + seg >= lookahead_m:
+            # Interpolate within this segment
+            remaining = lookahead_m - traveled
+            t = remaining / seg
+            pt = route_enu[i] + t * (route_enu[i + 1] - route_enu[i])
+            return float(pt[0]), float(pt[1])
         traveled += seg
-        if traveled >= lookahead_m:
-            return float(route_enu[i + 1, 0]), float(route_enu[i + 1, 1])
 
     # If route is shorter than lookahead, use the last point
     return float(route_enu[-1, 0]), float(route_enu[-1, 1])
@@ -209,9 +233,9 @@ def _header(timestamp: float, frame_id: str = "map") -> Header:
 def _costmap_to_occupancy_grid(grid: np.ndarray, timestamp: float) -> OccupancyGrid:
     """Convert internal grid to OccupancyGrid.
 
-    Internal grid: grid[r,c] — row 0 = max forward (+x), col 0 = min lateral (min y).
+    Internal grid: grid[r,c] — row 0 = min x (forward, -X), col 0 = min y.
     OccupancyGrid: row-major, row 0 = min y, col 0 = min x.
-    Transform: flip rows (so row 0 = min x) then transpose (swap row/col axes).
+    Transform: transpose only (row already starts at min x).
     """
     msg = OccupancyGrid()
     msg.header = _header(timestamp)
@@ -222,7 +246,7 @@ def _costmap_to_occupancy_grid(grid: np.ndarray, timestamp: float) -> OccupancyG
     msg.info.origin.position.y = GRID_ORIGIN
     msg.info.origin.position.z = 0.0
     msg.info.origin.orientation.w = 1.0
-    og = grid[::-1].T
+    og = grid.T
     msg.data = og.flatten().tolist()
     return msg
 
@@ -348,13 +372,13 @@ def _path_to_costmap_image(
             px = ps.pose.position.x
             py = ps.pose.position.y
             col = int((py - GRID_ORIGIN) / GRID_RESOLUTION) * scale
-            row = int((GRID_CELLS - 1 - (px - GRID_ORIGIN) / GRID_RESOLUTION)) * scale
+            row = int((px - GRID_ORIGIN) / GRID_RESOLUTION) * scale
             if 0 <= row < img.shape[0] and 0 <= col < img.shape[1]:
                 cv2.circle(img, (col, row), 3, (255, 180, 0), -1)
 
     # Goal
     gc = int((goal_y - GRID_ORIGIN) / GRID_RESOLUTION) * scale
-    gr = int((GRID_CELLS - 1 - (goal_x - GRID_ORIGIN) / GRID_RESOLUTION)) * scale
+    gr = int((goal_x - GRID_ORIGIN) / GRID_RESOLUTION) * scale
     if 0 <= gr < img.shape[0] and 0 <= gc < img.shape[1]:
         cv2.circle(img, (gc, gr), 8, (0, 0, 255), -1)
         cv2.putText(img, "GOAL", (gc + 10, gr + 5), cv2.FONT_HERSHEY_SIMPLEX,
@@ -405,11 +429,15 @@ def process_bag(
 
     # ── Initialize EKF ────────────────────────────────────────────────────
     ekf = EKF(
-        accel_noise=50.0,
+        accel_noise=2.0,
         gyro_noise=0.05,
-        initial_pos_cov=100.0,
+        initial_pos_cov=1.0,
+        heading_noise=0.15,
+        gps_heading_noise=0.3,
+        velocity_damping=0.95,
         use_imu=True,
         force_2d=True,
+        max_speed=3.0,
     )
 
     # Convert all GPS to ENU for the EKF
@@ -504,6 +532,7 @@ def process_bag(
     gps_idx = 0
     imu_idx = 0
     prev_imu_t: float | None = None
+    prev_gps_enu: np.ndarray | None = None
 
     for frame in frames:
         if max_frames and frame_num >= max_frames:
@@ -534,11 +563,15 @@ def process_bag(
             prev_imu_t = s.timestamp
             if ekf.initialized:
                 ekf.predict(s.accel, s.gyro, s.orientation, dt)
+                ekf.update_heading(s.orientation)
             imu_idx += 1
 
         while gps_idx < len(gps_fixes) and gps_fixes[gps_idx].timestamp <= frame.timestamp:
             if ekf.initialized:
                 ekf.update_gps(gps_enu_all[gps_idx], gps_cov_all[gps_idx])
+                if prev_gps_enu is not None:
+                    ekf.update_gps_heading(prev_gps_enu, gps_enu_all[gps_idx])
+                prev_gps_enu = gps_enu_all[gps_idx].copy()
 
             # Publish GPS fix as ROS2 topic
             g = gps_fixes[gps_idx]
@@ -695,7 +728,7 @@ def process_bag(
             print(
                 f"\rFrame {frame_num}: path={n_poses} poses, "
                 f"{n_det} det, {1/dt:.1f} FPS, "
-                f"EKF=({ego_enu[0]:.1f},{ego_enu[1]:.1f}) "
+                f"EKF=({ego_enu[0]:.1f},{ego_enu[1]:.1f}) yaw={math.degrees(ekf.yaw):.0f}° "
                 f"goal=({goal_x:.1f},{goal_y:.1f})",
                 end="", flush=True,
             )

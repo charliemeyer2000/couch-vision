@@ -58,7 +58,7 @@ def _apply_imu_rotation(points: np.ndarray, orientation: np.ndarray | None) -> n
     # After R.T, the IMU world frame has: [0]=forward, [1]=gravity(up), [2]=lateral.
     # Permute to ROS convention: X=forward, Y=lateral, Z=up.
     result = np.empty_like(pts_world)
-    result[:, 0] = pts_world[:, 0]   # forward → X
+    result[:, 0] = -pts_world[:, 0]  # forward → -X (negated to align with ENU/Google Maps)
     result[:, 1] = pts_world[:, 2]   # lateral → Y
     result[:, 2] = -pts_world[:, 1]  # -gravity → Z (up)
     return result.astype(np.float32)
