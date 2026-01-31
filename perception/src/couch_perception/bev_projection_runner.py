@@ -55,12 +55,12 @@ def _apply_imu_rotation(points: np.ndarray, orientation: np.ndarray | None) -> n
     R = _quat_to_rotation_matrix(orientation)
     # R.T = inverse rotation (world-to-device → device-to-world)
     pts_world = (R.T @ points.T).T
-    # The IMU world frame has Y as the gravity-normal axis. Permute so Z is up:
-    # new_x = x, new_y = z, new_z = -y
+    # After R.T, the IMU world frame has: [0]=forward, [1]=gravity(up), [2]=lateral.
+    # Permute to ROS convention: X=forward, Y=lateral, Z=up.
     result = np.empty_like(pts_world)
-    result[:, 0] = pts_world[:, 0]
-    result[:, 1] = pts_world[:, 2]
-    result[:, 2] = -pts_world[:, 1]
+    result[:, 0] = pts_world[:, 0]   # forward → X
+    result[:, 1] = pts_world[:, 2]   # lateral → Y
+    result[:, 2] = -pts_world[:, 1]  # -gravity → Z (up)
     return result.astype(np.float32)
 
 # Point stride: x(f32) + y(f32) + z(f32) + r(f32) + g(f32) + b(f32) + a(f32) = 28 bytes
@@ -197,6 +197,40 @@ def _extract_bbox_pixels(
         return np.empty((0, 2)), np.empty((0,))
 
     return np.vstack(all_pixels), np.concatenate(all_depths)
+
+
+def _extract_bbox_pixels_grouped(
+    detections: list[Detection],
+    depth: np.ndarray,
+    image_shape: tuple[int, int],
+    subsample: int = 8,
+) -> list[tuple[np.ndarray, np.ndarray]]:
+    """Like _extract_bbox_pixels but returns per-detection groups.
+
+    Returns a list of (pixels, depths) tuples, one per detection.
+    """
+    dh, dw = depth.shape[:2]
+    ih, iw = image_shape
+    scale_x = dw / iw
+    scale_y = dh / ih
+
+    groups = []
+    for det in detections:
+        x1 = max(0, int(det.x1 * scale_x))
+        y1 = max(0, int(det.y1 * scale_y))
+        x2 = min(dw - 1, int(det.x2 * scale_x))
+        y2 = min(dh - 1, int(det.y2 * scale_y))
+
+        ys, xs = np.mgrid[y1:y2:subsample, x1:x2:subsample]
+        xs = xs.ravel()
+        ys = ys.ravel()
+        d = depth[ys, xs]
+
+        valid = (d > 0.1) & (d < 20.0)
+        pixels = np.column_stack([xs[valid], ys[valid]])
+        groups.append((pixels, d[valid]))
+
+    return groups
 
 
 def _make_pointcloud(

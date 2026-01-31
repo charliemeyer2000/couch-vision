@@ -1,14 +1,16 @@
-"""Nav2 path planning on MCAP bag data with Foxglove visualization.
+"""Nav2 path planning on MCAP bag data with foxglove_bridge visualization.
 
 Processes bag through YOLOv8+YOLOP perception, builds a costmap, publishes it
 as a ROS2 OccupancyGrid for Nav2, uses the Simple Commander API to plan a path
-to a waypoint 5m ahead, then publishes the planned path to Foxglove.
+to a waypoint ahead, and publishes all results as ROS2 topics.
 
-Requires Nav2 planner_server + global_costmap to be running (see launch file).
+Visualization is handled by foxglove_bridge (launched separately), which
+forwards all ROS2 topics to Foxglove Studio over WebSocket.
+
+Requires Nav2 planner_server + foxglove_bridge to be running (see launch file).
 """
 
 import argparse
-import datetime
 import math
 import struct
 import threading
@@ -21,32 +23,11 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy
 from nav_msgs.msg import OccupancyGrid, Path
-from geometry_msgs.msg import PoseStamped, Pose, Point, Quaternion as RosQuaternion
-from std_msgs.msg import Header
-from builtin_interfaces.msg import Time as RosTime
-
-import foxglove
-from foxglove.schemas import (
-    CompressedImage,
-    Grid,
-    LinePrimitive,
-    LinePrimitiveLineType,
-    PackedElementField,
-    PackedElementFieldNumericType,
-    PointCloud,
-    Pose as FgPose,
-    Quaternion as FgQuaternion,
-    Color,
-    CubePrimitive,
-    Duration,
-    Point3,
-    SceneEntity,
-    SceneUpdate,
-    Timestamp,
-    Vector2,
-    Vector3,
-)
-from foxglove.websocket import ServerListener, Client, ChannelView
+from geometry_msgs.msg import PoseStamped
+from sensor_msgs.msg import CompressedImage, Image, Imu, PointCloud2, PointField
+from visualization_msgs.msg import Marker
+from std_msgs.msg import Header, ColorRGBA
+from builtin_interfaces.msg import Time as RosTime, Duration as RosDuration
 
 from nav2_simple_commander.robot_navigator import BasicNavigator
 
@@ -60,31 +41,15 @@ from couch_perception.costmap_runner import (
     GRID_ORIGIN,
     GRID_RESOLUTION,
     GRID_SIZE_M,
-    _make_foxglove_grid,
 )
 from couch_perception.costmap_visualizer import costmap_to_upscaled_image
 from couch_perception.bev_projection_runner import (
     _apply_imu_rotation,
     _extract_mask_pixels,
     _extract_bbox_pixels,
+    _extract_bbox_pixels_grouped,
     _build_depth_camera_model,
-    _pack_points_rgba_vectorized,
-    _make_pointcloud,
 )
-
-
-class _FgListener(ServerListener):
-    def __init__(self) -> None:
-        self.subscribers: dict[int, set[str]] = {}
-
-    def on_subscribe(self, client: Client, channel: ChannelView) -> None:
-        self.subscribers.setdefault(client.id, set()).add(channel.topic)
-
-    def on_unsubscribe(self, client: Client, channel: ChannelView) -> None:
-        if client.id in self.subscribers:
-            self.subscribers[client.id].discard(channel.topic)
-            if not self.subscribers[client.id]:
-                del self.subscribers[client.id]
 
 
 def _stamp_from_epoch(t: float) -> RosTime:
@@ -93,17 +58,24 @@ def _stamp_from_epoch(t: float) -> RosTime:
     return RosTime(sec=sec, nanosec=nanosec)
 
 
-def _costmap_to_occupancy_grid(grid: np.ndarray, timestamp: float) -> OccupancyGrid:
-    """Convert our costmap array to a ROS2 OccupancyGrid message.
+def _header(timestamp: float, frame_id: str = "map") -> Header:
+    h = Header()
+    h.stamp = _stamp_from_epoch(timestamp)
+    h.frame_id = frame_id
+    return h
 
-    Nav2 OccupancyGrid uses int8 values: 0=free, 100=lethal, -1=unknown.
-    Our grid already uses these conventions.
+
+# ── OccupancyGrid ──────────────────────────────────────────────────────────
+
+def _costmap_to_occupancy_grid(grid: np.ndarray, timestamp: float) -> OccupancyGrid:
+    """Convert internal grid to OccupancyGrid.
+
+    Internal grid: grid[r,c] — row 0 = max forward (+x), col 0 = min lateral (min y).
+    OccupancyGrid: row-major, row 0 = min y, col 0 = min x.
+    Transform: flip rows (so row 0 = min x) then transpose (swap row/col axes).
     """
     msg = OccupancyGrid()
-    msg.header = Header()
-    msg.header.stamp = _stamp_from_epoch(timestamp)
-    msg.header.frame_id = "map"
-
+    msg.header = _header(timestamp)
     msg.info.resolution = GRID_RESOLUTION
     msg.info.width = GRID_CELLS
     msg.info.height = GRID_CELLS
@@ -111,117 +83,143 @@ def _costmap_to_occupancy_grid(grid: np.ndarray, timestamp: float) -> OccupancyG
     msg.info.origin.position.y = GRID_ORIGIN
     msg.info.origin.position.z = 0.0
     msg.info.origin.orientation.w = 1.0
-
-    # OccupancyGrid.data is int8[] — flatten row-major
-    msg.data = grid.flatten().tolist()
+    og = grid[::-1].T
+    msg.data = og.flatten().tolist()
     return msg
 
 
-def _path_to_foxglove_scene(
-    path: Path, timestamp: float
-) -> SceneUpdate:
-    """Convert a nav_msgs/Path to a Foxglove SceneUpdate with a line strip."""
-    dt = datetime.datetime.fromtimestamp(timestamp, tz=datetime.timezone.utc)
-    ts = Timestamp.from_datetime(dt)
+# ── PointCloud2 ────────────────────────────────────────────────────────────
 
-    points = []
-    for pose_stamped in path.poses:
-        p = pose_stamped.pose.position
-        points.append(Point3(x=p.x, y=p.y, z=p.z + 0.05))
-
-    line = LinePrimitive(
-        type=LinePrimitiveLineType.LineStrip,
-        pose=FgPose(
-            position=Vector3(x=0.0, y=0.0, z=0.0),
-            orientation=FgQuaternion(x=0.0, y=0.0, z=0.0, w=1.0),
-        ),
-        thickness=0.08,
-        scale_invariant=False,
-        points=points,
-        color=Color(r=0.0, g=0.5, b=1.0, a=1.0),
-    )
-
-    entity = SceneEntity(
-        timestamp=ts,
-        frame_id="map",
-        id="planned_path",
-        lifetime=Duration(sec=0, nsec=500_000_000),
-        lines=[line],
-    )
-
-    return SceneUpdate(entities=[entity])
+_PC2_FIELDS = [
+    PointField(name="x", offset=0, datatype=PointField.FLOAT32, count=1),
+    PointField(name="y", offset=4, datatype=PointField.FLOAT32, count=1),
+    PointField(name="z", offset=8, datatype=PointField.FLOAT32, count=1),
+    PointField(name="r", offset=12, datatype=PointField.FLOAT32, count=1),
+    PointField(name="g", offset=16, datatype=PointField.FLOAT32, count=1),
+    PointField(name="b", offset=20, datatype=PointField.FLOAT32, count=1),
+    PointField(name="a", offset=24, datatype=PointField.FLOAT32, count=1),
+]
+_PC2_POINT_STEP = 28
 
 
-def _waypoint_marker(
-    x: float, y: float, timestamp: float
-) -> SceneUpdate:
-    """Create a Foxglove marker for the goal waypoint."""
-    dt = datetime.datetime.fromtimestamp(timestamp, tz=datetime.timezone.utc)
-    ts = Timestamp.from_datetime(dt)
+def _make_pointcloud2(
+    points: np.ndarray, r: float, g: float, b: float, timestamp: float
+) -> PointCloud2:
+    """Pack (N,3) float32 points with constant RGBA into a PointCloud2 message."""
+    msg = PointCloud2()
+    msg.header = _header(timestamp)
 
-    entity = SceneEntity(
-        timestamp=ts,
-        frame_id="map",
-        id="goal_waypoint",
-        lifetime=Duration(sec=0, nsec=500_000_000),
-        cubes=[
-            CubePrimitive(
-                pose=FgPose(
-                    position=Vector3(x=x, y=y, z=0.1),
-                    orientation=FgQuaternion(x=0.0, y=0.0, z=0.0, w=1.0),
-                ),
-                size=Vector3(x=0.3, y=0.3, z=0.3),
-                color=Color(r=1.0, g=0.2, b=0.2, a=0.9),
-            ),
-        ],
-    )
-    return SceneUpdate(entities=[entity])
+    if len(points) == 0:
+        msg.height = 1
+        msg.width = 0
+        msg.fields = _PC2_FIELDS
+        msg.point_step = _PC2_POINT_STEP
+        msg.row_step = 0
+        msg.data = b""
+        msg.is_dense = True
+        return msg
+
+    n = len(points)
+    data = np.empty((n, 7), dtype=np.float32)
+    data[:, :3] = points
+    data[:, 3] = r
+    data[:, 4] = g
+    data[:, 5] = b
+    data[:, 6] = 1.0
+
+    msg.height = 1
+    msg.width = n
+    msg.fields = _PC2_FIELDS
+    msg.is_bigendian = False
+    msg.point_step = _PC2_POINT_STEP
+    msg.row_step = _PC2_POINT_STEP * n
+    msg.data = data.tobytes()
+    msg.is_dense = True
+    return msg
 
 
-def _path_to_foxglove_image(
-    grid: np.ndarray, path: Path, goal_x: float, goal_y: float
-) -> np.ndarray:
-    """Draw the planned path and waypoint on top of the costmap color image."""
+# ── Markers ────────────────────────────────────────────────────────────────
+
+def _make_goal_marker(x: float, y: float, timestamp: float) -> Marker:
+    """Red cube at the goal waypoint."""
+    m = Marker()
+    m.header = _header(timestamp)
+    m.ns = "nav"
+    m.id = 0
+    m.type = Marker.CUBE
+    m.action = Marker.ADD
+    m.pose.position.x = x
+    m.pose.position.y = y
+    m.pose.position.z = 0.15
+    m.pose.orientation.w = 1.0
+    m.scale.x = 0.3
+    m.scale.y = 0.3
+    m.scale.z = 0.3
+    m.color = ColorRGBA(r=1.0, g=0.2, b=0.2, a=0.9)
+    m.lifetime = RosDuration(sec=1, nanosec=0)
+    return m
+
+
+def _make_ego_marker(timestamp: float) -> Marker:
+    """Small white sphere at ego position (0,0)."""
+    m = Marker()
+    m.header = _header(timestamp)
+    m.ns = "nav"
+    m.id = 1
+    m.type = Marker.SPHERE
+    m.action = Marker.ADD
+    m.pose.position.x = 0.0
+    m.pose.position.y = 0.0
+    m.pose.position.z = 0.15
+    m.pose.orientation.w = 1.0
+    m.scale.x = 0.2
+    m.scale.y = 0.2
+    m.scale.z = 0.2
+    m.color = ColorRGBA(r=1.0, g=1.0, b=1.0, a=1.0)
+    m.lifetime = RosDuration(sec=1, nanosec=0)
+    return m
+
+
+# ── Costmap overlay image ─────────────────────────────────────────────────
+
+def _path_to_costmap_image(
+    grid: np.ndarray, path: Path | None, goal_x: float, goal_y: float
+) -> CompressedImage:
+    """Draw the planned path and waypoint on the costmap color image, return as CompressedImage."""
     img = costmap_to_upscaled_image(grid, scale=4)
     scale = 4
 
-    # Draw path
-    for ps in path.poses:
-        px = ps.pose.position.x
-        py = ps.pose.position.y
-        col = int((py - GRID_ORIGIN) / GRID_RESOLUTION) * scale
-        row = int((GRID_CELLS - 1 - (px - GRID_ORIGIN) / GRID_RESOLUTION)) * scale
-        if 0 <= row < img.shape[0] and 0 <= col < img.shape[1]:
-            cv2.circle(img, (col, row), 3, (255, 180, 0), -1)  # cyan path
+    if path and path.poses:
+        for ps in path.poses:
+            px = ps.pose.position.x
+            py = ps.pose.position.y
+            col = int((py - GRID_ORIGIN) / GRID_RESOLUTION) * scale
+            row = int((GRID_CELLS - 1 - (px - GRID_ORIGIN) / GRID_RESOLUTION)) * scale
+            if 0 <= row < img.shape[0] and 0 <= col < img.shape[1]:
+                cv2.circle(img, (col, row), 3, (255, 180, 0), -1)
 
-    # Draw goal
+    # Goal
     gc = int((goal_y - GRID_ORIGIN) / GRID_RESOLUTION) * scale
     gr = int((GRID_CELLS - 1 - (goal_x - GRID_ORIGIN) / GRID_RESOLUTION)) * scale
     if 0 <= gr < img.shape[0] and 0 <= gc < img.shape[1]:
-        cv2.circle(img, (gc, gr), 8, (0, 0, 255), -1)  # red goal
+        cv2.circle(img, (gc, gr), 8, (0, 0, 255), -1)
         cv2.putText(img, "GOAL", (gc + 10, gr + 5), cv2.FONT_HERSHEY_SIMPLEX,
                     0.4, (0, 0, 255), 1)
 
-    # Draw ego position (center)
+    # Ego
     center = GRID_CELLS * scale // 2
     cv2.drawMarker(img, (center, center), (255, 255, 255),
                    cv2.MARKER_CROSS, 12, 2)
 
-    return img
+    _, buf = cv2.imencode(".png", img)
+    msg = CompressedImage()
+    msg.header = _header(time.time())
+    msg.format = "png"
+    msg.data = buf.tobytes()
+    return msg
 
 
-def _make_compressed_image(
-    image: np.ndarray, timestamp: float, frame_id: str = "costmap"
-) -> CompressedImage:
-    _, buf = cv2.imencode(".png", image)
-    dt = datetime.datetime.fromtimestamp(timestamp, tz=datetime.timezone.utc)
-    return CompressedImage(
-        timestamp=Timestamp.from_datetime(dt),
-        frame_id=frame_id,
-        data=buf.tobytes(),
-        format="png",
-    )
-
+# ── Main processing ───────────────────────────────────────────────────────
 
 def process_bag(
     bag_path: str,
@@ -232,61 +230,64 @@ def process_bag(
     subsample_lane: int = 2,
     subsample_bbox: int = 8,
     playback_rate: float = 1.0,
-    goal_x: float = 5.0,
+    goal_x: float = 15.0,
     goal_y: float = 0.0,
 ) -> None:
-    """Process bag, build costmaps, plan paths via Nav2, publish to Foxglove."""
+    """Process bag, build costmaps, plan paths via Nav2, publish all as ROS2 topics."""
 
-    # Initialize ROS2 and Nav2
     rclpy.init()
-    node = rclpy.create_node("costmap_publisher")
+    node = rclpy.create_node("nav2_planner_runner")
 
-    qos = QoSProfile(
+    # QoS profiles
+    qos_reliable = QoSProfile(
         depth=1,
         durability=DurabilityPolicy.TRANSIENT_LOCAL,
         reliability=ReliabilityPolicy.RELIABLE,
     )
-    costmap_pub = node.create_publisher(OccupancyGrid, "/costmap/occupancy_grid", qos)
+    qos_best_effort = QoSProfile(depth=5)
 
-    # Spin in background thread
+    # Publishers — all ROS2 topics
+    costmap_pub = node.create_publisher(OccupancyGrid, "/costmap/occupancy_grid", qos_reliable)
+    path_pub = node.create_publisher(Path, "/nav/planned_path", qos_best_effort)
+    goal_marker_pub = node.create_publisher(Marker, "/nav/goal_marker", qos_best_effort)
+    ego_marker_pub = node.create_publisher(Marker, "/nav/ego_marker", qos_best_effort)
+    costmap_img_pub = node.create_publisher(CompressedImage, "/nav/costmap_image/compressed", qos_best_effort)
+    pc_drivable_pub = node.create_publisher(PointCloud2, "/perception/pointcloud/drivable", qos_best_effort)
+    pc_lanes_pub = node.create_publisher(PointCloud2, "/perception/pointcloud/lanes", qos_best_effort)
+    pc_det_pub = node.create_publisher(PointCloud2, "/perception/pointcloud/detections", qos_best_effort)
+    camera_pub = node.create_publisher(CompressedImage, "/camera/image/compressed", qos_best_effort)
+    depth_pub = node.create_publisher(Image, "/camera/depth/image", qos_best_effort)
+    imu_pub = node.create_publisher(Imu, "/imu", qos_best_effort)
+
+    # Spin in background
     spin_thread = threading.Thread(target=rclpy.spin, args=(node,), daemon=True)
     spin_thread.start()
 
-    # Wait for Nav2 planner to come up
+    # Wait for Nav2
     print("Waiting for Nav2 planner server...")
     navigator = BasicNavigator()
-    # Wait for the compute_path_to_pose action server directly.
-    # We don't use AMCL or bt_navigator, just the planner.
     navigator._waitForNodeToActivate("planner_server")
     print("Nav2 planner is active!")
 
-    # Load perception models
+    # Load perception
     yolo = YOLOv8Detector(conf_threshold=conf, device=device)
     print(f"YOLOv8 loaded (device={yolo.device})")
     print("Loading YOLOP...")
     yolop = YOLOPDetector(device=device)
 
-    # Start Foxglove
-    fg_listener = _FgListener()
-    fg_server = foxglove.start_server(server_listener=fg_listener)
-    print("Foxglove server started on ws://localhost:8765")
-
-    # Build goal pose
+    # Poses
     goal_pose = PoseStamped()
     goal_pose.header.frame_id = "map"
     goal_pose.pose.position.x = goal_x
     goal_pose.pose.position.y = goal_y
-    goal_pose.pose.position.z = 0.0
     goal_pose.pose.orientation.w = 1.0
 
     start_pose = PoseStamped()
     start_pose.header.frame_id = "map"
-    start_pose.pose.position.x = 0.0
-    start_pose.pose.position.y = 0.0
-    start_pose.pose.position.z = 0.0
     start_pose.pose.orientation.w = 1.0
 
     print(f"Goal waypoint: ({goal_x}, {goal_y}) — {math.hypot(goal_x, goal_y):.1f}m ahead")
+    print("Topics are published on ROS2. Connect Foxglove to foxglove_bridge (ws://localhost:8765).")
 
     frames = read_synced_frames(bag_path)
     cam_model: CameraModel | None = None
@@ -318,11 +319,37 @@ def process_bag(
 
         t0 = time.perf_counter()
 
+        # Publish raw sensor data
+        cam_msg = CompressedImage()
+        cam_msg.header = _header(frame.timestamp, "camera")
+        cam_msg.format = "jpeg"
+        _, cam_buf = cv2.imencode(".jpg", frame.image, [cv2.IMWRITE_JPEG_QUALITY, 80])
+        cam_msg.data = cam_buf.tobytes()
+        camera_pub.publish(cam_msg)
+
+        depth_msg = Image()
+        depth_msg.header = _header(frame.timestamp, "camera")
+        depth_msg.height, depth_msg.width = frame.depth.shape[:2]
+        depth_msg.encoding = "32FC1"
+        depth_msg.is_bigendian = False
+        depth_msg.step = depth_msg.width * 4
+        depth_msg.data = frame.depth.tobytes()
+        depth_pub.publish(depth_msg)
+
+        if frame.orientation is not None:
+            imu_msg = Imu()
+            imu_msg.header = _header(frame.timestamp, "imu")
+            imu_msg.orientation.x = float(frame.orientation[0])
+            imu_msg.orientation.y = float(frame.orientation[1])
+            imu_msg.orientation.z = float(frame.orientation[2])
+            imu_msg.orientation.w = float(frame.orientation[3])
+            imu_pub.publish(imu_msg)
+
         # Run perception
         detections = yolo.detect(frame.image)
         yolop_result = yolop.detect(frame.image)
 
-        # Project points
+        # Project drivable area
         drivable_pts = None
         if yolop_result and yolop_result.drivable_mask is not None:
             pixels, depths = _extract_mask_pixels(
@@ -331,10 +358,11 @@ def process_bag(
             if len(pixels) > 0:
                 pts_3d = depth_cam_model.project_pixels_to_3d(pixels, depths)
                 drivable_pts = _apply_imu_rotation(pts_3d, frame.orientation)
-                data = _pack_points_rgba_vectorized(drivable_pts, 0.0, 1.0, 0.0)
-                foxglove.log("/perception/pointcloud/drivable",
-                             _make_pointcloud(data, frame.timestamp))
+                pc_drivable_pub.publish(
+                    _make_pointcloud2(drivable_pts, 0.0, 1.0, 0.0, frame.timestamp)
+                )
 
+        # Project lanes
         lane_pts = None
         if yolop_result and yolop_result.lane_mask is not None:
             pixels, depths = _extract_mask_pixels(
@@ -343,30 +371,40 @@ def process_bag(
             if len(pixels) > 0:
                 pts_3d = depth_cam_model.project_pixels_to_3d(pixels, depths)
                 lane_pts = _apply_imu_rotation(pts_3d, frame.orientation)
-                data = _pack_points_rgba_vectorized(lane_pts, 1.0, 0.0, 0.0)
-                foxglove.log("/perception/pointcloud/lanes",
-                             _make_pointcloud(data, frame.timestamp))
+                pc_lanes_pub.publish(
+                    _make_pointcloud2(lane_pts, 1.0, 0.0, 0.0, frame.timestamp)
+                )
 
+        # Project detections (per-detection groups for filled costmap obstacles)
         det_pts = None
+        det_groups = None
         if detections:
-            pixels, depths = _extract_bbox_pixels(
+            groups = _extract_bbox_pixels_grouped(
                 detections, frame.depth, frame.image.shape[:2], subsample=subsample_bbox
             )
-            if len(pixels) > 0:
+            all_world_groups = []
+            all_world_pts = []
+            for pixels, depths in groups:
+                if len(pixels) == 0:
+                    continue
                 pts_3d = depth_cam_model.project_pixels_to_3d(pixels, depths)
-                det_pts = _apply_imu_rotation(pts_3d, frame.orientation)
-                data = _pack_points_rgba_vectorized(det_pts, 1.0, 1.0, 0.0)
-                foxglove.log("/perception/pointcloud/detections",
-                             _make_pointcloud(data, frame.timestamp))
+                world_pts = _apply_imu_rotation(pts_3d, frame.orientation)
+                all_world_groups.append(world_pts)
+                all_world_pts.append(world_pts)
+            if all_world_pts:
+                det_pts = np.vstack(all_world_pts)
+                det_groups = all_world_groups
+                pc_det_pub.publish(
+                    _make_pointcloud2(det_pts, 1.0, 1.0, 0.0, frame.timestamp)
+                )
 
-        # Build costmap and publish to ROS2
-        grid = build_costmap(drivable_pts, lane_pts, det_pts)
-        ros_msg = _costmap_to_occupancy_grid(grid, frame.timestamp)
-        costmap_pub.publish(ros_msg)
+        # Build and publish costmap
+        grid = build_costmap(drivable_pts, lane_pts, det_pts, det_groups=det_groups)
+        costmap_pub.publish(_costmap_to_occupancy_grid(grid, frame.timestamp))
 
-        # Publish costmap to Foxglove
-        foxglove.log("/costmap/occupancy_grid",
-                     _make_foxglove_grid(grid, frame.timestamp))
+        # Publish markers
+        goal_marker_pub.publish(_make_goal_marker(goal_x, goal_y, frame.timestamp))
+        ego_marker_pub.publish(_make_ego_marker(frame.timestamp))
 
         # Plan path via Nav2
         goal_pose.header.stamp = _stamp_from_epoch(frame.timestamp)
@@ -380,38 +418,24 @@ def process_bag(
                 print(f"\nPlanner failed: {e}")
 
         if path and path.poses:
-            # Publish path as Foxglove scene (3D line)
-            foxglove.log("/nav/planned_path",
-                         _path_to_foxglove_scene(path, frame.timestamp))
+            path.header = _header(frame.timestamp)
+            path_pub.publish(path)
 
-            # Publish path overlay on costmap image
-            path_img = _path_to_foxglove_image(grid, path, goal_x, goal_y)
-            foxglove.log("/nav/costmap_with_path",
-                         _make_compressed_image(path_img, frame.timestamp))
+        # Publish costmap overlay image (with or without path)
+        costmap_img_pub.publish(
+            _path_to_costmap_image(grid, path, goal_x, goal_y)
+        )
 
-            # Publish waypoint marker
-            foxglove.log("/nav/goal_marker",
-                         _waypoint_marker(goal_x, goal_y, frame.timestamp))
-
-            if frame_num % 5 == 0:
-                print(
-                    f"\rFrame {frame_num}: path={len(path.poses)} poses, "
-                    f"{len(detections)} det, {1/(time.perf_counter()-t0):.1f} FPS",
-                    end="", flush=True,
-                )
-        else:
-            # Still publish costmap image without path
-            img = costmap_to_upscaled_image(grid, scale=4)
-            foxglove.log("/nav/costmap_with_path",
-                         _make_compressed_image(img, frame.timestamp))
-            if frame_num % 5 == 0:
-                print(
-                    f"\rFrame {frame_num}: NO PATH, {len(detections)} det, "
-                    f"{1/(time.perf_counter()-t0):.1f} FPS",
-                    end="", flush=True,
-                )
-
+        dt = time.perf_counter() - t0
         frame_num += 1
+        if frame_num % 5 == 0:
+            n_det = len(detections)
+            n_poses = len(path.poses) if path and path.poses else 0
+            print(
+                f"\rFrame {frame_num}: path={n_poses} poses, "
+                f"{n_det} det, {1/dt:.1f} FPS",
+                end="", flush=True,
+            )
 
     print(f"\nDone. Processed {frame_num} frames.")
     print("Press Ctrl+C to stop.")
@@ -424,12 +448,11 @@ def process_bag(
         navigator.lifecycleShutdown()
         node.destroy_node()
         rclpy.shutdown()
-        fg_server.stop()
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Nav2 path planning on MCAP bag data with Foxglove visualization"
+        description="Nav2 path planning on MCAP bag data with ROS2 + foxglove_bridge"
     )
     parser.add_argument("--bag", required=True, help="Path to .mcap bag file")
     parser.add_argument("--device", default=None, help="Torch device")
@@ -439,7 +462,7 @@ def main() -> None:
     parser.add_argument("--subsample-lane", type=int, default=2)
     parser.add_argument("--subsample-bbox", type=int, default=8)
     parser.add_argument("--playback-rate", type=float, default=1.0)
-    parser.add_argument("--goal-x", type=float, default=5.0,
+    parser.add_argument("--goal-x", type=float, default=15.0,
                         help="Goal X position in meters (forward)")
     parser.add_argument("--goal-y", type=float, default=0.0,
                         help="Goal Y position in meters (lateral)")

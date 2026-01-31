@@ -55,6 +55,7 @@ from couch_perception.bev_projection_runner import (
     _apply_imu_rotation,
     _extract_mask_pixels,
     _extract_bbox_pixels,
+    _extract_bbox_pixels_grouped,
     _build_depth_camera_model,
     _pack_points_rgba_vectorized,
     _make_pointcloud,
@@ -65,13 +66,16 @@ from couch_perception.bev_projection_runner import (
 logger = logging.getLogger(__name__)
 
 # Grid parameters
-GRID_SIZE_M = 10.0      # 10m x 10m
-GRID_RESOLUTION = 0.1   # 10cm per cell
-GRID_CELLS = int(GRID_SIZE_M / GRID_RESOLUTION)  # 100
-GRID_ORIGIN = -GRID_SIZE_M / 2.0  # -5.0m (grid centered at 0,0)
+GRID_SIZE_M = 40.0      # 40m x 40m (covers full depth range ~20m forward)
+GRID_RESOLUTION = 0.3   # 30cm per cell
+GRID_CELLS = int(GRID_SIZE_M / GRID_RESOLUTION)  # 133
+GRID_ORIGIN = -GRID_SIZE_M / 2.0  # -20.0m (grid centered at 0,0)
+
+# Radius around ego assumed drivable (camera can't see the ground nearby)
+EGO_DRIVABLE_RADIUS_M = 3.0
 
 # FOV parameters
-FOV_DEG = 70.0
+FOV_DEG = 120.0
 FOV_HALF_RAD = math.radians(FOV_DEG / 2.0)
 
 
@@ -118,6 +122,18 @@ def _build_fov_mask() -> np.ndarray:
 _FOV_MASK = _build_fov_mask()
 
 
+def _build_ego_drivable_mask() -> np.ndarray:
+    """Boolean mask where True = within EGO_DRIVABLE_RADIUS_M of ego (grid center)."""
+    r_cells = EGO_DRIVABLE_RADIUS_M / GRID_RESOLUTION
+    center = (GRID_CELLS - 1) / 2.0
+    ys, xs = np.ogrid[:GRID_CELLS, :GRID_CELLS]
+    dist_sq = (ys - center) ** 2 + (xs - center) ** 2
+    return dist_sq <= r_cells ** 2
+
+
+_EGO_DRIVABLE_MASK = _build_ego_drivable_mask()
+
+
 def _world_to_grid(x: np.ndarray, y: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Convert world coordinates (meters, ego at 0,0) to grid row/col indices.
 
@@ -135,11 +151,16 @@ def build_costmap(
     drivable_pts: np.ndarray | None,
     lane_pts: np.ndarray | None,
     det_pts: np.ndarray | None,
+    det_groups: list[np.ndarray] | None = None,
 ) -> np.ndarray:
     """Build a 100x100 costmap from projected 3D points.
 
     Points are in ego-centric world frame (x=forward, y=lateral, z=up).
     Grid is centered at (0,0).
+
+    If det_groups is provided (list of per-detection (N,3) point arrays),
+    each detection's ground-plane bounding box is filled as lethal cost.
+    Otherwise falls back to rasterizing det_pts as individual points.
 
     Returns:
         (GRID_CELLS, GRID_CELLS) int8 array with Nav2-compatible cost values.
@@ -148,6 +169,10 @@ def build_costmap(
 
     # Outside FOV → high cost
     grid[~_FOV_MASK] = COST_FOV_BOUNDARY
+
+    # Assume everything within EGO_DRIVABLE_RADIUS_M of ego is drivable
+    # (camera can't see the ground directly around the user)
+    grid[_EGO_DRIVABLE_MASK] = COST_FREE
 
     # Rasterize drivable area (lowest priority cost, written first)
     if drivable_pts is not None and len(drivable_pts) > 0:
@@ -160,7 +185,26 @@ def build_costmap(
         grid[row[valid], col[valid]] = COST_LANE
 
     # Rasterize obstacles (highest priority, written last to override)
-    if det_pts is not None and len(det_pts) > 0:
+    if det_groups is not None:
+        for group_pts in det_groups:
+            if len(group_pts) < 2:
+                continue
+            # Fill the bounding rectangle of this detection on the grid
+            x_min, x_max = group_pts[:, 0].min(), group_pts[:, 0].max()
+            y_min, y_max = group_pts[:, 1].min(), group_pts[:, 1].max()
+            r_min, c_min, _ = _world_to_grid(
+                np.array([x_max]), np.array([y_min])
+            )
+            r_max, c_max, _ = _world_to_grid(
+                np.array([x_min]), np.array([y_max])
+            )
+            r0 = max(0, int(r_min[0]))
+            r1 = min(GRID_CELLS - 1, int(r_max[0]))
+            c0 = max(0, int(c_min[0]))
+            c1 = min(GRID_CELLS - 1, int(c_max[0]))
+            if r0 <= r1 and c0 <= c1:
+                grid[r0:r1+1, c0:c1+1] = COST_LETHAL
+    elif det_pts is not None and len(det_pts) > 0:
         row, col, valid = _world_to_grid(det_pts[:, 0], det_pts[:, 1])
         grid[row[valid], col[valid]] = COST_LETHAL
 
@@ -296,15 +340,25 @@ def process_bag(
                     _make_pointcloud(data, frame.timestamp),
                 )
 
-        # Project bounding boxes
+        # Project bounding boxes (per-detection groups for filled costmap obstacles)
         det_pts: np.ndarray | None = None
+        det_groups: list[np.ndarray] | None = None
         if detections:
-            pixels, depths = _extract_bbox_pixels(
+            groups = _extract_bbox_pixels_grouped(
                 detections, frame.depth, frame.image.shape[:2], subsample=subsample_bbox
             )
-            if len(pixels) > 0:
-                pts_3d = depth_cam_model.project_pixels_to_3d(pixels, depths)
-                det_pts = _apply_imu_rotation(pts_3d, frame.orientation)
+            all_world_groups = []
+            all_world_pts = []
+            for pixels, depths_g in groups:
+                if len(pixels) == 0:
+                    continue
+                pts_3d = depth_cam_model.project_pixels_to_3d(pixels, depths_g)
+                world_pts = _apply_imu_rotation(pts_3d, frame.orientation)
+                all_world_groups.append(world_pts)
+                all_world_pts.append(world_pts)
+            if all_world_pts:
+                det_pts = np.vstack(all_world_pts)
+                det_groups = all_world_groups
                 data = _pack_points_rgba_vectorized(det_pts, 1.0, 1.0, 0.0)
                 foxglove.log(
                     "/perception/pointcloud/detections",
@@ -312,7 +366,7 @@ def process_bag(
                 )
 
         # Build and publish costmap
-        grid = build_costmap(drivable_pts, lane_pts, det_pts)
+        grid = build_costmap(drivable_pts, lane_pts, det_pts, det_groups=det_groups)
 
         foxglove.log(
             "/costmap/occupancy_grid",

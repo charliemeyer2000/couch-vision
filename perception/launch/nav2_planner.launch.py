@@ -1,4 +1,4 @@
-"""Minimal Nav2 launch: planner_server + lifecycle_manager + static TF."""
+"""Minimal Nav2 launch: planner_server + lifecycle_manager + foxglove_bridge + static TF."""
 
 import os
 from launch import LaunchDescription
@@ -32,5 +32,17 @@ def generate_launch_description():
             package="tf2_ros",
             executable="static_transform_publisher",
             arguments=["0", "0", "0", "0", "0", "0", "map", "base_link"],
+        ),
+        # Foxglove bridge: forwards all ROS2 topics to ws://localhost:8765
+        Node(
+            package="foxglove_bridge",
+            executable="foxglove_bridge",
+            name="foxglove_bridge",
+            output="screen",
+            parameters=[{
+                "port": 8765,
+                "send_buffer_limit": 10000000,
+                "num_threads": 2,
+            }],
         ),
     ])

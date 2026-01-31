@@ -10,6 +10,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-jazzy-nav2-lifecycle-manager \
     ros-jazzy-nav2-navfn-planner \
     ros-jazzy-tf2-ros \
+    ros-jazzy-foxglove-bridge \
     ros-jazzy-vision-msgs \
     ros-jazzy-rmw-cyclonedds-cpp \
     python3-numpy \
