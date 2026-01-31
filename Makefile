@@ -19,7 +19,7 @@ ROS2_SETUP := export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp; \
         build-ios build-sim xcode regen \
         bridge foxglove topics echo hz rviz rqt image bag bag-play \
         deploy-jetson ip check-ros2 clean \
-        perception perception-node perception-docker costmap costmap-docker nav2-planner \
+        perception perception-node perception-docker costmap costmap-docker nav2-planner full-stack \
         lint lint-fix format
 
 # === Help ===
@@ -61,6 +61,7 @@ help:
 	@echo "  make perception-docker                Run perception in Docker"
 	@echo "  make costmap BAG=path/to/bag.mcap     Generate costmap from bag"
 	@echo "  make costmap-docker BAG=bag.mcap       Run costmap in Docker"
+	@echo "  make full-stack BAG=bag.mcap           Run perception + Nav2 planning (Docker)"
 	@echo ""
 	@echo "Linting & Formatting:"
 	@echo "  make lint           Run all linters (via pre-commit)"
@@ -240,6 +241,10 @@ costmap-docker:
 
 nav2-planner:
 	cd perception && BAG_FILE=$(notdir $(BAG)) PLAYBACK_RATE=$(or $(RATE),1.0) GOAL_X=$(or $(GX),5.0) GOAL_Y=$(or $(GY),0.0) docker compose -f docker-compose.nav2.yml up --build
+
+full-stack:
+	@[ -f .env ] && set -a && . ./.env && set +a; \
+	cd perception && BAG_FILE=$(notdir $(BAG)) PLAYBACK_RATE=$(or $(RATE),1.0) DEST_LAT=$(or $(DEST_LAT),38.036830) DEST_LON=$(or $(DEST_LON),-78.503577) LOOKAHEAD=$(or $(LOOKAHEAD),15.0) docker compose -f docker-compose.nav2.yml up --build
 
 # === Linting & Formatting ===
 

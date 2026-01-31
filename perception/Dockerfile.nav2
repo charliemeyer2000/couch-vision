@@ -30,7 +30,7 @@ RUN uv venv --system-site-packages \
     && uv pip install \
        torch torchvision --index-url https://download.pytorch.org/whl/cpu \
     && UV_EXTRA_INDEX_URL=https://download.pytorch.org/whl/cpu \
-       uv pip install --override /dev/stdin -e . <<'OVERRIDES'
+       uv pip install --index-strategy unsafe-best-match --override /dev/stdin -e . <<'OVERRIDES'
 torch>=2.0
 torchvision>=0.15
 OVERRIDES

@@ -8,4 +8,12 @@ services:
     volumes:
       - ./weights:/perception/weights
       - ../bags:/bags:ro
-    command: ["--bag", "/bags/${BAG_FILE:-walk_around_university_all_data.mcap}", "--playback-rate", "${PLAYBACK_RATE:-1.0}", "--goal-x", "${GOAL_X:-15.0}", "--goal-y", "${GOAL_Y:-0.0}"]
+    environment:
+      - GOOGLE_MAPS_API_KEY=${GOOGLE_MAPS_API_KEY:-}
+    command: [
+      "--bag", "/bags/${BAG_FILE:-walk_around_university_all_data.mcap}",
+      "--playback-rate", "${PLAYBACK_RATE:-1.0}",
+      "--dest-lat", "${DEST_LAT:-38.036830}",
+      "--dest-lon", "${DEST_LON:--78.503577}",
+      "--lookahead", "${LOOKAHEAD:-15.0}"
+    ]

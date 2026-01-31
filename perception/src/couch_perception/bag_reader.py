@@ -37,6 +37,25 @@ class CameraIntrinsics:
 
 
 @dataclass
+class GpsFix:
+    """A GPS fix from the bag."""
+    timestamp: float
+    latitude: float
+    longitude: float
+    altitude: float
+    position_covariance: list[float]
+
+
+@dataclass
+class ImuSample:
+    """An IMU sample from the bag."""
+    timestamp: float
+    orientation: np.ndarray  # quaternion (x, y, z, w)
+    accel: np.ndarray  # (ax, ay, az)
+    gyro: np.ndarray  # (wx, wy, wz)
+
+
+@dataclass
 class SyncedFrame:
     """A time-synchronized set of image, depth, camera intrinsics, and IMU orientation."""
     timestamp: float
@@ -136,3 +155,54 @@ def read_synced_frames(
             intrinsics=intrinsics,
             orientation=orientation,
         )
+
+
+def read_gps_and_imu(
+    bag_path: str | Path,
+    gps_suffix: str = "gps/fix",
+    imu_suffix: str = "imu",
+) -> tuple[list[GpsFix], list[ImuSample]]:
+    """Read all GPS fixes and IMU samples from an MCAP bag.
+
+    Returns (gps_fixes, imu_samples) sorted by timestamp.
+    """
+    from mcap.reader import make_reader
+    from mcap_ros2.decoder import DecoderFactory
+
+    gps_fixes: list[GpsFix] = []
+    imu_samples: list[ImuSample] = []
+
+    with Path(bag_path).open("rb") as f:
+        reader = make_reader(f, decoder_factories=[DecoderFactory()])
+        for _schema, channel, message, ros_msg in reader.iter_decoded_messages():
+            ts = message.log_time / 1e9
+
+            if channel.topic.endswith(gps_suffix):
+                gps_fixes.append(GpsFix(
+                    timestamp=ts,
+                    latitude=ros_msg.latitude,
+                    longitude=ros_msg.longitude,
+                    altitude=ros_msg.altitude,
+                    position_covariance=list(ros_msg.position_covariance),
+                ))
+
+            elif channel.topic.endswith(imu_suffix) and hasattr(ros_msg, "orientation"):
+                o = ros_msg.orientation
+                imu_samples.append(ImuSample(
+                    timestamp=ts,
+                    orientation=np.array([o.x, o.y, o.z, o.w], dtype=np.float64),
+                    accel=np.array([
+                        ros_msg.linear_acceleration.x,
+                        ros_msg.linear_acceleration.y,
+                        ros_msg.linear_acceleration.z,
+                    ], dtype=np.float64),
+                    gyro=np.array([
+                        ros_msg.angular_velocity.x,
+                        ros_msg.angular_velocity.y,
+                        ros_msg.angular_velocity.z,
+                    ], dtype=np.float64),
+                ))
+
+    gps_fixes.sort(key=lambda g: g.timestamp)
+    imu_samples.sort(key=lambda s: s.timestamp)
+    return gps_fixes, imu_samples

@@ -67,12 +67,12 @@ logger = logging.getLogger(__name__)
 
 # Grid parameters
 GRID_SIZE_M = 40.0      # 40m x 40m (covers full depth range ~20m forward)
-GRID_RESOLUTION = 0.3   # 30cm per cell
-GRID_CELLS = int(GRID_SIZE_M / GRID_RESOLUTION)  # 133
+GRID_RESOLUTION = 0.3   # 50cm per cell
+GRID_CELLS = int(GRID_SIZE_M / GRID_RESOLUTION)
 GRID_ORIGIN = -GRID_SIZE_M / 2.0  # -20.0m (grid centered at 0,0)
 
 # Radius around ego assumed drivable (camera can't see the ground nearby)
-EGO_DRIVABLE_RADIUS_M = 3.0
+EGO_DRIVABLE_RADIUS_M = 1.0
 
 # FOV parameters
 FOV_DEG = 120.0

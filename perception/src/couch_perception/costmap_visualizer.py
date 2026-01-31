@@ -5,7 +5,7 @@ import numpy as np
 
 
 # Cost value constants
-COST_UNKNOWN = -1
+COST_UNKNOWN = -1 # not the end of the world to drive on
 COST_FREE = 0
 COST_LANE = 80
 COST_FOV_BOUNDARY = 99
