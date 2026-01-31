@@ -221,6 +221,9 @@ endif
 perception:
 	cd perception && uv run couch-perception --bag $(abspath $(BAG)) --output output/
 
+bev-projection:
+	cd perception && uv run couch-bev-projection --bag $(abspath $(BAG)) $(ARGS)
+
 perception-node:
 	@$(ROS2_SETUP) && cd perception && ([ -f .venv/pyvenv.cfg ] && grep -q "include-system-site-packages = true" .venv/pyvenv.cfg || uv venv --python $(PERC_PYTHON) --system-site-packages) && uv sync --quiet && uv run python -m couch_perception.ros_node $(ARGS)
 

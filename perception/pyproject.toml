@@ -23,10 +23,12 @@ dependencies = [
     "tqdm>=4.60",
     "onnx>=1.14",
     "onnxslim>=0.1",
+    "foxglove-sdk>=0.16.6",
 ]
 
 [project.scripts]
 couch-perception = "couch_perception.runner:main"
+couch-bev-projection = "couch_perception.bev_projection_runner:main"
 
 [build-system]
 requires = ["hatchling"]
