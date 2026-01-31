@@ -19,7 +19,7 @@ ROS2_SETUP := export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp; \
         build-ios build-sim xcode regen \
         bridge foxglove topics echo hz rviz rqt image bag bag-play \
         deploy-jetson ip check-ros2 clean \
-        perception perception-node perception-docker \
+        perception perception-node perception-docker costmap costmap-docker nav2-planner full-stack \
         lint lint-fix format
 
 # === Help ===
@@ -59,6 +59,9 @@ help:
 	@echo "  make perception BAG=path/to/bag.mcap  Run YOLOv8+YOLOP on bag"
 	@echo "  make perception-node                  Run live perception ROS2 node"
 	@echo "  make perception-docker                Run perception in Docker"
+	@echo "  make costmap BAG=path/to/bag.mcap     Generate costmap from bag"
+	@echo "  make costmap-docker BAG=bag.mcap       Run costmap in Docker"
+	@echo "  make full-stack BAG=bag.mcap           Run perception + Nav2 planning (Docker)"
 	@echo ""
 	@echo "Linting & Formatting:"
 	@echo "  make lint           Run all linters (via pre-commit)"
@@ -221,11 +224,27 @@ endif
 perception:
 	cd perception && uv run couch-perception --bag $(abspath $(BAG)) --output output/
 
+bev-projection:
+	cd perception && uv run couch-bev-projection --bag $(abspath $(BAG)) $(ARGS)
+
 perception-node:
 	@$(ROS2_SETUP) && cd perception && ([ -f .venv/pyvenv.cfg ] && grep -q "include-system-site-packages = true" .venv/pyvenv.cfg || uv venv --python $(PERC_PYTHON) --system-site-packages) && uv sync --quiet && uv run python -m couch_perception.ros_node $(ARGS)
 
 perception-docker:
 	cd perception && docker compose up --build
+
+costmap:
+	cd perception && uv run couch-costmap --bag $(abspath $(BAG)) $(ARGS)
+
+costmap-docker:
+	cd perception && BAG_FILE=$(notdir $(BAG)) PLAYBACK_RATE=$(or $(RATE),1.0) docker compose -f docker-compose.costmap.yml up --build
+
+nav2-planner:
+	cd perception && BAG_FILE=$(notdir $(BAG)) PLAYBACK_RATE=$(or $(RATE),1.0) GOAL_X=$(or $(GX),5.0) GOAL_Y=$(or $(GY),0.0) docker compose -f docker-compose.nav2.yml up --build
+
+full-stack:
+	@[ -f .env ] && set -a && . ./.env && set +a; \
+	cd perception && BAG_FILE=$(notdir $(BAG)) PLAYBACK_RATE=$(or $(RATE),1.0) DEST_LAT=$(or $(DEST_LAT),38.036830) DEST_LON=$(or $(DEST_LON),-78.503577) LOOKAHEAD=$(or $(LOOKAHEAD),15.0) docker compose -f docker-compose.nav2.yml up --build
 
 # === Linting & Formatting ===
 

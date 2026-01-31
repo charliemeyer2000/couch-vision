@@ -1,0 +1,10 @@
+services:
+  costmap:
+    build:
+      context: .
+      dockerfile: Dockerfile.costmap
+    network_mode: host
+    volumes:
+      - ./weights:/perception/weights
+      - ../bags:/bags:ro
+    command: ["--bag", "/bags/${BAG_FILE:-bag.mcap}", "--playback-rate", "${PLAYBACK_RATE:-1.0}"]
