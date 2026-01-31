@@ -1,0 +1,10 @@
+services:
+  nav2-planner:
+    build:
+      context: .
+      dockerfile: Dockerfile.nav2
+    network_mode: host
+    volumes:
+      - ./weights:/perception/weights
+      - ../bags:/bags:ro
+    command: ["--bag", "/bags/${BAG_FILE:-walk_around_university_all_data.mcap}", "--playback-rate", "${PLAYBACK_RATE:-1.0}", "--goal-x", "${GOAL_X:-4.5}", "--goal-y", "${GOAL_Y:-0.0}"]

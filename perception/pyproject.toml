@@ -29,6 +29,8 @@ dependencies = [
 [project.scripts]
 couch-perception = "couch_perception.runner:main"
 couch-bev-projection = "couch_perception.bev_projection_runner:main"
+couch-costmap = "couch_perception.costmap_runner:main"
+couch-nav2-planner = "couch_perception.nav2_planner_runner:main"
 
 [build-system]
 requires = ["hatchling"]

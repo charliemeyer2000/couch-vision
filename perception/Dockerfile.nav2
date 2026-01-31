@@ -1,0 +1,48 @@
+FROM ros:jazzy
+
+# Install Nav2 + perception deps
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ros-jazzy-navigation2 \
+    ros-jazzy-nav2-bringup \
+    ros-jazzy-nav2-simple-commander \
+    ros-jazzy-nav2-planner \
+    ros-jazzy-nav2-costmap-2d \
+    ros-jazzy-nav2-lifecycle-manager \
+    ros-jazzy-nav2-navfn-planner \
+    ros-jazzy-tf2-ros \
+    ros-jazzy-vision-msgs \
+    ros-jazzy-rmw-cyclonedds-cpp \
+    python3-numpy \
+    python3-opencv \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
+
+WORKDIR /perception
+
+COPY pyproject.toml ./
+# The pyproject.toml pins torch<=2.8.0 with a Jetson-only index for Linux.
+# Override: install torch CPU from PyPI first, then install the package
+# with relaxed resolution so the pre-installed torch satisfies the constraint.
+RUN uv venv --system-site-packages \
+    && uv pip install \
+       torch torchvision --index-url https://download.pytorch.org/whl/cpu \
+    && UV_EXTRA_INDEX_URL=https://download.pytorch.org/whl/cpu \
+       uv pip install --override /dev/stdin -e . <<'OVERRIDES'
+torch>=2.0
+torchvision>=0.15
+OVERRIDES
+
+COPY src/ src/
+COPY config/ config/
+COPY launch/ launch/
+COPY entrypoint_nav2.sh /entrypoint_nav2.sh
+RUN chmod +x /entrypoint_nav2.sh
+
+ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+
+EXPOSE 8765
+
+ENTRYPOINT ["/entrypoint_nav2.sh"]
+CMD ["--bag", "/bags/bag.mcap"]
