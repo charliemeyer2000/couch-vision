@@ -80,7 +80,7 @@ setup-ros2:
 	@bash scripts/setup-ros2.sh
 
 setup-bridge:
-	cd bridge && uv venv --system-site-packages && uv sync
+	cd bridge && uv venv --python python3.12 --system-site-packages && uv sync
 
 # === iOS App ===
 

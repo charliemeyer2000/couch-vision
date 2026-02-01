@@ -89,6 +89,7 @@ public final class CameraManager: NSObject, ObservableObject {
     @Published public private(set) var state: SensorState = .unknown
     @Published public private(set) var activeCamera: CameraType?
     @Published public var isEnabled: Bool = false
+    @Published public private(set) var availableCameras: [CameraType] = []
     private let _framePrefixLock = NSLock()
     private var _framePrefix = "iphone"
     public var framePrefix: String {
@@ -125,7 +126,20 @@ public final class CameraManager: NSObject, ObservableObject {
 
     override public init() {
         super.init()
+        updateAvailableCameras()
         checkAvailability()
+    }
+
+    private func updateAvailableCameras() {
+        var available: [CameraType] = []
+        for cameraType in CameraType.allCases {
+            if getDevice(for: cameraType) != nil {
+                available.append(cameraType)
+            }
+        }
+        DispatchQueue.main.async { [weak self] in
+            self?.availableCameras = available
+        }
     }
 
     @discardableResult
@@ -245,6 +259,11 @@ public final class CameraManager: NSObject, ObservableObject {
     }
 
     private func switchCamera(to cameraType: CameraType) {
+        guard availableCameras.contains(cameraType) else {
+            print("Camera \(cameraType) not available on this device")
+            return
+        }
+
         sessionQueue.async { [weak self] in
             guard let self, let session = captureSession else { return }
             session.beginConfiguration()
