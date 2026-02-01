@@ -308,7 +308,7 @@ Couch drives with keyboard control, `/wheel_odom` publishes from encoders
 ### Phase 1: Sensor Verification & Visualization
 **Goal:** iPhone data streaming end-to-end, visualized in Foxglove
 
-**Status:** In Progress — streaming works, Foxglove connected, layout needed
+**Status:** In Progress — all sensor topics verified including PointCloud2, Foxglove layout complete
 
 The iOS app is built and streaming 18 topics. The bridge and foxglove_bridge are running on Jetson. This phase is about verifying data quality and building a proper visualization layout.
 
@@ -326,8 +326,8 @@ The iOS app is built and streaming 18 topics. The bridge and foxglove_bridge are
   - [x] Topic graph panel
 - [x] **Publish couch bounding box marker** — `visualization_msgs/Marker` from bridge on `/couch/marker` at `base_link`
 - [x] Verify topic data quality (via `make verify`, see `verify_bag.py`):
-  - [x] `/iphone/camera/arkit/image/compressed` — 4.5 Hz effective, clear JPEG frames
-  - [ ] `/iphone/lidar/points` — PointCloud2 not recorded in current bags (0 messages)
+  - [x] `/iphone/camera/arkit/image/compressed` — 10.5–18.7 Hz effective, clear JPEG frames
+  - [x] `/iphone/lidar/points` — 8,094 messages at 38.6 Hz, XYZI float32, valid depth range 0.1–5.9m
   - [x] `/iphone/imu` — 98.9 Hz effective, orientation/angular vel/linear accel all reasonable
   - [x] `/iphone/gps/fix` — 1 Hz, 156 fixes, clear walk path on scatter plot
   - [x] `/tf` — 27876 messages, ARKit pose transforms present
@@ -1084,4 +1084,4 @@ foxglove_bridge is built from source on the Jetson at `~/ros2_jazzy/`. It requir
 ---
 
 *Last updated: 2026-01-30*
-*Current phase: Phase 3 perception nearly complete (TensorRT INT8 exported, CUDA working on Jetson at 37-57 FPS, ROS2 node + Docker ready). Phase 2 EKF complete. Phase 1 data verification still open. Phase 0 hardware unblocked in parallel.*
+*Current phase: Phase 3 perception nearly complete (TensorRT INT8 exported, CUDA working on Jetson at 37-57 FPS, ROS2 node + Docker ready). Phase 2 EKF complete. Phase 1 data verification complete (all topics including PointCloud2 verified). Phase 0 hardware unblocked in parallel.*

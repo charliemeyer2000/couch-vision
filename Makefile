@@ -237,14 +237,14 @@ costmap:
 	cd perception && uv run couch-costmap --bag $(abspath $(BAG)) $(ARGS)
 
 costmap-docker:
-	cd perception && BAG_FILE=$(notdir $(BAG)) PLAYBACK_RATE=$(or $(RATE),1.0) docker compose -f docker-compose.costmap.yml up --build
+	cd perception && BAG_FILE=$(patsubst bags/%,%,$(BAG)) PLAYBACK_RATE=$(or $(RATE),1.0) docker compose -f docker-compose.costmap.yml up --build
 
 nav2-planner:
-	cd perception && BAG_FILE=$(notdir $(BAG)) PLAYBACK_RATE=$(or $(RATE),1.0) GOAL_X=$(or $(GX),5.0) GOAL_Y=$(or $(GY),0.0) docker compose -f docker-compose.nav2.yml up --build
+	cd perception && BAG_FILE=$(patsubst bags/%,%,$(BAG)) PLAYBACK_RATE=$(or $(RATE),1.0) GOAL_X=$(or $(GX),5.0) GOAL_Y=$(or $(GY),0.0) docker compose -f docker-compose.nav2.yml up --build
 
 full-stack:
 	@[ -f .env ] && set -a && . ./.env && set +a; \
-	cd perception && BAG_FILE=$(notdir $(BAG)) PLAYBACK_RATE=$(or $(RATE),1.0) DEST_LAT=$(or $(DEST_LAT),38.036830) DEST_LON=$(or $(DEST_LON),-78.503577) LOOKAHEAD=$(or $(LOOKAHEAD),15.0) docker compose -f docker-compose.nav2.yml up --build
+	cd perception && BAG_FILE=$(patsubst bags/%,%,$(BAG)) PLAYBACK_RATE=$(or $(RATE),1.0) DEST_LAT=$(or $(DEST_LAT),38.036830) DEST_LON=$(or $(DEST_LON),-78.503577) LOOKAHEAD=$(or $(LOOKAHEAD),15.0) docker compose -f docker-compose.nav2.yml up --build
 
 # === Linting & Formatting ===
 

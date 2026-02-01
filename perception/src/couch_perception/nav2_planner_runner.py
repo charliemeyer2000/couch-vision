@@ -502,7 +502,7 @@ def process_bag(
     print("Nav2 planner is active!")
 
     # Load perception
-    yolo = YOLOv8Detector(conf_threshold=conf, device=device)
+    yolo = YOLOv8Detector(model_path="weights/yolov8n.pt", conf_threshold=conf, device=device)
     print(f"YOLOv8 loaded (device={yolo.device})")
     print("Loading YOLOP...")
     yolop = YOLOPDetector(device=device)
