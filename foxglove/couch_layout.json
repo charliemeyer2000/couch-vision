@@ -1,6 +1,6 @@
 {
   "configById": {
-    "3d-panel": {
+    "3D!nav3d": {
       "cameraState": {
         "perspective": true,
         "distance": 40,
@@ -69,27 +69,23 @@
         }
       }
     },
-    "camera-panel": {
+    "Image!camera": {
       "imageMode": {
-        "imageTopic": "/camera/image/compressed",
-        "calibrationTopic": ""
-      },
-      "followTf": ""
+        "imageTopic": "/camera/image/compressed"
+      }
     },
-    "costmap-image-panel": {
+    "Image!costmap": {
       "imageMode": {
-        "imageTopic": "/nav/costmap_image/compressed",
-        "calibrationTopic": ""
-      },
-      "followTf": ""
+        "imageTopic": "/nav/costmap_image/compressed"
+      }
     },
-    "gps-map-panel": {
+    "map!gps": {
       "layer": "map",
       "topicPath": "/gps/fix",
       "followTopic": "/gps/fix",
       "zoomLevel": 17
     },
-    "imu-plot-panel": {
+    "Plot!imu": {
       "paths": [
         { "value": "/iphone/imu.orientation.x", "enabled": true, "timestampMethod": "receiveTime" },
         { "value": "/iphone/imu.orientation.y", "enabled": true, "timestampMethod": "receiveTime" },
@@ -105,7 +101,7 @@
       "xAxisVal": "timestamp",
       "followingViewWidth": 30
     },
-    "topic-list-panel": {}
+    "TopicList!topics": {}
   },
   "globalVariables": {},
   "userNodes": {},
@@ -117,46 +113,22 @@
     "direction": "row",
     "first": {
       "direction": "column",
-      "first": {
-        "id": "3d-panel",
-        "type": "3D",
-        "config": {}
-      },
+      "first": "3D!nav3d",
       "second": {
         "direction": "row",
-        "first": {
-          "id": "camera-panel",
-          "type": "ImageView",
-          "config": {}
-        },
-        "second": {
-          "id": "costmap-image-panel",
-          "type": "ImageView",
-          "config": {}
-        },
+        "first": "Image!camera",
+        "second": "Image!costmap",
         "splitPercentage": 50
       },
       "splitPercentage": 60
     },
     "second": {
       "direction": "column",
-      "first": {
-        "id": "gps-map-panel",
-        "type": "map",
-        "config": {}
-      },
+      "first": "map!gps",
       "second": {
         "direction": "column",
-        "first": {
-          "id": "imu-plot-panel",
-          "type": "Plot",
-          "config": {}
-        },
-        "second": {
-          "id": "topic-list-panel",
-          "type": "TopicList",
-          "config": {}
-        },
+        "first": "Plot!imu",
+        "second": "TopicList!topics",
         "splitPercentage": 60
       },
       "splitPercentage": 40
