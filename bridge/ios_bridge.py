@@ -12,8 +12,10 @@ from __future__ import annotations
 
 import argparse
 import queue
+import re
 import socket
 import struct
+import subprocess
 import threading
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
@@ -129,6 +131,7 @@ class IOSBridge(Node):  # type: ignore[misc]
         self._tcp_clients: dict[str, socket.socket] = {}
         self._tcp_clients_lock = threading.Lock()
         self.running = False
+        self._stop_event = threading.Event()
 
         self._sensor_qos = QoSProfile(
             reliability=ReliabilityPolicy.BEST_EFFORT,
@@ -230,6 +233,53 @@ class IOSBridge(Node):  # type: ignore[misc]
         self._topic_publishers[topic] = self.create_publisher(msg_type, topic, qos)
         return self._topic_publishers[topic]
 
+    @staticmethod
+    def _get_interfaces() -> set[tuple[str, str]]:
+        """Return set of (interface_name, ipv4_address) tuples from ifconfig."""
+        try:
+            output = subprocess.check_output(["ifconfig"], text=True, timeout=5)
+        except (subprocess.SubprocessError, OSError):
+            return set()
+
+        interfaces: set[tuple[str, str]] = set()
+        current_iface = ""
+        for line in output.splitlines():
+            iface_match = re.match(r"^(\S+):", line)
+            if iface_match:
+                current_iface = iface_match.group(1)
+            inet_match = re.search(r"inet (\d+\.\d+\.\d+\.\d+)", line)
+            if inet_match and current_iface:
+                ip = inet_match.group(1)
+                if ip != "127.0.0.1":
+                    interfaces.add((current_iface, ip))
+        return interfaces
+
+    def _log_interfaces(self, interfaces: set[tuple[str, str]]) -> None:
+        """Log available network interfaces."""
+        if not interfaces:
+            self.get_logger().warn("No network interfaces found")
+            return
+        self.get_logger().info("Available interfaces (connect your iPhone to any of these):")
+        for name, ip in sorted(interfaces):
+            self.get_logger().info(f"  {name}: {ip}:{self.port}")
+
+    def _interface_monitor_loop(self) -> None:
+        """Periodically check for new/removed network interfaces."""
+        known = self._get_interfaces()
+        self._log_interfaces(known)
+
+        while not self._stop_event.wait(5.0):
+            current = self._get_interfaces()
+            added = current - known
+            removed = known - current
+            for name, ip in sorted(added):
+                self.get_logger().info(
+                    f"New network interface detected: {name} ({ip}) — connect on {ip}:{self.port}"
+                )
+            for name, ip in sorted(removed):
+                self.get_logger().info(f"Network interface removed: {name} ({ip})")
+            known = current
+
     def start_server(self) -> None:
         """Start TCP server to accept iOS connections."""
         self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -239,6 +289,10 @@ class IOSBridge(Node):  # type: ignore[misc]
         self.running = True
 
         self.get_logger().info(f"Listening on 0.0.0.0:{self.port}")
+
+        monitor_thread = threading.Thread(target=self._interface_monitor_loop, daemon=True)
+        monitor_thread.start()
+
         self.get_logger().info("Waiting for iOS devices to connect...")
 
         while self.running:
@@ -595,6 +649,7 @@ class IOSBridge(Node):  # type: ignore[misc]
     def stop(self) -> None:
         """Stop the bridge."""
         self.running = False
+        self._stop_event.set()
         with self._tcp_clients_lock:
             for client in self._tcp_clients.values():
                 client.close()
