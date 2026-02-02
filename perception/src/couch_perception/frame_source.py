@@ -19,8 +19,9 @@ from couch_perception.bag_reader import (
     CameraIntrinsics,
     GpsFix,
     ImuSample,
+    OdomSample,
     SyncedFrame,
-    read_gps_and_imu,
+    read_gps_imu_and_odom,
     read_synced_frames,
 )
 
@@ -32,6 +33,7 @@ class SensorStreams:
     frames: Iterator[SyncedFrame]
     gps_fixes: list[GpsFix]
     imu_samples: list[ImuSample]
+    odom_samples: list[OdomSample]
 
 
 class BagSource:
@@ -55,12 +57,13 @@ class BagSource:
 
     def open(self) -> SensorStreams:
         """Open the bag and return all sensor streams."""
-        gps_fixes, imu_samples = read_gps_and_imu(self.bag_path)
+        gps_fixes, imu_samples, odom_samples = read_gps_imu_and_odom(self.bag_path)
         frames = self._paced_frames()
         return SensorStreams(
             frames=frames,
             gps_fixes=gps_fixes,
             imu_samples=imu_samples,
+            odom_samples=odom_samples,
         )
 
     def _paced_frames(self) -> Iterator[SyncedFrame]:
@@ -112,6 +115,7 @@ class LiveSource:
         camera_info_suffix: str = "camera/arkit/camera_info",
         imu_suffix: str = "imu",
         gps_suffix: str = "gps/fix",
+        odom_suffix: str = "odom",
         max_queue: int = 2,
     ) -> None:
         self._node = node
@@ -121,6 +125,7 @@ class LiveSource:
         self._camera_info_suffix = camera_info_suffix
         self._imu_suffix = imu_suffix
         self._gps_suffix = gps_suffix
+        self._odom_suffix = odom_suffix
 
         self._intrinsics: CameraIntrinsics | None = None
         self._intrinsics_event = threading.Event()
@@ -129,6 +134,7 @@ class LiveSource:
         )
         self._gps_fixes: list[GpsFix] = []
         self._imu_samples: list[ImuSample] = []
+        self._odom_samples: list[OdomSample] = []
         self._latest_orientation: np.ndarray | None = None
 
         self._setup_subscribers()
@@ -138,6 +144,7 @@ class LiveSource:
 
     def _setup_subscribers(self) -> None:
         from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
+        from nav_msgs.msg import Odometry
         from sensor_msgs.msg import CameraInfo, CompressedImage, Image, Imu, NavSatFix
 
         sensor_qos = QoSProfile(
@@ -157,6 +164,9 @@ class LiveSource:
         )
         self._node.create_subscription(
             NavSatFix, self._topic(self._gps_suffix), self._on_gps, sensor_qos
+        )
+        self._node.create_subscription(
+            Odometry, self._topic(self._odom_suffix), self._on_odom, sensor_qos
         )
 
         import message_filters
@@ -231,6 +241,21 @@ class LiveSource:
             )
         )
 
+    def _on_odom(self, msg: "Odometry") -> None:
+        ts = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+        p = msg.pose.pose.position
+        q = msg.pose.pose.orientation
+        self._odom_samples.append(
+            OdomSample(
+                timestamp=ts,
+                position=np.array([p.x, p.y, p.z], dtype=np.float64),
+                orientation=np.array([q.x, q.y, q.z, q.w], dtype=np.float64),
+                pose_covariance=np.array(
+                    msg.pose.covariance, dtype=np.float64
+                ).reshape(6, 6),
+            )
+        )
+
     def _on_synced(
         self, image_msg: "CompressedImage", depth_msg: "Image"
     ) -> None:
@@ -294,6 +319,7 @@ class LiveSource:
             frames=self._frame_iterator(),
             gps_fixes=self._gps_fixes,
             imu_samples=self._imu_samples,
+            odom_samples=self._odom_samples,
         )
 
     def _frame_iterator(self) -> Iterator[SyncedFrame]:

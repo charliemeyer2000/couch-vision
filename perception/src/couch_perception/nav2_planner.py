@@ -36,7 +36,7 @@ from builtin_interfaces.msg import Time as RosTime, Duration as RosDuration
 
 from nav2_simple_commander.robot_navigator import BasicNavigator
 
-from couch_perception.bag_reader import GpsFix, ImuSample
+from couch_perception.bag_reader import GpsFix, ImuSample, OdomSample
 from couch_perception.config import PipelineConfig
 from couch_perception.ekf import EKF
 from couch_perception.frame_source import BagSource, LiveSource, SensorStreams
@@ -425,6 +425,7 @@ class Nav2Planner:
         # EKF tracking indices
         self._gps_idx = 0
         self._imu_idx = 0
+        self._odom_idx = 0
         self._prev_imu_t: float | None = None
         self._prev_gps_enu: np.ndarray | None = None
         self._gps_enu_cache: list[np.ndarray] = []
@@ -438,7 +439,7 @@ class Nav2Planner:
         print("Connect Foxglove to ws://localhost:8765")
 
         for frame in streams.frames:
-            self._process_frame(frame, streams.gps_fixes, streams.imu_samples)
+            self._process_frame(frame, streams.gps_fixes, streams.imu_samples, streams.odom_samples)
 
         print(f"\nDone. Processed {self._frame_num} frames.")
 
@@ -451,9 +452,23 @@ class Nav2Planner:
             cov = g.position_covariance
             self._gps_cov_cache.append(np.diag([cov[0], cov[4], cov[8]]))
 
-    def _try_init_ekf(self, gps_fixes: list[GpsFix], imu_samples: list[ImuSample]) -> None:
-        """Initialize EKF on first GPS fix + IMU sample."""
+    def _try_init_ekf(
+        self,
+        gps_fixes: list[GpsFix],
+        imu_samples: list[ImuSample],
+        odom_samples: list[OdomSample],
+    ) -> None:
+        """Initialize EKF on first GPS fix + IMU sample, and align ARKit frame."""
         if self._ekf.initialized:
+            if not self._ekf.arkit_aligned and odom_samples:
+                from scipy.spatial.transform import Rotation
+                o = odom_samples[0]
+                arkit_yaw = Rotation.from_quat(o.orientation).as_euler("xyz")[2]
+                self._ekf.align_arkit_frame(
+                    o.position, arkit_yaw,
+                    self._gps_enu_cache[0], self._ekf.yaw,
+                )
+                print(f"  ARKit frame aligned (offset: {self._ekf._arkit_translation[:2]})")
             return
         if not gps_fixes or not imu_samples:
             return
@@ -479,13 +494,15 @@ class Nav2Planner:
         frame: "SyncedFrame",
         gps_fixes: list[GpsFix],
         imu_samples: list[ImuSample],
+        odom_samples: list[OdomSample],
     ) -> None:
         t0 = time.perf_counter()
 
         n_imu = len(imu_samples)
         n_gps = len(gps_fixes)
+        n_odom = len(odom_samples)
 
-        self._try_init_ekf(gps_fixes, imu_samples)
+        self._try_init_ekf(gps_fixes, imu_samples, odom_samples)
         self._try_resolve_route(gps_fixes)
         self._ensure_gps_enu(gps_fixes)
 
@@ -517,6 +534,14 @@ class Nav2Planner:
                 self._gps_pub.publish(gps_msg)
 
             self._gps_idx += 1
+
+        # Advance EKF through odom samples up to this frame
+        while self._odom_idx < n_odom and odom_samples[self._odom_idx].timestamp <= frame.timestamp:
+            if self._ekf.initialized and self._ekf.arkit_aligned:
+                o = odom_samples[self._odom_idx]
+                enu_pos = self._ekf.arkit_to_enu(o.position)
+                self._ekf.update_odom(enu_pos, o.pose_covariance[:3, :3])
+            self._odom_idx += 1
 
         # EKF position
         ego_enu = self._ekf.x[:3].copy()
