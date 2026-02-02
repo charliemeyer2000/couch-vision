@@ -1,0 +1,166 @@
+{
+  "configById": {
+    "3d-panel": {
+      "cameraState": {
+        "perspective": true,
+        "distance": 40,
+        "phi": 60,
+        "thetaOffset": 0,
+        "targetOffset": [0, 0, 0],
+        "target": [0, 0, 0],
+        "fovy": 45
+      },
+      "followMode": "follow-pose",
+      "followTf": "map",
+      "scene": {
+        "backgroundColor": "#1a1a2e",
+        "enableStats": false
+      },
+      "topics": {
+        "/costmap/occupancy_grid": {
+          "visible": true,
+          "colorMode": "costmap",
+          "alpha": 0.7
+        },
+        "/nav/planned_path": {
+          "visible": true,
+          "type": "line",
+          "lineWidth": 0.15,
+          "gradient": ["#00ff88", "#00ff88"]
+        },
+        "/nav/google_maps_path": {
+          "visible": true,
+          "type": "line",
+          "lineWidth": 0.08,
+          "gradient": ["#4488ff", "#4488ff"]
+        },
+        "/nav/goal_marker": {
+          "visible": true
+        },
+        "/nav/ego_marker": {
+          "visible": true
+        },
+        "/perception/pointcloud/drivable": {
+          "visible": true,
+          "pointSize": 3,
+          "colorMode": "flat",
+          "flatColor": "#00cc44"
+        },
+        "/perception/pointcloud/lanes": {
+          "visible": true,
+          "pointSize": 4,
+          "colorMode": "flat",
+          "flatColor": "#ff4444"
+        },
+        "/perception/pointcloud/detections": {
+          "visible": true,
+          "pointSize": 5,
+          "colorMode": "flat",
+          "flatColor": "#ffcc00"
+        },
+        "/iphone/lidar/points": {
+          "visible": false,
+          "pointSize": 2,
+          "colorMode": "flat",
+          "flatColor": "#888888"
+        },
+        "/tf": {
+          "visible": true
+        }
+      }
+    },
+    "camera-panel": {
+      "imageMode": {
+        "imageTopic": "/camera/image/compressed",
+        "calibrationTopic": ""
+      },
+      "followTf": ""
+    },
+    "costmap-image-panel": {
+      "imageMode": {
+        "imageTopic": "/nav/costmap_image/compressed",
+        "calibrationTopic": ""
+      },
+      "followTf": ""
+    },
+    "gps-map-panel": {
+      "layer": "map",
+      "topicPath": "/gps/fix",
+      "followTopic": "/gps/fix",
+      "zoomLevel": 17
+    },
+    "imu-plot-panel": {
+      "paths": [
+        { "value": "/iphone/imu.orientation.x", "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "/iphone/imu.orientation.y", "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "/iphone/imu.orientation.z", "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "/iphone/imu.orientation.w", "enabled": true, "timestampMethod": "receiveTime" }
+      ],
+      "showXAxisLabels": true,
+      "showYAxisLabels": true,
+      "showLegend": true,
+      "legendDisplay": "floating",
+      "showPlotValuesInLegend": true,
+      "isSynced": true,
+      "xAxisVal": "timestamp",
+      "followingViewWidth": 30
+    },
+    "topic-list-panel": {}
+  },
+  "globalVariables": {},
+  "userNodes": {},
+  "linkedGlobalVariables": [],
+  "playbackConfig": {
+    "speed": 1
+  },
+  "layout": {
+    "direction": "row",
+    "first": {
+      "direction": "column",
+      "first": {
+        "id": "3d-panel",
+        "type": "3D",
+        "config": {}
+      },
+      "second": {
+        "direction": "row",
+        "first": {
+          "id": "camera-panel",
+          "type": "ImageView",
+          "config": {}
+        },
+        "second": {
+          "id": "costmap-image-panel",
+          "type": "ImageView",
+          "config": {}
+        },
+        "splitPercentage": 50
+      },
+      "splitPercentage": 60
+    },
+    "second": {
+      "direction": "column",
+      "first": {
+        "id": "gps-map-panel",
+        "type": "map",
+        "config": {}
+      },
+      "second": {
+        "direction": "column",
+        "first": {
+          "id": "imu-plot-panel",
+          "type": "Plot",
+          "config": {}
+        },
+        "second": {
+          "id": "topic-list-panel",
+          "type": "TopicList",
+          "config": {}
+        },
+        "splitPercentage": 60
+      },
+      "splitPercentage": 40
+    },
+    "splitPercentage": 70
+  }
+}
