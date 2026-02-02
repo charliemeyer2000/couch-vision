@@ -108,45 +108,19 @@ aws s3 cp s3://couch-vision-bags/<filename> .
 # or just curl/wget the URL directly
 ```
 
-## Docker Images
-
-Both the iOS bridge and EKF are published to Docker Hub on every push to `main`. Images are built by CI (see `.github/workflows/ci.yml`).
-
-| Image | Docker Hub |
-|-------|------------|
-| iOS Bridge | [`charliemeyer2000/couch-vision-bridge`](https://hub.docker.com/r/charliemeyer2000/couch-vision-bridge) |
-| EKF | [`charliemeyer2000/couch-vision-ekf`](https://hub.docker.com/r/charliemeyer2000/couch-vision-ekf) |
+## Docker
 
 ### iOS Bridge
-
-Runs the Python ROS2 TCP bridge that receives sensor data from the iPhone and publishes to ROS2 topics.
-
 ```bash
 docker run --network host \
   -v $(pwd)/cyclonedds.xml:/bridge/cyclonedds.xml:ro \
   charliemeyer2000/couch-vision-bridge:latest
 ```
 
-Or with docker compose from `bridge/`:
+### Full Stack (Nav2 + Perception)
 ```bash
-docker compose up
-```
-
-### EKF
-
-Runs the Extended Kalman Filter on recorded bag files and outputs a dashboard image.
-
-```bash
-docker run \
-  -v $(pwd)/bags:/bags:ro \
-  -v $(pwd)/output:/output \
-  charliemeyer2000/couch-vision-ekf:latest \
-  /bags/<bagfile>.mcap -o /output/dashboard.png --no-show
-```
-
-Or with docker compose from `ekf/`:
-```bash
-docker compose up
+make full-stack BAG=bags/your_bag.mcap
+# Connect Foxglove to ws://localhost:8765
 ```
 
 ## Development
@@ -161,6 +135,18 @@ CouchVision/         # iOS app (Swift)
 ├── ROS/             # Message types, CDR encoder
 └── Networking/      # Publisher implementations
 bridge/              # Python ROS2 bridge
+perception/          # Python perception package (uv project)
+├── configs/         # Pipeline presets (default, fast, accurate)
+├── src/couch_perception/
+│   ├── config.py            # PipelineConfig + YAML loading
+│   ├── perception_pipeline.py
+│   ├── yolov8_detector.py   # YOLOv8 (TensorRT > CUDA > MPS > CPU)
+│   ├── yolop_detector.py    # YOLOP (TensorRT FP16 > CUDA > CPU)
+│   ├── costmap_runner.py    # Costmap generation
+│   ├── bev_projection_runner.py
+│   ├── nav2_planner_runner.py
+│   └── ...
+└── tests/           # pytest + pytest-benchmark
 scripts/             # Setup scripts
 ```
 
@@ -169,20 +155,26 @@ scripts/             # Setup scripts
 ```bash
 # iOS (Mac only)
 make xcode          # Open Xcode project
-make build-ios      # Build for device
-make regen          # Regenerate Xcode project
 
 # ROS2 Bridge (Mac or Jetson)
 make bridge         # Start iOS TCP bridge
-make foxglove       # Start Foxglove WebSocket bridge (Jetson only)
+
+# Perception
+make perception BAG=path.mcap              # Run YOLOv8+YOLOP on bag
+make costmap BAG=path.mcap                 # Generate costmap
+make bev-projection BAG=path.mcap          # BEV point cloud projection
+make full-stack BAG=path.mcap              # Perception + Nav2 (Docker)
+make perception BAG=path.mcap CONFIG=perception/configs/fast.yaml  # Use preset
+
+# Testing
+make test           # Run perception tests
+make benchmark      # Run component benchmarks
 
 # Deployment
 make deploy-jetson  # Pull latest code on Jetson
 
 # Linting
-make lint           # Run all linters
-make lint-fix       # Auto-fix lint issues
-make format         # Format all code
+make lint           # Run all linters (pre-commit)
 ```
 
 ### Adding a sensor
