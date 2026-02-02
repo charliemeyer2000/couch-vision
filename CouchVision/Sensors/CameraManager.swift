@@ -79,6 +79,15 @@ public enum CameraType: String, CaseIterable {
         self == .front ? .front : .back
     }
 
+    public var displayName: String {
+        switch self {
+        case .backWide: "Back Wide"
+        case .backUltraWide: "Back Ultra Wide"
+        case .backTelephoto: "Back Telephoto"
+        case .front: "Front"
+        }
+    }
+
     func frameId(prefix: String) -> String {
         "\(prefix)_camera_\(rawValue)"
     }
@@ -89,6 +98,7 @@ public final class CameraManager: NSObject, ObservableObject {
     @Published public private(set) var state: SensorState = .unknown
     @Published public private(set) var activeCamera: CameraType?
     @Published public var isEnabled: Bool = false
+    @Published public private(set) var availableCameras: [CameraType] = []
     private let _framePrefixLock = NSLock()
     private var _framePrefix = "iphone"
     public var framePrefix: String {
@@ -111,7 +121,9 @@ public final class CameraManager: NSObject, ObservableObject {
     }
 
     public var selectedCamera: CameraType = .backWide {
-        didSet { if state == .running, oldValue != selectedCamera { switchCamera(to: selectedCamera) } }
+        didSet {
+            if state == .running, oldValue != selectedCamera { switchCamera(to: selectedCamera) }
+        }
     }
 
     private var captureSession: AVCaptureSession?
@@ -125,7 +137,21 @@ public final class CameraManager: NSObject, ObservableObject {
 
     override public init() {
         super.init()
+        updateAvailableCamerasSync()
+        if !availableCameras.contains(selectedCamera), let best = availableCameras.first {
+            selectedCamera = best
+        }
         checkAvailability()
+    }
+
+    private func updateAvailableCamerasSync() {
+        var available: [CameraType] = []
+        for cameraType in CameraType.allCases {
+            if getDevice(for: cameraType) != nil {
+                available.append(cameraType)
+            }
+        }
+        availableCameras = available
     }
 
     @discardableResult
@@ -245,6 +271,11 @@ public final class CameraManager: NSObject, ObservableObject {
     }
 
     private func switchCamera(to cameraType: CameraType) {
+        guard availableCameras.contains(cameraType) else {
+            Log.app.warning("Camera \(cameraType.rawValue) not available on this device")
+            return
+        }
+
         sessionQueue.async { [weak self] in
             guard let self, let session = captureSession else { return }
             session.beginConfiguration()

@@ -4,6 +4,7 @@ struct SettingsView: View {
     @EnvironmentObject var coordinator: SensorCoordinator
     @Environment(\.dismiss) private var dismiss
 
+    @State private var selectedCamera: CameraType = .backWide
     @State private var cameraResolution: CameraConfig.Resolution = .p720
     @State private var cameraFrameRate: Int = 30
     @State private var jpegQuality: Double = 80
@@ -45,6 +46,15 @@ struct SettingsView: View {
 
     private var cameraSection: some View {
         Section("Camera") {
+            if coordinator.cameraManager.availableCameras.count > 1 {
+                Picker("Camera", selection: $selectedCamera) {
+                    ForEach(coordinator.cameraManager.availableCameras, id: \.self) { camera in
+                        Text(camera.displayName).tag(camera)
+                    }
+                }
+            } else if let camera = coordinator.cameraManager.availableCameras.first {
+                LabeledContent("Camera", value: camera.displayName)
+            }
             Picker("Resolution", selection: $cameraResolution) {
                 Text("1080p").tag(CameraConfig.Resolution.p1080)
                 Text("720p").tag(CameraConfig.Resolution.p720)
@@ -108,6 +118,7 @@ struct SettingsView: View {
 
     private func loadSettings() {
         // Load from persisted storage first, then overlay live coordinator state
+        selectedCamera = coordinator.cameraManager.selectedCamera
         cameraResolution = SettingsStorage.cameraResolution
         cameraFrameRate = SettingsStorage.cameraFrameRate
         jpegQuality = SettingsStorage.jpegQuality
@@ -129,6 +140,7 @@ struct SettingsView: View {
 
     private func applyAndPersistSettings() {
         // Persist to UserDefaults
+        SettingsStorage.selectedCamera = selectedCamera
         SettingsStorage.cameraResolution = cameraResolution
         SettingsStorage.cameraFrameRate = cameraFrameRate
         SettingsStorage.jpegQuality = jpegQuality
@@ -140,6 +152,7 @@ struct SettingsView: View {
         SettingsStorage.endpoint = endpoint
 
         // Apply to live coordinator
+        coordinator.cameraManager.selectedCamera = selectedCamera
         coordinator.cameraManager.config = CameraConfig(
             resolution: cameraResolution,
             frameRate: cameraFrameRate,

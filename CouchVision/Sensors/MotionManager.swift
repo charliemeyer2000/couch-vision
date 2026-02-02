@@ -84,16 +84,31 @@ public final class MotionManager: ObservableObject {
         }
 
         // CoreMotion prompts on first use - briefly start to trigger prompt
-        let granted = await withCheckedContinuation { continuation in
+        let granted = await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
+            let resumed = NSLock()
+            var hasResumed = false
+
             motionManager.startDeviceMotionUpdates(to: operationQueue) { [weak self] motion, _ in
                 self?.motionManager.stopDeviceMotionUpdates()
-                continuation.resume(returning: motion != nil)
+                resumed.lock()
+                let alreadyResumed = hasResumed
+                hasResumed = true
+                resumed.unlock()
+                if !alreadyResumed {
+                    continuation.resume(returning: motion != nil)
+                }
             }
 
             // Timeout after 2 seconds - assume granted if no callback
-            let manager = motionManager
-            DispatchQueue.global().asyncAfter(deadline: .now() + 2.0) {
-                manager.stopDeviceMotionUpdates()
+            DispatchQueue.global().asyncAfter(deadline: .now() + 2.0) { [weak self] in
+                self?.motionManager.stopDeviceMotionUpdates()
+                resumed.lock()
+                let alreadyResumed = hasResumed
+                hasResumed = true
+                resumed.unlock()
+                if !alreadyResumed {
+                    continuation.resume(returning: true)
+                }
             }
         }
 
