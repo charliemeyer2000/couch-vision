@@ -126,14 +126,6 @@ public final class CameraManager: NSObject, ObservableObject {
         }
     }
 
-    /// Returns the best default camera - prefers backWide, falls back to first available
-    public func bestAvailableCamera() -> CameraType? {
-        if availableCameras.contains(.backWide) {
-            return .backWide
-        }
-        return availableCameras.first
-    }
-
     private var captureSession: AVCaptureSession?
     private var videoOutput: AVCaptureVideoDataOutput?
     private var currentDevice: AVCaptureDevice?
@@ -146,14 +138,12 @@ public final class CameraManager: NSObject, ObservableObject {
     override public init() {
         super.init()
         updateAvailableCamerasSync()
-        // Auto-select best available camera if default isn't available
         if !availableCameras.contains(selectedCamera), let best = availableCameras.first {
             selectedCamera = best
         }
         checkAvailability()
     }
 
-    /// Synchronous version for init - updates availableCameras immediately
     private func updateAvailableCamerasSync() {
         var available: [CameraType] = []
         for cameraType in CameraType.allCases {
@@ -162,18 +152,6 @@ public final class CameraManager: NSObject, ObservableObject {
             }
         }
         availableCameras = available
-    }
-
-    private func updateAvailableCameras() {
-        var available: [CameraType] = []
-        for cameraType in CameraType.allCases {
-            if getDevice(for: cameraType) != nil {
-                available.append(cameraType)
-            }
-        }
-        DispatchQueue.main.async { [weak self] in
-            self?.availableCameras = available
-        }
     }
 
     @discardableResult
@@ -294,7 +272,7 @@ public final class CameraManager: NSObject, ObservableObject {
 
     private func switchCamera(to cameraType: CameraType) {
         guard availableCameras.contains(cameraType) else {
-            print("Camera \(cameraType) not available on this device")
+            Log.app.warning("Camera \(cameraType) not available on this device")
             return
         }
 

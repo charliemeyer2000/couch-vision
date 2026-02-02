@@ -145,7 +145,7 @@ struct ContentView: View {
                 .state == .running
 
             SensorToggleRow(
-                name: cameraViaLidar ? "Camera (via LiDAR)" : "Camera (Back Wide)",
+                name: cameraViaLidar ? "Camera (via LiDAR)" : "Camera (\(coordinator.cameraManager.selectedCamera.displayName))",
                 state: cameraViaLidar ? coordinator.lidarManager.state : coordinator.cameraManager.state,
                 isEnabled: Binding(
                     get: { coordinator.cameraManager.isEnabled },
