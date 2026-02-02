@@ -36,7 +36,7 @@ from builtin_interfaces.msg import Time as RosTime, Duration as RosDuration
 
 from nav2_simple_commander.robot_navigator import BasicNavigator
 
-from couch_perception.bag_reader import GpsFix, ImuSample
+from couch_perception.bag_reader import GpsFix, ImuSample, OdomSample
 from couch_perception.config import PipelineConfig
 from couch_perception.ekf import EKF
 from couch_perception.frame_source import BagSource, LiveSource, SensorStreams
@@ -425,6 +425,8 @@ class Nav2Planner:
         # EKF tracking indices
         self._gps_idx = 0
         self._imu_idx = 0
+        self._odom_idx = 0
+        self._init_enu_yaw: float = 0.0
         self._prev_imu_t: float | None = None
         self._prev_gps_enu: np.ndarray | None = None
         self._gps_enu_cache: list[np.ndarray] = []
@@ -438,7 +440,7 @@ class Nav2Planner:
         print("Connect Foxglove to ws://localhost:8765")
 
         for frame in streams.frames:
-            self._process_frame(frame, streams.gps_fixes, streams.imu_samples)
+            self._process_frame(frame, streams.gps_fixes, streams.imu_samples, streams.odom_samples)
 
         print(f"\nDone. Processed {self._frame_num} frames.")
 
@@ -451,15 +453,36 @@ class Nav2Planner:
             cov = g.position_covariance
             self._gps_cov_cache.append(np.diag([cov[0], cov[4], cov[8]]))
 
-    def _try_init_ekf(self, gps_fixes: list[GpsFix], imu_samples: list[ImuSample]) -> None:
-        """Initialize EKF on first GPS fix + IMU sample."""
+    def _try_init_ekf(
+        self,
+        gps_fixes: list[GpsFix],
+        imu_samples: list[ImuSample],
+        odom_samples: list[OdomSample],
+    ) -> None:
+        """Initialize EKF on first GPS fix + IMU sample, and align ARKit frame."""
         if self._ekf.initialized:
+            if not self._ekf.arkit_aligned and odom_samples:
+                self._align_arkit(gps_fixes[0].timestamp, odom_samples)
             return
         if not gps_fixes or not imu_samples:
             return
         self._ensure_gps_enu(gps_fixes)
         self._ekf.initialize(self._gps_enu_cache[0], imu_samples[0].orientation)
+        self._init_enu_yaw = self._ekf.yaw
         print(f"  EKF initialized at ENU: ({self._gps_enu_cache[0][0]:.1f}, {self._gps_enu_cache[0][1]:.1f})")
+        if odom_samples:
+            self._align_arkit(gps_fixes[0].timestamp, odom_samples)
+
+    def _align_arkit(self, gps_timestamp: float, odom_samples: list[OdomSample]) -> None:
+        """Align ARKit frame using the odom sample nearest to the first GPS fix."""
+        from scipy.spatial.transform import Rotation
+        nearest = min(odom_samples, key=lambda o: abs(o.timestamp - gps_timestamp))
+        arkit_yaw = Rotation.from_quat(nearest.orientation).as_euler("xyz")[2]
+        self._ekf.align_arkit_frame(
+            nearest.position, arkit_yaw,
+            self._gps_enu_cache[0], self._init_enu_yaw,
+        )
+        print(f"  ARKit frame aligned (dt={nearest.timestamp - gps_timestamp:.2f}s)")
 
     def _try_resolve_route(self, gps_fixes: list[GpsFix]) -> None:
         """Query Google Maps route on first GPS fix (one-time)."""
@@ -479,13 +502,15 @@ class Nav2Planner:
         frame: "SyncedFrame",
         gps_fixes: list[GpsFix],
         imu_samples: list[ImuSample],
+        odom_samples: list[OdomSample],
     ) -> None:
         t0 = time.perf_counter()
 
         n_imu = len(imu_samples)
         n_gps = len(gps_fixes)
+        n_odom = len(odom_samples)
 
-        self._try_init_ekf(gps_fixes, imu_samples)
+        self._try_init_ekf(gps_fixes, imu_samples, odom_samples)
         self._try_resolve_route(gps_fixes)
         self._ensure_gps_enu(gps_fixes)
 
@@ -517,6 +542,14 @@ class Nav2Planner:
                 self._gps_pub.publish(gps_msg)
 
             self._gps_idx += 1
+
+        # Advance EKF through odom samples up to this frame
+        while self._odom_idx < n_odom and odom_samples[self._odom_idx].timestamp <= frame.timestamp:
+            if self._ekf.initialized and self._ekf.arkit_aligned:
+                o = odom_samples[self._odom_idx]
+                enu_pos = self._ekf.arkit_to_enu(o.position)
+                self._ekf.update_odom(enu_pos, o.pose_covariance[:3, :3])
+            self._odom_idx += 1
 
         # EKF position
         ego_enu = self._ekf.x[:3].copy()

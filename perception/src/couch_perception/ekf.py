@@ -58,6 +58,11 @@ class EKF:
         self.max_speed = max_speed
         self._initialized = False
 
+        # ARKit→ENU frame alignment (computed on first GPS fix)
+        self._arkit_translation: NDArray[np.float64] | None = None
+        self._arkit_cos: float = 1.0
+        self._arkit_sin: float = 0.0
+
     def initialize(
         self,
         position_enu: NDArray[np.float64],
@@ -204,5 +209,56 @@ class EKF:
 
         self.x += (K * innovation).flatten()
         self.x[8] = _wrap_angle(self.x[8])
+        self.P = (np.eye(STATE_DIM) - K @ H) @ self.P
+        self.P = 0.5 * (self.P + self.P.T)
+
+    # ── ARKit odometry ────────────────────────────────────────────────
+
+    @property
+    def arkit_aligned(self) -> bool:
+        return self._arkit_translation is not None
+
+    def align_arkit_frame(
+        self,
+        arkit_pos: NDArray[np.float64],
+        arkit_yaw: float,
+        enu_pos: NDArray[np.float64],
+        enu_yaw: float,
+    ) -> None:
+        """Compute the ARKit→ENU transform from a matched pair of positions+yaws."""
+        dyaw = _wrap_angle(enu_yaw - arkit_yaw)
+        self._arkit_cos = math.cos(dyaw)
+        self._arkit_sin = math.sin(dyaw)
+        # Rotate arkit_pos into ENU, then compute translation
+        rotated = np.array([
+            self._arkit_cos * arkit_pos[0] - self._arkit_sin * arkit_pos[1],
+            self._arkit_sin * arkit_pos[0] + self._arkit_cos * arkit_pos[1],
+            arkit_pos[2],
+        ])
+        self._arkit_translation = enu_pos - rotated
+
+    def arkit_to_enu(self, arkit_pos: NDArray[np.float64]) -> NDArray[np.float64]:
+        """Transform an ARKit world-frame position to ENU."""
+        rotated = np.array([
+            self._arkit_cos * arkit_pos[0] - self._arkit_sin * arkit_pos[1],
+            self._arkit_sin * arkit_pos[0] + self._arkit_cos * arkit_pos[1],
+            arkit_pos[2],
+        ])
+        return rotated + self._arkit_translation
+
+    def update_odom(
+        self,
+        position_enu: NDArray[np.float64],
+        R_cov: NDArray[np.float64],
+    ) -> None:
+        """ARKit odometry position update (same math as GPS, different covariance)."""
+        H = np.zeros((3, STATE_DIM))
+        H[:3, :3] = np.eye(3)
+
+        y = position_enu - self.x[POS]
+        S = H @ self.P @ H.T + R_cov
+        K = self.P @ H.T @ np.linalg.inv(S)
+
+        self.x += K @ y
         self.P = (np.eye(STATE_DIM) - K @ H) @ self.P
         self.P = 0.5 * (self.P + self.P.T)

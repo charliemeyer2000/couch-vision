@@ -56,6 +56,15 @@ class ImuSample:
 
 
 @dataclass
+class OdomSample:
+    """An odometry sample (ARKit VIO)."""
+    timestamp: float
+    position: np.ndarray      # (3,) xyz in ARKit world frame
+    orientation: np.ndarray   # (4,) quaternion (x, y, z, w)
+    pose_covariance: np.ndarray  # (6, 6)
+
+
+@dataclass
 class SyncedFrame:
     """A time-synchronized set of image, depth, camera intrinsics, and IMU orientation."""
     timestamp: float
@@ -157,20 +166,22 @@ def read_synced_frames(
         )
 
 
-def read_gps_and_imu(
+def read_gps_imu_and_odom(
     bag_path: str | Path,
     gps_suffix: str = "gps/fix",
     imu_suffix: str = "imu",
-) -> tuple[list[GpsFix], list[ImuSample]]:
-    """Read all GPS fixes and IMU samples from an MCAP bag.
+    odom_suffix: str = "odom",
+) -> tuple[list[GpsFix], list[ImuSample], list[OdomSample]]:
+    """Read all GPS fixes, IMU samples, and odometry from an MCAP bag.
 
-    Returns (gps_fixes, imu_samples) sorted by timestamp.
+    Returns (gps_fixes, imu_samples, odom_samples) sorted by timestamp.
     """
     from mcap.reader import make_reader
     from mcap_ros2.decoder import DecoderFactory
 
     gps_fixes: list[GpsFix] = []
     imu_samples: list[ImuSample] = []
+    odom_samples: list[OdomSample] = []
 
     with Path(bag_path).open("rb") as f:
         reader = make_reader(f, decoder_factories=[DecoderFactory()])
@@ -203,6 +214,19 @@ def read_gps_and_imu(
                     ], dtype=np.float64),
                 ))
 
+            elif channel.topic.endswith(odom_suffix) and hasattr(ros_msg, "pose"):
+                p = ros_msg.pose.pose.position
+                q = ros_msg.pose.pose.orientation
+                odom_samples.append(OdomSample(
+                    timestamp=ts,
+                    position=np.array([p.x, p.y, p.z], dtype=np.float64),
+                    orientation=np.array([q.x, q.y, q.z, q.w], dtype=np.float64),
+                    pose_covariance=np.array(
+                        ros_msg.pose.covariance, dtype=np.float64
+                    ).reshape(6, 6),
+                ))
+
     gps_fixes.sort(key=lambda g: g.timestamp)
     imu_samples.sort(key=lambda s: s.timestamp)
-    return gps_fixes, imu_samples
+    odom_samples.sort(key=lambda o: o.timestamp)
+    return gps_fixes, imu_samples, odom_samples
