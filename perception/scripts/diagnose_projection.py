@@ -11,12 +11,12 @@ from couch_perception.bag_reader import read_synced_frames
 from couch_perception.camera_model import make_camera_model, CameraModel
 from couch_perception.yolov8_detector import YOLOv8Detector
 from couch_perception.yolop_detector import YOLOPDetector
-from couch_perception.bev_projection_runner import (
-    _apply_imu_rotation,
-    _quat_to_rotation_matrix,
-    _extract_mask_pixels,
-    _extract_bbox_pixels,
-    _build_depth_camera_model,
+from couch_perception.projection import (
+    apply_imu_rotation,
+    quat_to_rotation_matrix,
+    extract_mask_pixels,
+    extract_bbox_pixels,
+    build_depth_camera_model,
 )
 
 
@@ -55,14 +55,14 @@ def main():
 
         if cam_model is None:
             cam_model = make_camera_model(frame.intrinsics)
-            depth_cam_model = _build_depth_camera_model(cam_model, frame.depth.shape[:2])
+            depth_cam_model = build_depth_camera_model(cam_model, frame.depth.shape[:2])
 
         print(f"\n{'='*60}")
         print(f"Frame {i} (t={frame.timestamp:.3f})")
         if frame.orientation is not None:
             q = frame.orientation
             print(f"  IMU quat (x,y,z,w): {q[0]:.4f} {q[1]:.4f} {q[2]:.4f} {q[3]:.4f}")
-            R = _quat_to_rotation_matrix(q)
+            R = quat_to_rotation_matrix(q)
             print(f"  R.T (device-to-world):")
             for row in R.T:
                 print(f"    [{row[0]:+.4f} {row[1]:+.4f} {row[2]:+.4f}]")
@@ -72,31 +72,31 @@ def main():
 
         # Drivable
         if yolop_result and yolop_result.drivable_mask is not None:
-            pixels, depths = _extract_mask_pixels(yolop_result.drivable_mask, frame.depth, subsample=4)
+            pixels, depths = extract_mask_pixels(yolop_result.drivable_mask, frame.depth, subsample=4)
             if len(pixels) > 0:
                 cam_pts = depth_cam_model.project_pixels_to_3d(pixels, depths)
                 _stats("drivable (camera-frame)", cam_pts)
-                world_pts = _apply_imu_rotation(cam_pts, frame.orientation)
+                world_pts = apply_imu_rotation(cam_pts, frame.orientation)
                 _stats("drivable (world-frame)", world_pts)
                 # Expected: drivable should be mostly in front (x>0), spread laterally (y),
                 # and near ground (z≈0)
 
         # Lanes
         if yolop_result and yolop_result.lane_mask is not None:
-            pixels, depths = _extract_mask_pixels(yolop_result.lane_mask, frame.depth, subsample=2)
+            pixels, depths = extract_mask_pixels(yolop_result.lane_mask, frame.depth, subsample=2)
             if len(pixels) > 0:
                 cam_pts = depth_cam_model.project_pixels_to_3d(pixels, depths)
                 _stats("lanes (camera-frame)", cam_pts)
-                world_pts = _apply_imu_rotation(cam_pts, frame.orientation)
+                world_pts = apply_imu_rotation(cam_pts, frame.orientation)
                 _stats("lanes (world-frame)", world_pts)
 
         # Detections
         if detections:
-            pixels, depths = _extract_bbox_pixels(detections, frame.depth, frame.image.shape[:2], subsample=8)
+            pixels, depths = extract_bbox_pixels(detections, frame.depth, frame.image.shape[:2], subsample=8)
             if len(pixels) > 0:
                 cam_pts = depth_cam_model.project_pixels_to_3d(pixels, depths)
                 _stats("detections (camera-frame)", cam_pts)
-                world_pts = _apply_imu_rotation(cam_pts, frame.orientation)
+                world_pts = apply_imu_rotation(cam_pts, frame.orientation)
                 _stats("detections (world-frame)", world_pts)
 
         print(f"\n  Camera frame convention: x=right, y=down, z=forward")

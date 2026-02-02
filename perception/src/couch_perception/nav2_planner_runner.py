@@ -14,7 +14,6 @@ Requires Nav2 planner_server + foxglove_bridge to be running (see launch file).
 import argparse
 import math
 import os
-import struct
 import threading
 import time
 
@@ -38,12 +37,10 @@ from builtin_interfaces.msg import Time as RosTime, Duration as RosDuration
 
 from nav2_simple_commander.robot_navigator import BasicNavigator
 
-from couch_perception.bag_reader import read_synced_frames, read_gps_and_imu, GpsFix, ImuSample
-from couch_perception.camera_model import make_camera_model, CameraModel
+from couch_perception.frame_source import BagSource
 from couch_perception.ekf import EKF
-from couch_perception.geo import geodetic_to_enu, ROTUNDA_LAT, ROTUNDA_LON, ROTUNDA_ALT
-from couch_perception.yolov8_detector import YOLOv8Detector
-from couch_perception.yolop_detector import YOLOPDetector
+from couch_perception.geo import geodetic_to_enu, ROTUNDA_LAT, ROTUNDA_LON
+from couch_perception.perception_pipeline import PerceptionPipeline
 from couch_perception.costmap_runner import (
     build_costmap,
     GRID_CELLS,
@@ -52,13 +49,6 @@ from couch_perception.costmap_runner import (
     GRID_SIZE_M,
 )
 from couch_perception.costmap_visualizer import costmap_to_upscaled_image
-from couch_perception.bev_projection_runner import (
-    _apply_imu_rotation,
-    _extract_mask_pixels,
-    _extract_bbox_pixels,
-    _extract_bbox_pixels_grouped,
-    _build_depth_camera_model,
-)
 
 
 # ── Google Maps route planning ────────────────────────────────────────────
@@ -418,9 +408,11 @@ def process_bag(
     if not api_key:
         print("WARNING: GOOGLE_MAPS_API_KEY not set. Will use fixed goal fallback.")
 
-    # ── Pre-read GPS + IMU for EKF ────────────────────────────────────────
-    print(f"Pre-reading GPS and IMU from bag: {bag_path}")
-    gps_fixes, imu_samples = read_gps_and_imu(bag_path)
+    # ── Open bag source ─────────────────────────────────────────────────
+    source = BagSource(bag_path, playback_rate=playback_rate, max_frames=max_frames)
+    streams = source.open()
+    gps_fixes = streams.gps_fixes
+    imu_samples = streams.imu_samples
     print(f"  GPS fixes: {len(gps_fixes)}, IMU samples: {len(imu_samples)}")
 
     if gps_fixes:
@@ -456,7 +448,6 @@ def process_bag(
 
     # ── Google Maps route (triggered on first GPS) ────────────────────────
     route_enu: np.ndarray | None = None  # (N, 2) ENU path
-    route_gps: list[tuple[float, float]] | None = None
 
     if api_key and gps_fixes:
         g0 = gps_fixes[0]
@@ -502,10 +493,15 @@ def process_bag(
     print("Nav2 planner is active!")
 
     # Load perception
-    yolo = YOLOv8Detector(model_path="weights/yolov8n.pt", conf_threshold=conf, device=device)
-    print(f"YOLOv8 loaded (device={yolo.device})")
-    print("Loading YOLOP...")
-    yolop = YOLOPDetector(device=device)
+    pipeline = PerceptionPipeline(
+        device=device,
+        conf=conf,
+        model_path="weights/yolov8n.pt",
+        subsample_drivable=subsample_drivable,
+        subsample_lane=subsample_lane,
+        subsample_bbox=subsample_bbox,
+    )
+    print(f"YOLOv8 loaded (device={pipeline.device})")
 
     # Poses
     goal_pose = PoseStamped()
@@ -520,13 +516,7 @@ def process_bag(
     print("Topics are published on ROS2. Connect Foxglove to foxglove_bridge (ws://localhost:8765).")
 
     # ── Frame processing loop ─────────────────────────────────────────────
-    frames = read_synced_frames(bag_path)
-    cam_model: CameraModel | None = None
-    depth_cam_model: CameraModel | None = None
-
     frame_num = 0
-    prev_wall_time: float | None = None
-    prev_bag_time: float | None = None
 
     # EKF tracking indices
     gps_idx = 0
@@ -534,26 +524,7 @@ def process_bag(
     prev_imu_t: float | None = None
     prev_gps_enu: np.ndarray | None = None
 
-    for frame in frames:
-        if max_frames and frame_num >= max_frames:
-            break
-
-        if cam_model is None:
-            cam_model = make_camera_model(frame.intrinsics)
-            depth_cam_model = _build_depth_camera_model(
-                cam_model, frame.depth.shape[:2]
-            )
-
-        # Pace playback
-        if prev_bag_time is not None and playback_rate > 0:
-            bag_dt = frame.timestamp - prev_bag_time
-            wall_dt = time.monotonic() - prev_wall_time
-            sleep_time = (bag_dt / playback_rate) - wall_dt
-            if sleep_time > 0:
-                time.sleep(sleep_time)
-        prev_bag_time = frame.timestamp
-        prev_wall_time = time.monotonic()
-
+    for frame in streams.frames:
         t0 = time.perf_counter()
 
         # ── EKF update: advance IMU predictions and GPS updates up to this frame ──
@@ -637,61 +608,28 @@ def process_bag(
             route_ego = route_enu - ego_enu[:2]
             gmaps_path_pub.publish(_make_route_path(route_ego, frame.timestamp))
 
-        # Run perception
-        detections = yolo.detect(frame.image)
-        yolop_result = yolop.detect(frame.image)
+        # Run perception pipeline
+        result = pipeline.process_frame(frame)
 
-        # Project drivable area
-        drivable_pts = None
-        if yolop_result and yolop_result.drivable_mask is not None:
-            pixels, depths = _extract_mask_pixels(
-                yolop_result.drivable_mask, frame.depth, subsample=subsample_drivable
+        # Publish point clouds via ROS2
+        if result.drivable_pts is not None:
+            pc_drivable_pub.publish(
+                _make_pointcloud2(result.drivable_pts, 0.0, 1.0, 0.0, frame.timestamp)
             )
-            if len(pixels) > 0:
-                pts_3d = depth_cam_model.project_pixels_to_3d(pixels, depths)
-                drivable_pts = _apply_imu_rotation(pts_3d, frame.orientation)
-                pc_drivable_pub.publish(
-                    _make_pointcloud2(drivable_pts, 0.0, 1.0, 0.0, frame.timestamp)
-                )
-
-        # Project lanes
-        lane_pts = None
-        if yolop_result and yolop_result.lane_mask is not None:
-            pixels, depths = _extract_mask_pixels(
-                yolop_result.lane_mask, frame.depth, subsample=subsample_lane
+        if result.lane_pts is not None:
+            pc_lanes_pub.publish(
+                _make_pointcloud2(result.lane_pts, 1.0, 0.0, 0.0, frame.timestamp)
             )
-            if len(pixels) > 0:
-                pts_3d = depth_cam_model.project_pixels_to_3d(pixels, depths)
-                lane_pts = _apply_imu_rotation(pts_3d, frame.orientation)
-                pc_lanes_pub.publish(
-                    _make_pointcloud2(lane_pts, 1.0, 0.0, 0.0, frame.timestamp)
-                )
-
-        # Project detections (per-detection groups for filled costmap obstacles)
-        det_pts = None
-        det_groups = None
-        if detections:
-            groups = _extract_bbox_pixels_grouped(
-                detections, frame.depth, frame.image.shape[:2], subsample=subsample_bbox
+        if result.det_pts is not None:
+            pc_det_pub.publish(
+                _make_pointcloud2(result.det_pts, 1.0, 1.0, 0.0, frame.timestamp)
             )
-            all_world_groups = []
-            all_world_pts = []
-            for pixels, depths in groups:
-                if len(pixels) == 0:
-                    continue
-                pts_3d = depth_cam_model.project_pixels_to_3d(pixels, depths)
-                world_pts = _apply_imu_rotation(pts_3d, frame.orientation)
-                all_world_groups.append(world_pts)
-                all_world_pts.append(world_pts)
-            if all_world_pts:
-                det_pts = np.vstack(all_world_pts)
-                det_groups = all_world_groups
-                pc_det_pub.publish(
-                    _make_pointcloud2(det_pts, 1.0, 1.0, 0.0, frame.timestamp)
-                )
 
         # Build and publish costmap
-        grid = build_costmap(drivable_pts, lane_pts, det_pts, det_groups=det_groups)
+        grid = build_costmap(
+            result.drivable_pts, result.lane_pts, result.det_pts,
+            det_groups=result.det_groups or None,
+        )
         costmap_pub.publish(_costmap_to_occupancy_grid(grid, frame.timestamp))
 
         # Publish markers
@@ -723,11 +661,10 @@ def process_bag(
         dt = time.perf_counter() - t0
         frame_num += 1
         if frame_num % 5 == 0:
-            n_det = len(detections)
             n_poses = len(path.poses) if path and path.poses else 0
             print(
                 f"\rFrame {frame_num}: path={n_poses} poses, "
-                f"{n_det} det, {1/dt:.1f} FPS, "
+                f"{len(result.detections)} det, {1/dt:.1f} FPS, "
                 f"EKF=({ego_enu[0]:.1f},{ego_enu[1]:.1f}) yaw={math.degrees(ekf.yaw):.0f}° "
                 f"goal=({goal_x:.1f},{goal_y:.1f})",
                 end="", flush=True,

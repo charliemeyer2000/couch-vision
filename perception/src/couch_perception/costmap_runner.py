@@ -15,7 +15,6 @@ import argparse
 import datetime
 import logging
 import math
-import struct
 import time
 
 import cv2
@@ -27,7 +26,6 @@ from foxglove.schemas import (
     Grid,
     PackedElementField,
     PackedElementFieldNumericType,
-    PointCloud,
     Pose,
     Quaternion,
     Timestamp,
@@ -36,10 +34,8 @@ from foxglove.schemas import (
 )
 from foxglove.websocket import ServerListener, Client, ChannelView
 
-from couch_perception.bag_reader import read_synced_frames, SyncedFrame
-from couch_perception.camera_model import make_camera_model, CameraModel
-from couch_perception.yolov8_detector import YOLOv8Detector, Detection
-from couch_perception.yolop_detector import YOLOPDetector, YOLOPResult
+from couch_perception.frame_source import BagSource
+from couch_perception.perception_pipeline import PerceptionPipeline
 from couch_perception.costmap_visualizer import (
     COST_UNKNOWN,
     COST_FREE,
@@ -48,19 +44,9 @@ from couch_perception.costmap_visualizer import (
     COST_LETHAL,
     costmap_to_upscaled_image,
 )
-
-# Reuse projection helpers from bev_projection_runner
 from couch_perception.bev_projection_runner import (
-    _quat_to_rotation_matrix,
-    _apply_imu_rotation,
-    _extract_mask_pixels,
-    _extract_bbox_pixels,
-    _extract_bbox_pixels_grouped,
-    _build_depth_camera_model,
-    _pack_points_rgba_vectorized,
-    _make_pointcloud,
-    POINT_STRIDE,
-    POINTCLOUD_FIELDS,
+    pack_points_rgba_vectorized,
+    make_pointcloud,
 )
 
 logger = logging.getLogger(__name__)
@@ -134,7 +120,7 @@ def _build_ego_drivable_mask() -> np.ndarray:
 _EGO_DRIVABLE_MASK = _build_ego_drivable_mask()
 
 
-def _world_to_grid(x: np.ndarray, y: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+def _world_to_grid(x: np.ndarray, y: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Convert world coordinates (meters, ego at 0,0) to grid row/col indices.
 
     Forward is -X, so row 0 = most negative x (forward), row GRID_CELLS-1 = most positive x (behind).
@@ -265,126 +251,58 @@ def process_bag(
 ) -> None:
     """Process a bag file, build costmaps, and publish via Foxglove WebSocket."""
 
-    yolo = YOLOv8Detector(conf_threshold=conf, device=device)
-    print(f"YOLOv8 loaded (device={yolo.device})")
-
-    print("Loading YOLOP...")
-    yolop = YOLOPDetector(device=device)
+    pipeline = PerceptionPipeline(
+        device=device,
+        conf=conf,
+        subsample_drivable=subsample_drivable,
+        subsample_lane=subsample_lane,
+        subsample_bbox=subsample_bbox,
+    )
+    print(f"YOLOv8 loaded (device={pipeline.device})")
 
     listener = _Listener()
     server = foxglove.start_server(server_listener=listener)
     print("Foxglove server started on ws://localhost:8765")
     print("Open Foxglove Studio and connect to ws://localhost:8765")
 
-    frames = read_synced_frames(bag_path)
-    cam_model: CameraModel | None = None
-    depth_cam_model: CameraModel | None = None
-
+    source = BagSource(bag_path, playback_rate=playback_rate, max_frames=max_frames)
+    streams = source.open()
     frame_num = 0
-    prev_wall_time: float | None = None
-    prev_bag_time: float | None = None
 
-    for frame in frames:
-        if max_frames and frame_num >= max_frames:
-            break
-
-        if cam_model is None:
-            cam_model = make_camera_model(frame.intrinsics)
-            depth_cam_model = _build_depth_camera_model(
-                cam_model, frame.depth.shape[:2]
-            )
-
-        # Pace playback
-        if prev_bag_time is not None and playback_rate > 0:
-            bag_dt = frame.timestamp - prev_bag_time
-            wall_dt = time.monotonic() - prev_wall_time
-            sleep_time = (bag_dt / playback_rate) - wall_dt
-            if sleep_time > 0:
-                time.sleep(sleep_time)
-        prev_bag_time = frame.timestamp
-        prev_wall_time = time.monotonic()
-
+    for frame in streams.frames:
         t0 = time.perf_counter()
 
-        # Run perception
-        detections = yolo.detect(frame.image)
-        yolop_result = yolop.detect(frame.image)
+        result = pipeline.process_frame(frame)
 
-        # Project drivable area
-        drivable_pts: np.ndarray | None = None
-        if yolop_result and yolop_result.drivable_mask is not None:
-            pixels, depths = _extract_mask_pixels(
-                yolop_result.drivable_mask, frame.depth, subsample=subsample_drivable
-            )
-            if len(pixels) > 0:
-                pts_3d = depth_cam_model.project_pixels_to_3d(pixels, depths)
-                drivable_pts = _apply_imu_rotation(pts_3d, frame.orientation)
-                data = _pack_points_rgba_vectorized(drivable_pts, 0.0, 1.0, 0.0)
-                foxglove.log(
-                    "/perception/pointcloud/drivable",
-                    _make_pointcloud(data, frame.timestamp),
-                )
+        # Publish point clouds
+        if result.drivable_pts is not None:
+            data = pack_points_rgba_vectorized(result.drivable_pts, 0.0, 1.0, 0.0)
+            foxglove.log("/perception/pointcloud/drivable", make_pointcloud(data, frame.timestamp))
 
-        # Project lane lines
-        lane_pts: np.ndarray | None = None
-        if yolop_result and yolop_result.lane_mask is not None:
-            pixels, depths = _extract_mask_pixels(
-                yolop_result.lane_mask, frame.depth, subsample=subsample_lane
-            )
-            if len(pixels) > 0:
-                pts_3d = depth_cam_model.project_pixels_to_3d(pixels, depths)
-                lane_pts = _apply_imu_rotation(pts_3d, frame.orientation)
-                data = _pack_points_rgba_vectorized(lane_pts, 1.0, 0.0, 0.0)
-                foxglove.log(
-                    "/perception/pointcloud/lanes",
-                    _make_pointcloud(data, frame.timestamp),
-                )
+        if result.lane_pts is not None:
+            data = pack_points_rgba_vectorized(result.lane_pts, 1.0, 0.0, 0.0)
+            foxglove.log("/perception/pointcloud/lanes", make_pointcloud(data, frame.timestamp))
 
-        # Project bounding boxes (per-detection groups for filled costmap obstacles)
-        det_pts: np.ndarray | None = None
-        det_groups: list[np.ndarray] | None = None
-        if detections:
-            groups = _extract_bbox_pixels_grouped(
-                detections, frame.depth, frame.image.shape[:2], subsample=subsample_bbox
-            )
-            all_world_groups = []
-            all_world_pts = []
-            for pixels, depths_g in groups:
-                if len(pixels) == 0:
-                    continue
-                pts_3d = depth_cam_model.project_pixels_to_3d(pixels, depths_g)
-                world_pts = _apply_imu_rotation(pts_3d, frame.orientation)
-                all_world_groups.append(world_pts)
-                all_world_pts.append(world_pts)
-            if all_world_pts:
-                det_pts = np.vstack(all_world_pts)
-                det_groups = all_world_groups
-                data = _pack_points_rgba_vectorized(det_pts, 1.0, 1.0, 0.0)
-                foxglove.log(
-                    "/perception/pointcloud/detections",
-                    _make_pointcloud(data, frame.timestamp),
-                )
+        if result.det_pts is not None:
+            data = pack_points_rgba_vectorized(result.det_pts, 1.0, 1.0, 0.0)
+            foxglove.log("/perception/pointcloud/detections", make_pointcloud(data, frame.timestamp))
 
         # Build and publish costmap
-        grid = build_costmap(drivable_pts, lane_pts, det_pts, det_groups=det_groups)
-
-        foxglove.log(
-            "/costmap/occupancy_grid",
-            _make_foxglove_grid(grid, frame.timestamp),
+        grid = build_costmap(
+            result.drivable_pts, result.lane_pts, result.det_pts,
+            det_groups=result.det_groups or None,
         )
+
+        foxglove.log("/costmap/occupancy_grid", _make_foxglove_grid(grid, frame.timestamp))
 
         color_img = costmap_to_upscaled_image(grid, scale=4)
-        foxglove.log(
-            "/costmap/image",
-            _make_compressed_image(color_img, frame.timestamp),
-        )
+        foxglove.log("/costmap/image", _make_compressed_image(color_img, frame.timestamp))
 
         dt = time.perf_counter() - t0
         frame_num += 1
         if frame_num % 5 == 0:
-            n_det = len(detections)
             print(
-                f"\rFrame {frame_num}: {1/dt:.1f} FPS, {n_det} detections",
+                f"\rFrame {frame_num}: {1/dt:.1f} FPS, {len(result.detections)} detections",
                 end="",
                 flush=True,
             )
