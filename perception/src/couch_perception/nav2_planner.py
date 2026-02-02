@@ -426,6 +426,7 @@ class Nav2Planner:
         self._gps_idx = 0
         self._imu_idx = 0
         self._odom_idx = 0
+        self._init_enu_yaw: float = 0.0
         self._prev_imu_t: float | None = None
         self._prev_gps_enu: np.ndarray | None = None
         self._gps_enu_cache: list[np.ndarray] = []
@@ -461,20 +462,27 @@ class Nav2Planner:
         """Initialize EKF on first GPS fix + IMU sample, and align ARKit frame."""
         if self._ekf.initialized:
             if not self._ekf.arkit_aligned and odom_samples:
-                from scipy.spatial.transform import Rotation
-                o = odom_samples[0]
-                arkit_yaw = Rotation.from_quat(o.orientation).as_euler("xyz")[2]
-                self._ekf.align_arkit_frame(
-                    o.position, arkit_yaw,
-                    self._gps_enu_cache[0], self._ekf.yaw,
-                )
-                print(f"  ARKit frame aligned (offset: {self._ekf._arkit_translation[:2]})")
+                self._align_arkit(gps_fixes[0].timestamp, odom_samples)
             return
         if not gps_fixes or not imu_samples:
             return
         self._ensure_gps_enu(gps_fixes)
         self._ekf.initialize(self._gps_enu_cache[0], imu_samples[0].orientation)
+        self._init_enu_yaw = self._ekf.yaw
         print(f"  EKF initialized at ENU: ({self._gps_enu_cache[0][0]:.1f}, {self._gps_enu_cache[0][1]:.1f})")
+        if odom_samples:
+            self._align_arkit(gps_fixes[0].timestamp, odom_samples)
+
+    def _align_arkit(self, gps_timestamp: float, odom_samples: list[OdomSample]) -> None:
+        """Align ARKit frame using the odom sample nearest to the first GPS fix."""
+        from scipy.spatial.transform import Rotation
+        nearest = min(odom_samples, key=lambda o: abs(o.timestamp - gps_timestamp))
+        arkit_yaw = Rotation.from_quat(nearest.orientation).as_euler("xyz")[2]
+        self._ekf.align_arkit_frame(
+            nearest.position, arkit_yaw,
+            self._gps_enu_cache[0], self._init_enu_yaw,
+        )
+        print(f"  ARKit frame aligned (dt={nearest.timestamp - gps_timestamp:.2f}s)")
 
     def _try_resolve_route(self, gps_fixes: list[GpsFix]) -> None:
         """Query Google Maps route on first GPS fix (one-time)."""
