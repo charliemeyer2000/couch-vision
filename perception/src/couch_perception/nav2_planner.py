@@ -287,10 +287,12 @@ def _make_ego_marker(timestamp: float) -> Marker:
     return m
 
 
-def _make_route_path(route_ego: np.ndarray, timestamp: float) -> Path:
+def _make_route_path(route_ego: np.ndarray, timestamp: float, max_points: int = 200) -> Path:
     msg = Path()
     msg.header = _header(timestamp)
-    for i in range(len(route_ego)):
+    # Subsample long routes to avoid creating thousands of PoseStamped objects per frame
+    step = max(1, len(route_ego) // max_points)
+    for i in range(0, len(route_ego), step):
         ps = PoseStamped()
         ps.header = msg.header
         ps.pose.position.x = float(route_ego[i, 0])
@@ -482,12 +484,16 @@ class Nav2Planner:
     ) -> None:
         t0 = time.perf_counter()
 
+        # Snapshot list lengths to avoid races with LiveSource's growing lists
+        n_imu = len(imu_samples)
+        n_gps = len(gps_fixes)
+
         self._try_init_ekf(gps_fixes, imu_samples)
         self._try_resolve_route(gps_fixes)
         self._ensure_gps_enu(gps_fixes)
 
         # Advance EKF through IMU samples up to this frame
-        while self._imu_idx < len(imu_samples) and imu_samples[self._imu_idx].timestamp <= frame.timestamp:
+        while self._imu_idx < n_imu and imu_samples[self._imu_idx].timestamp <= frame.timestamp:
             s = imu_samples[self._imu_idx]
             dt = (s.timestamp - self._prev_imu_t) if self._prev_imu_t is not None else 0.0
             self._prev_imu_t = s.timestamp
@@ -497,7 +503,7 @@ class Nav2Planner:
             self._imu_idx += 1
 
         # Advance EKF through GPS fixes up to this frame
-        while self._gps_idx < len(gps_fixes) and gps_fixes[self._gps_idx].timestamp <= frame.timestamp:
+        while self._gps_idx < n_gps and gps_fixes[self._gps_idx].timestamp <= frame.timestamp:
             if self._ekf.initialized:
                 self._ekf.update_gps(self._gps_enu_cache[self._gps_idx], self._gps_cov_cache[self._gps_idx])
                 if self._prev_gps_enu is not None:
@@ -700,6 +706,8 @@ def main() -> None:
     except KeyboardInterrupt:
         pass
     finally:
+        if live_mode:
+            source.stop()
         planner.shutdown()
         node.destroy_node()
         rclpy.shutdown()

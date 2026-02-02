@@ -272,14 +272,15 @@ class LiveSource:
         )
 
         # Non-blocking put — drop oldest if full (backpressure)
-        try:
-            self._frame_queue.put_nowait(frame)
-        except queue.Full:
+        while True:
             try:
-                self._frame_queue.get_nowait()
-            except queue.Empty:
-                pass
-            self._frame_queue.put_nowait(frame)
+                self._frame_queue.put_nowait(frame)
+                return
+            except queue.Full:
+                try:
+                    self._frame_queue.get_nowait()
+                except queue.Empty:
+                    pass
 
     def open(self) -> SensorStreams:
         """Block until camera intrinsics received, then return SensorStreams.
@@ -309,4 +310,10 @@ class LiveSource:
 
     def stop(self) -> None:
         """Signal the frame iterator to stop."""
-        self._frame_queue.put(None)
+        # Drain queue to ensure put succeeds without blocking
+        while not self._frame_queue.empty():
+            try:
+                self._frame_queue.get_nowait()
+            except queue.Empty:
+                break
+        self._frame_queue.put_nowait(None)
