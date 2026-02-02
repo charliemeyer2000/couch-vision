@@ -4,19 +4,17 @@ import cv2
 import numpy as np
 
 
-# Cost value constants
-COST_UNKNOWN = -1 # not the end of the world to drive on
+# Cost value constants (Nav2 OccupancyGrid: 0=free, 100=lethal, -1=unknown)
 COST_FREE = 0
-COST_LANE = 80
-COST_FOV_BOUNDARY = 99
+COST_LANE = 50
+COST_UNSEEN = 98
 COST_LETHAL = 100
 
 # BGR colors for visualization
 _COLOR_MAP = {
-    COST_UNKNOWN: (0, 0, 0),        # black
     COST_FREE: (0, 200, 0),         # green
     COST_LANE: (0, 200, 200),       # yellow
-    COST_FOV_BOUNDARY: (50, 50, 50),  # dark gray
+    COST_UNSEEN: (50, 50, 50),      # dark gray
     COST_LETHAL: (0, 0, 220),       # red
 }
 

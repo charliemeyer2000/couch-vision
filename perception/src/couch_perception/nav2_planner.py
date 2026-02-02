@@ -11,6 +11,7 @@ Visualization via foxglove_bridge (ws://localhost:8765).
 """
 
 import argparse
+import json
 import math
 import os
 import threading
@@ -31,7 +32,7 @@ from nav_msgs.msg import OccupancyGrid, Path
 from geometry_msgs.msg import PoseStamped
 from sensor_msgs.msg import CompressedImage, Image, Imu, PointCloud2, PointField, NavSatFix
 from visualization_msgs.msg import Marker
-from std_msgs.msg import Header, ColorRGBA
+from std_msgs.msg import Header, ColorRGBA, String
 from builtin_interfaces.msg import Time as RosTime, Duration as RosDuration
 
 from nav2_simple_commander.robot_navigator import BasicNavigator
@@ -351,7 +352,7 @@ class Nav2Planner:
         config: PipelineConfig,
         dest_lat: float = 38.036830,
         dest_lon: float = -78.503577,
-        lookahead_m: float = 15.0,
+        lookahead_m: float = 8.0,
         republish_sensors: bool = True,
     ) -> None:
         self._node = node
@@ -408,6 +409,14 @@ class Nav2Planner:
         self._pc_lanes_pub = node.create_publisher(PointCloud2, "/perception/pointcloud/lanes", qos)
         self._pc_det_pub = node.create_publisher(PointCloud2, "/perception/pointcloud/detections", qos)
 
+        # Dynamic destination control (from Foxglove panel)
+        self._status_pub = node.create_publisher(String, "/nav/status", qos)
+        self._dest_sub = node.create_subscription(
+            String, "/nav/set_destination", self._on_destination_command, qos,
+        )
+        self._status_timer = node.create_timer(1.0, self._publish_status)
+        self._start_override: tuple[float, float] | None = None
+
         if republish_sensors:
             self._camera_pub = node.create_publisher(CompressedImage, "/camera/image/compressed", qos)
             self._depth_pub = node.create_publisher(Image, "/camera/depth/image", qos)
@@ -433,6 +442,36 @@ class Nav2Planner:
         self._gps_cov_cache: list[np.ndarray] = []
 
         self._frame_num = 0
+
+    def _on_destination_command(self, msg: String) -> None:
+        try:
+            data = json.loads(msg.data)
+            self._dest_lat = data["dest_lat"]
+            self._dest_lon = data["dest_lon"]
+            if data.get("api_key"):
+                self._api_key = data["api_key"]
+            if "lookahead_m" in data:
+                self._lookahead_m = data["lookahead_m"]
+            if data.get("start_lat") is not None and data.get("start_lon") is not None:
+                self._start_override = (data["start_lat"], data["start_lon"])
+            self._route_resolved = False
+            self._route_enu = None
+            print(f"\nDestination updated: ({self._dest_lat}, {self._dest_lon})")
+        except Exception as e:
+            print(f"\nFailed to parse destination command: {e}")
+
+    def _publish_status(self) -> None:
+        status = {
+            "api_key_configured": bool(self._api_key),
+            "route_resolved": self._route_resolved,
+            "current_dest_lat": self._dest_lat,
+            "current_dest_lon": self._dest_lon,
+            "route_points": len(self._route_enu) if self._route_enu is not None else 0,
+            "ekf_initialized": self._ekf.initialized,
+        }
+        msg = String()
+        msg.data = json.dumps(status)
+        self._status_pub.publish(msg)
 
     def run(self, streams: SensorStreams) -> None:
         """Process frames from any source. Blocks until source is exhausted or interrupted."""
@@ -485,13 +524,17 @@ class Nav2Planner:
         print(f"  ARKit frame aligned (dt={nearest.timestamp - gps_timestamp:.2f}s)")
 
     def _try_resolve_route(self, gps_fixes: list[GpsFix]) -> None:
-        """Query Google Maps route on first GPS fix (one-time)."""
+        """Query Google Maps route on first GPS fix or when destination changes."""
         if self._route_resolved or not self._api_key or not gps_fixes:
             return
         self._route_resolved = True
-        g0 = gps_fixes[0]
-        print(f"Querying Google Maps: ({g0.latitude:.6f}, {g0.longitude:.6f}) → ({self._dest_lat}, {self._dest_lon})")
-        route_gps = _get_google_maps_route(g0.latitude, g0.longitude, self._dest_lat, self._dest_lon, self._api_key)
+        if self._start_override:
+            start_lat, start_lon = self._start_override
+            self._start_override = None
+        else:
+            start_lat, start_lon = gps_fixes[0].latitude, gps_fixes[0].longitude
+        print(f"Querying Google Maps: ({start_lat:.6f}, {start_lon:.6f}) → ({self._dest_lat}, {self._dest_lon})")
+        route_gps = _get_google_maps_route(start_lat, start_lon, self._dest_lat, self._dest_lon, self._api_key)
         if route_gps:
             route_xy = _route_to_enu(route_gps)
             self._route_enu = _resample_path(route_xy, step_size=0.5)
@@ -663,6 +706,7 @@ class Nav2Planner:
 
     def shutdown(self) -> None:
         """Clean up Nav2 and ROS2 resources."""
+        self._status_timer.cancel()
         self._navigator.lifecycleShutdown()
 
 
@@ -688,7 +732,7 @@ def main() -> None:
     parser.add_argument("--subsample-lane", type=int, default=2)
     parser.add_argument("--subsample-bbox", type=int, default=8)
     parser.add_argument("--playback-rate", type=float, default=1.0)
-    parser.add_argument("--lookahead", type=float, default=15.0,
+    parser.add_argument("--lookahead", type=float, default=8.0,
                         help="Lookahead distance on Google Maps route (meters)")
     args = parser.parse_args()
 
