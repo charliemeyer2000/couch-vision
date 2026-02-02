@@ -35,6 +35,7 @@ jobs:
               - 'cyclonedds.xml'
             perception:
               - 'perception/src/**'
+              - 'perception/tests/**'
               - 'perception/Dockerfile*'
               - 'perception/docker-compose*.yml'
               - 'perception/pyproject.toml'
@@ -182,6 +183,25 @@ jobs:
           issuer-id: ${{ secrets.APPSTORE_ISSUER_ID }}
           api-key-id: ${{ secrets.APPSTORE_API_KEY_ID }}
           api-private-key: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
+
+  perception-test:
+    name: Perception unit tests
+    runs-on: ubuntu-latest
+    needs: [lint, changes]
+    if: needs.changes.outputs.perception == 'true'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Run geometry & costmap tests
+        working-directory: perception
+        run: |
+          uv run --group dev pytest tests/test_benchmark.py \
+            -k "TestProjection or TestCostmap" \
+            --benchmark-disable \
+            -v
 
   bridge-docker:
     name: Build & Publish Bridge Docker Image
