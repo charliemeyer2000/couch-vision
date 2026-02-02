@@ -144,7 +144,7 @@ perception/          # Python perception package (uv project)
 │   ├── yolop_detector.py    # YOLOP (TensorRT FP16 > CUDA > CPU)
 │   ├── costmap_runner.py    # Costmap generation
 │   ├── bev_projection_runner.py
-│   ├── nav2_planner_runner.py
+│   ├── nav2_planner.py       # Nav2 + EKF + perception (bag or live)
 │   └── ...
 └── tests/           # pytest + pytest-benchmark
 scripts/             # Setup scripts

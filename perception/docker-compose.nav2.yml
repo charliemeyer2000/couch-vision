@@ -10,6 +10,12 @@ services:
       - ../bags:/bags:ro
     environment:
       - GOOGLE_MAPS_API_KEY=${GOOGLE_MAPS_API_KEY:-}
+      - LIVE_MODE=${LIVE_MODE:-}
+      - TOPIC_PREFIX=${TOPIC_PREFIX:-/iphone}
+      - DEST_LAT=${DEST_LAT:-38.036830}
+      - DEST_LON=${DEST_LON:--78.503577}
+      - LOOKAHEAD=${LOOKAHEAD:-15.0}
+    network_mode: "${NETWORK_MODE:-bridge}"
     command: [
       "--bag", "/bags/${BAG_FILE:-walk_around_university_all_data.mcap}",
       "--playback-rate", "${PLAYBACK_RATE:-1.0}",

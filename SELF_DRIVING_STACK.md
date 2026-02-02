@@ -356,14 +356,14 @@ Foxglove layout showing live camera, point cloud, GPS on map, IMU plots, and cou
 ### Phase 2: GPS Waypoint Navigation 🗺️
 **Goal:** Given two GPS coordinates (start, destination), plan and visualize a path
 
-**Status:** In Progress — Google Maps routing integrated into nav2_planner_runner, EKF consolidated into perception package
+**Status:** In Progress — Google Maps routing integrated into nav2_planner, EKF consolidated into perception package
 
 **Prerequisites:** Phase 1 (GPS streaming verified in Foxglove)
 
 **Does NOT require hardware** — path planning and visualization can be tested without motors. The couch just won't move yet.
 
-#### Existing Work: `nav2_planner_runner.py` (PR #12)
-Google Maps routing is now integrated into the full Nav2 planning pipeline (`perception/src/couch_perception/nav2_planner_runner.py`). It:
+#### Existing Work: `nav2_planner.py` (PR #12)
+Google Maps routing is now integrated into the full Nav2 planning pipeline (`perception/src/couch_perception/nav2_planner.py`). It:
 - Calls Google Maps Directions API for a walking route between two GPS points
 - Converts GPS waypoints to local ENU frame (origin: UVA Rotunda `38.035853,-78.503307`)
 - Runs full perception pipeline (YOLOv8 + YOLOP) to build ego-centric costmaps
@@ -373,7 +373,7 @@ Google Maps routing is now integrated into the full Nav2 planning pipeline (`per
 - Runs in Docker via `make full-stack` with Nav2 + foxglove_bridge + perception
 - Requires `GOOGLE_MAPS_API_KEY` env var (stored in `.env`, gitignored)
 
-The standalone `nav/` directory has been deleted — all routing logic lives in nav2_planner_runner now.
+The standalone `nav/` directory has been deleted — all routing logic lives in nav2_planner now.
 
 #### Architecture
 ```
@@ -429,7 +429,7 @@ get this working please.
 - [x] Test with `bags/university_intersect_gps_only.mcap` and `bags/2026-01-29_12-10-44/walk_around_university_all_data.mcap`
 - [x] Bag files uploaded to public S3 bucket (`s3://couch-vision-bags/`)
 - [x] Consolidated EKF/geo/bag_reader into `perception/` package (PR #12) — deleted standalone `ekf/` directory
-- [x] Integrated EKF into nav2_planner_runner for real-time localization during planning
+- [x] Integrated EKF into nav2_planner for real-time localization during planning
 
 #### EKF Configuration
 ```yaml
@@ -523,7 +523,7 @@ Given two GPS coordinates, a `nav_msgs/Path` is planned and visible in Foxglove.
 - [x] Add detection overlay to rviz layout (perception overlay panel)
 - [x] BEV projection: depth + camera intrinsics → 3D point clouds with IMU rotation (`bev_projection_runner.py`)
 - [x] Ego-centric costmap generation: drivable area (cost 0), lane lines (cost 80), obstacles (cost 100), FOV boundary (cost 99) (`costmap_runner.py`)
-- [x] Nav2 integration: costmap → OccupancyGrid → Nav2 planner → nav_msgs/Path (`nav2_planner_runner.py`)
+- [x] Nav2 integration: costmap → OccupancyGrid → Nav2 planner → nav_msgs/Path (`nav2_planner.py`)
 - [x] Docker full-stack: Nav2 + foxglove_bridge + perception in one container (`Dockerfile.nav2`, `make full-stack`)
 - [x] YOLOP drivable area + lane line segmentation integrated into costmap
 - [x] Perception pipeline refactored into shared modules (PR #12):
@@ -952,7 +952,7 @@ couch-vision/
 │   │   ├── costmap_runner.py        # Costmap generation + Foxglove viz
 │   │   ├── costmap_visualizer.py    # Costmap → color image rendering
 │   │   ├── bev_projection_runner.py # BEV point cloud projection + Foxglove viz
-│   │   ├── nav2_planner_runner.py   # Full Nav2 pipeline: perception + EKF + routing + planning
+│   │   ├── nav2_planner.py   # Full Nav2 pipeline: perception + EKF + routing + planning
 │   │   ├── runner.py                # Simple 2D detection runner (no 3D)
 │   │   ├── ros_node.py              # ROS2 perception node
 │   │   ├── yolov8_detector.py       # YOLOv8 detection (auto: TensorRT > CUDA > MPS > CPU)
