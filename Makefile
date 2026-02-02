@@ -52,7 +52,8 @@ help:
 	@echo "  make perception BAG=path.mcap         Run YOLOv8+YOLOP on bag"
 	@echo "  make perception-node                  Run live perception ROS2 node"
 	@echo "  make costmap BAG=path.mcap            Generate costmap from bag"
-	@echo "  make full-stack BAG=path.mcap         Perception + Nav2 planning (Docker)"
+	@echo "  make full-stack BAG=path.mcap         Perception + Nav2 planning (Docker, bag replay)"
+	@echo "  make full-stack                       Live mode — subscribes to ROS2 topics"
 	@echo ""
 	@echo "Testing:"
 	@echo "  make test                             Run perception tests"
@@ -133,7 +134,10 @@ costmap:
 
 full-stack:
 	@[ -f .env ] && set -a && . ./.env && set +a; \
-	cd perception && BAG_FILE=$(patsubst bags/%,%,$(BAG)) PLAYBACK_RATE=$(or $(RATE),1.0) DEST_LAT=$(or $(DEST_LAT),38.036830) DEST_LON=$(or $(DEST_LON),-78.503577) LOOKAHEAD=$(or $(LOOKAHEAD),15.0) docker compose -f docker-compose.nav2.yml up --build
+	cd perception && \
+	$(if $(BAG),BAG_FILE=$(patsubst bags/%,%,$(BAG)) PLAYBACK_RATE=$(or $(RATE),1.0),LIVE_MODE=1 TOPIC_PREFIX=$(or $(PREFIX),/iphone) NETWORK_MODE=host) \
+	DEST_LAT=$(or $(DEST_LAT),38.036830) DEST_LON=$(or $(DEST_LON),-78.503577) LOOKAHEAD=$(or $(LOOKAHEAD),15.0) \
+	docker compose -f docker-compose.nav2.yml up --build
 
 # === Testing ===
 

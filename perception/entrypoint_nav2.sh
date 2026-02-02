@@ -15,10 +15,20 @@ sleep 5
 
 # Run our planner node.
 # Source the venv but keep ROS2 system packages on PYTHONPATH.
-echo "Starting Nav2 planner runner..."
+echo "Starting Nav2 planner..."
 source /perception/.venv/bin/activate
 export PYTHONPATH="/perception/src:${PYTHONPATH}"
-python -m couch_perception.nav2_planner_runner "$@"
+
+if [ -n "$LIVE_MODE" ]; then
+    python -m couch_perception.nav2_planner \
+        --topic-prefix "${TOPIC_PREFIX:-/iphone}" \
+        --dest-lat "${DEST_LAT:-38.036830}" \
+        --dest-lon "${DEST_LON:--78.503577}" \
+        --lookahead "${LOOKAHEAD:-15.0}" \
+        "$@"
+else
+    python -m couch_perception.nav2_planner "$@"
+fi
 
 # Cleanup
 kill $NAV2_PID 2>/dev/null || true
