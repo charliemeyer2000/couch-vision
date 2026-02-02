@@ -143,7 +143,6 @@ class PerceptionPipeline:
         return "cpu"
 
     def shutdown(self) -> None:
-        """Clean up thread pool resources."""
         if self._cpu_executor:
             self._cpu_executor.shutdown(wait=False)
             self._cpu_executor = None

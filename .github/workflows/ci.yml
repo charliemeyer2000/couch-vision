@@ -331,6 +331,9 @@ jobs:
             type=sha
             type=raw,value=latest,enable={{is_default_branch}}
 
+      # CI builds amd64 only. arm64 (Jetson) builds natively on-device via
+      # `make full-stack` because the Jetson base image (dustynv/pytorch)
+      # requires CUDA/TensorRT and is too slow to cross-compile via QEMU.
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
@@ -342,7 +345,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Upload image as artifact
+      - name: Save image for PR testing
         if: github.event_name == 'pull_request'
         run: |
           docker save charliemeyer2000/couch-vision-perception:sha-${GITHUB_SHA::7} | gzip > perception-image.tar.gz
