@@ -110,24 +110,22 @@ def _get_google_maps_route(
     return snapped
 
 
+_TMERC_PROJ = (
+    f"+proj=tmerc +lat_0={ROTUNDA_LAT} +lon_0={ROTUNDA_LON} "
+    f"+k=1 +x_0=0 +y_0=0 +ellps=WGS84 +datum=WGS84 +units=m +no_defs"
+)
+
+
 def _enu_to_geodetic(x: float, y: float) -> tuple[float, float]:
-    """Convert ENU (x=east, y=north) back to (lat, lon) via inverse tmerc projection."""
-    proj_string = (
-        f"+proj=tmerc +lat_0={ROTUNDA_LAT} +lon_0={ROTUNDA_LON} "
-        f"+k=1 +x_0=0 +y_0=0 +ellps=WGS84 +datum=WGS84 +units=m +no_defs"
-    )
-    tfm = Transformer.from_crs(proj_string, "EPSG:4326", always_xy=True)
+    """Convert ENU (x=east, y=north) back to (lat, lon)."""
+    tfm = Transformer.from_crs(_TMERC_PROJ, "EPSG:4326", always_xy=True)
     lon, lat = tfm.transform(x, y)
     return lat, lon
 
 
 def _route_to_enu(route_gps: list[tuple[float, float]]) -> np.ndarray:
     """Convert GPS route to ENU coordinates relative to Rotunda. Returns (N, 2)."""
-    proj_string = (
-        f"+proj=tmerc +lat_0={ROTUNDA_LAT} +lon_0={ROTUNDA_LON} "
-        f"+k=1 +x_0=0 +y_0=0 +ellps=WGS84 +datum=WGS84 +units=m +no_defs"
-    )
-    tfm = Transformer.from_crs("EPSG:4326", proj_string, always_xy=True)
+    tfm = Transformer.from_crs("EPSG:4326", _TMERC_PROJ, always_xy=True)
     return np.array(
         [tfm.transform(lon, lat) for lat, lon in route_gps], dtype=np.float64
     )
@@ -468,12 +466,11 @@ class Nav2Planner:
         """Handle clicked point from Foxglove 3D panel — set as new destination."""
         x, y = msg.point.x, msg.point.y
         lat, lon = _enu_to_geodetic(x, y)
-        print(f"\nClicked point: ENU=({x:.1f}, {y:.1f}) → GPS=({lat:.6f}, {lon:.6f})")
+        print(f"\nClicked point: ENU=({x:.1f}, {y:.1f}) → dest=({lat:.6f}, {lon:.6f})")
         self._dest_lat = lat
         self._dest_lon = lon
         self._route_resolved = False
         self._route_enu = None
-        print(f"Destination updated to ({lat:.6f}, {lon:.6f}). Will re-route on next frame.")
 
     def _on_destination_command(self, msg: String) -> None:
         try:
@@ -711,8 +708,9 @@ class Nav2Planner:
                     path.header = _header(frame.timestamp)
                     self._path_pub.publish(path)
                     self._latest_path = path
-            except Exception:
-                pass
+            except Exception as e:
+                if self._frame_num % 10 == 0:
+                    print(f"\nPlanner failed: {e}")
             self._plan_future = None
 
         # Submit new Nav2 planning in background

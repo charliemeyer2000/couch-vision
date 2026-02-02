@@ -23,7 +23,7 @@ def costmap_to_color_image(grid: np.ndarray) -> np.ndarray:
     """Convert a costmap (int8 values) to a BGR color image.
 
     Args:
-        grid: (H, W) array with values in {-1, 0, 80, 99, 100}.
+        grid: (H, W) array with values in {0, 50, 98, 100}.
 
     Returns:
         (H, W, 3) uint8 BGR image.
