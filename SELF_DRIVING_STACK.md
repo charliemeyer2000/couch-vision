@@ -430,6 +430,7 @@ get this working please.
 - [x] Bag files uploaded to public S3 bucket (`s3://couch-vision-bags/`)
 - [x] Consolidated EKF/geo/bag_reader into `perception/` package (PR #12) — deleted standalone `ekf/` directory
 - [x] Integrated EKF into nav2_planner for real-time localization during planning
+- [x] ARKit VIO odometry (~30Hz) fused into EKF alongside GPS+IMU (PR #17) — frame alignment computed on first GPS fix
 
 #### EKF Configuration
 ```yaml
@@ -957,7 +958,7 @@ couch-vision/
 │   │   ├── yolop_detector.py        # YOLOP segmentation (auto: TensorRT FP16 > CUDA > CPU)
 │   │   ├── camera_model.py          # Camera intrinsics + projection
 │   │   ├── bag_reader.py            # MCAP bag reader (SyncedFrame output)
-│   │   ├── ekf.py                   # EKF: IMU + GPS fusion
+│   │   ├── ekf.py                   # EKF: IMU + GPS + ARKit odom fusion
 │   │   ├── geo.py                   # GPS → ENU conversion
 │   │   └── visualization.py         # 2D detection overlay
 │   ├── tests/
@@ -1135,7 +1136,7 @@ foxglove_bridge is built from source on the Jetson at `~/ros2_jazzy/`. It requir
 - **No VLA for now.** Team considered NVIDIA Alpamayo but it requires 24GB+ VRAM (won't fit on Orin Nano's 8GB). Classical perception stack (YOLO + Nav2) is more debuggable and faster. VLA can be explored later on workstation as a parallel "advisor" that doesn't control the couch directly.
 - **GPS waypoint navigation** uses Nav2's built-in GPS waypoint follower + `navsat_transform_node` from `robot_localization`. No custom code needed for WGS84→UTM conversion.
 - **Perception on Jetson only.** YOLOv8n INT8 via TensorRT (not DeepStream — ultralytics handles export directly). Workstation (5090) reserved for experiments, not in the critical path.
-- **Platform-specific torch via uv sources.** `pyproject.toml` uses `[tool.uv.sources]` with `sys_platform` markers to pull CUDA torch from `pypi.jetson-ai-lab.io` on Linux and CPU torch from `download.pytorch.org/whl/cpu` on Mac. Jetson needs Python 3.10 (only version with CUDA wheels), Mac uses 3.12. Torch 2.9.1 on Jetson requires `libcudss` not available on JetPack 6 — pinned to `<=2.8.0`.
+- **Platform-specific torch via uv sources.** `pyproject.toml` uses `[tool.uv.sources]` with `sys_platform` + `platform_machine` markers: Jetson (linux/aarch64) → Jetson CUDA index, CI (linux/x86_64) + Mac → PyTorch CPU index. Jetson needs Python 3.10 (only version with CUDA wheels), Mac uses 3.12. Torch 2.9.1 on Jetson requires `libcudss` not available on JetPack 6 — pinned to `<=2.8.0`.
 - **Auto device detection.** `YOLOv8Detector` auto-selects cuda > mps > cpu and prefers `.engine` (TensorRT) over `.pt` if the engine file exists alongside the weights.
 
 ---
@@ -1152,4 +1153,4 @@ foxglove_bridge is built from source on the Jetson at `~/ros2_jazzy/`. It requir
 ---
 
 *Last updated: 2026-02-02*
-*Current phase: Phase 3 perception + Nav2 working end-to-end in both bag replay and live mode (`make full-stack`). Standalone runners consolidated into `nav2_planner.py`. Phase 2 EKF + Google Maps routing integrated. Phase 1 complete. Phase 0 hardware unblocked in parallel.*
+*Current phase: Phase 3 perception + Nav2 working end-to-end in both bag replay and live mode (`make full-stack`). Standalone runners consolidated into `nav2_planner.py`. Phase 2 EKF fuses IMU + GPS + ARKit odom + Google Maps routing. Phase 1 complete. Phase 0 hardware unblocked in parallel.*
