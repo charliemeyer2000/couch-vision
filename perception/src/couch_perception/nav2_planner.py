@@ -290,7 +290,6 @@ def _make_ego_marker(timestamp: float) -> Marker:
 def _make_route_path(route_ego: np.ndarray, timestamp: float, max_points: int = 200) -> Path:
     msg = Path()
     msg.header = _header(timestamp)
-    # Subsample long routes to avoid creating thousands of PoseStamped objects per frame
     step = max(1, len(route_ego) // max_points)
     for i in range(0, len(route_ego), step):
         ps = PoseStamped()
@@ -378,7 +377,7 @@ class Nav2Planner:
             max_speed=3.0,
         )
 
-        # Google Maps route (resolved lazily on first GPS fix)
+        # Google Maps route (resolved on first GPS fix)
         self._api_key = os.environ.get("GOOGLE_MAPS_API_KEY")
         if not self._api_key:
             print("WARNING: GOOGLE_MAPS_API_KEY not set. Will use fixed goal fallback.")
@@ -409,14 +408,13 @@ class Nav2Planner:
         self._pc_lanes_pub = node.create_publisher(PointCloud2, "/perception/pointcloud/lanes", qos)
         self._pc_det_pub = node.create_publisher(PointCloud2, "/perception/pointcloud/detections", qos)
 
-        # Sensor republishers (bag mode only — in live mode the bridge publishes these)
         if republish_sensors:
             self._camera_pub = node.create_publisher(CompressedImage, "/camera/image/compressed", qos)
             self._depth_pub = node.create_publisher(Image, "/camera/depth/image", qos)
             self._imu_pub = node.create_publisher(Imu, "/imu", qos)
             self._gps_pub = node.create_publisher(NavSatFix, "/gps/fix", qos)
 
-        # Reusable pose messages
+        # Poses
         self._goal_pose = PoseStamped()
         self._goal_pose.header.frame_id = "map"
         self._goal_pose.pose.orientation.w = 1.0
@@ -424,7 +422,7 @@ class Nav2Planner:
         self._start_pose.header.frame_id = "map"
         self._start_pose.pose.orientation.w = 1.0
 
-        # EKF tracking state
+        # EKF tracking indices
         self._gps_idx = 0
         self._imu_idx = 0
         self._prev_imu_t: float | None = None
@@ -445,7 +443,7 @@ class Nav2Planner:
         print(f"\nDone. Processed {self._frame_num} frames.")
 
     def _ensure_gps_enu(self, gps_fixes: list[GpsFix]) -> None:
-        """Convert any new GPS fixes to ENU (incremental — handles growing lists)."""
+        """Convert any new GPS fixes to ENU (incremental)."""
         while len(self._gps_enu_cache) < len(gps_fixes):
             g = gps_fixes[len(self._gps_enu_cache)]
             enu = geodetic_to_enu(g.latitude, g.longitude, g.altitude)
@@ -454,7 +452,7 @@ class Nav2Planner:
             self._gps_cov_cache.append(np.diag([cov[0], cov[4], cov[8]]))
 
     def _try_init_ekf(self, gps_fixes: list[GpsFix], imu_samples: list[ImuSample]) -> None:
-        """Lazily initialize EKF once we have at least one GPS fix and one IMU sample."""
+        """Initialize EKF on first GPS fix + IMU sample."""
         if self._ekf.initialized:
             return
         if not gps_fixes or not imu_samples:
@@ -484,7 +482,6 @@ class Nav2Planner:
     ) -> None:
         t0 = time.perf_counter()
 
-        # Snapshot list lengths to avoid races with LiveSource's growing lists
         n_imu = len(imu_samples)
         n_gps = len(gps_fixes)
 
@@ -540,7 +537,6 @@ class Nav2Planner:
         goal_x = np.clip(goal_x, -half, half)
         goal_y = np.clip(goal_y, -half, half)
 
-        # Republish raw sensors (bag mode only)
         if self._republish_sensors:
             cam_msg = CompressedImage()
             cam_msg.header = _header(frame.timestamp, "camera")
@@ -698,7 +694,6 @@ def main() -> None:
 
     try:
         planner.run(streams)
-        # In live mode, run blocks indefinitely. In bag mode, it returns after all frames.
         if not live_mode:
             print("Press Ctrl+C to stop.")
             while True:

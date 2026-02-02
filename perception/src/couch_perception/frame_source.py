@@ -159,7 +159,6 @@ class LiveSource:
             NavSatFix, self._topic(self._gps_suffix), self._on_gps, sensor_qos
         )
 
-        # Use message_filters for image+depth synchronization
         import message_filters
 
         image_sub = message_filters.Subscriber(
@@ -238,13 +237,11 @@ class LiveSource:
         if self._intrinsics is None:
             return
 
-        # Decode compressed image
         buf = np.frombuffer(bytes(image_msg.data), dtype=np.uint8)
         bgr = cv2.imdecode(buf, cv2.IMREAD_COLOR)
         if bgr is None:
             return
 
-        # Decode depth
         if depth_msg.encoding == "32FC1":
             depth = np.frombuffer(bytes(depth_msg.data), dtype=np.float32).reshape(
                 depth_msg.height, depth_msg.width
@@ -271,7 +268,6 @@ class LiveSource:
             orientation=self._latest_orientation,
         )
 
-        # Non-blocking put — drop oldest if full (backpressure)
         while True:
             try:
                 self._frame_queue.put_nowait(frame)
@@ -310,7 +306,6 @@ class LiveSource:
 
     def stop(self) -> None:
         """Signal the frame iterator to stop."""
-        # Drain queue to ensure put succeeds without blocking
         while not self._frame_queue.empty():
             try:
                 self._frame_queue.get_nowait()
