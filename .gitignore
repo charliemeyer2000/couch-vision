@@ -37,3 +37,8 @@ infra/*.tfstate
 infra/*.tfstate.backup
 infra/.terraform.lock.hcl
 infra/lambda/*.zip
+
+# models
+*.pt
+*.engine
+*.pth

@@ -308,7 +308,7 @@ Couch drives with keyboard control, `/wheel_odom` publishes from encoders
 ### Phase 1: Sensor Verification & Visualization
 **Goal:** iPhone data streaming end-to-end, visualized in Foxglove
 
-**Status:** In Progress — streaming works, Foxglove connected, layout needed
+**Status:** In Progress — all sensor topics verified including PointCloud2, Foxglove layout complete
 
 The iOS app is built and streaming 18 topics. The bridge and foxglove_bridge are running on Jetson. This phase is about verifying data quality and building a proper visualization layout.
 
@@ -326,8 +326,8 @@ The iOS app is built and streaming 18 topics. The bridge and foxglove_bridge are
   - [x] Topic graph panel
 - [x] **Publish couch bounding box marker** — `visualization_msgs/Marker` from bridge on `/couch/marker` at `base_link`
 - [x] Verify topic data quality (via `make verify`, see `verify_bag.py`):
-  - [x] `/iphone/camera/arkit/image/compressed` — 4.5 Hz effective, clear JPEG frames
-  - [ ] `/iphone/lidar/points` — PointCloud2 not recorded in current bags (0 messages)
+  - [x] `/iphone/camera/arkit/image/compressed` — 10.5–18.7 Hz effective, clear JPEG frames
+  - [x] `/iphone/lidar/points` — 8,094 messages at 38.6 Hz, XYZI float32, valid depth range 0.1–5.9m
   - [x] `/iphone/imu` — 98.9 Hz effective, orientation/angular vel/linear accel all reasonable
   - [x] `/iphone/gps/fix` — 1 Hz, 156 fixes, clear walk path on scatter plot
   - [x] `/tf` — 27876 messages, ARKit pose transforms present
@@ -356,23 +356,24 @@ Foxglove layout showing live camera, point cloud, GPS on map, IMU plots, and cou
 ### Phase 2: GPS Waypoint Navigation 🗺️
 **Goal:** Given two GPS coordinates (start, destination), plan and visualize a path
 
-**Status:** In Progress — `nav/basic_nav_node.py` generates Google Maps routes and publishes to Foxglove
+**Status:** In Progress — Google Maps routing integrated into nav2_planner_runner, EKF consolidated into perception package
 
 **Prerequisites:** Phase 1 (GPS streaming verified in Foxglove)
 
 **Does NOT require hardware** — path planning and visualization can be tested without motors. The couch just won't move yet.
 
-#### Existing Work: `nav/basic_nav_node.py` (PR #3, @wkaisertexas)
-A standalone path generator already exists. It:
-- Calls Google Maps Directions API for a driving route between two GPS points
-- Snaps the route to roads via Google Roads API
-- Projects to local ENU frame (origin: UVA Rotunda `38.035853,-78.503307`)
-- Resamples with spline interpolation at 0.5m spacing
-- Publishes to Foxglove directly via `foxglove-sdk` (NOT ROS2):
-  - `/gps_path` (GeoJSON LineString), `/path_points` (PointCloud), `/location` (origin)
+#### Existing Work: `nav2_planner_runner.py` (PR #12)
+Google Maps routing is now integrated into the full Nav2 planning pipeline (`perception/src/couch_perception/nav2_planner_runner.py`). It:
+- Calls Google Maps Directions API for a walking route between two GPS points
+- Converts GPS waypoints to local ENU frame (origin: UVA Rotunda `38.035853,-78.503307`)
+- Runs full perception pipeline (YOLOv8 + YOLOP) to build ego-centric costmaps
+- Feeds costmaps into Nav2 planner server (running in Docker) to generate obstacle-aware paths
+- Publishes via ROS2: `/map/costmap` (OccupancyGrid), `/plan` (nav_msgs/Path), `/goal_pose`, sensor data
+- Uses EKF (consolidated in `perception/src/couch_perception/ekf.py`) for IMU+GPS fusion
+- Runs in Docker via `make full-stack` with Nav2 + foxglove_bridge + perception
 - Requires `GOOGLE_MAPS_API_KEY` env var (stored in `.env`, gitignored)
 
-This handles path generation and visualization. Remaining work is integrating with ROS2 Nav2 for actual navigation (publishing `nav_msgs/Path`, feeding into the Nav2 planner/controller).
+The standalone `nav/` directory has been deleted — all routing logic lives in nav2_planner_runner now.
 
 #### Architecture
 ```
@@ -419,16 +420,16 @@ get this working please.
 ---
 
 
-- [x] Build custom EKF (numpy) fusing IMU + GPS in map frame (`ekf/src/couch_ekf/ekf.py`)
-- [x] Build UKF variant for comparison (`ekf/src/couch_ekf/ukf.py`)
-- [x] Convert NavSatFix to ENU relative to rotunda (38.035853, -78.503307) (`ekf/src/couch_ekf/geo.py`)
-- [x] Read from MCAP bag files for offline testing (`ekf/src/couch_ekf/bag_reader.py`)
+- [x] Build custom EKF (numpy) fusing IMU + GPS in map frame (now at `perception/src/couch_perception/ekf.py`)
+- [x] Build UKF variant for comparison (removed — EKF sufficient)
+- [x] Convert NavSatFix to ENU relative to rotunda (38.035853, -78.503307) (`perception/src/couch_perception/geo.py`)
+- [x] Read from MCAP bag files for offline testing (`perception/src/couch_perception/bag_reader.py`)
 - [x] Output localization at 100 Hz
-- [x] Create matplotlib dashboard (covariance over time + localized path) (`ekf/src/couch_ekf/dashboard.py`)
+- [x] Create matplotlib dashboard (covariance over time + localized path)
 - [x] Test with `bags/university_intersect_gps_only.mcap` and `bags/2026-01-29_12-10-44/walk_around_university_all_data.mcap`
-- [x] Grid search scripts for EKF/UKF parameter tuning (`ekf/grid_search.py`, `ekf/ukf_grid_search.py`)
-- [x] Dockerized with CI (Docker Hub: `charliemeyer2000/couch-vision-ekf`)
 - [x] Bag files uploaded to public S3 bucket (`s3://couch-vision-bags/`)
+- [x] Consolidated EKF/geo/bag_reader into `perception/` package (PR #12) — deleted standalone `ekf/` directory
+- [x] Integrated EKF into nav2_planner_runner for real-time localization during planning
 
 #### EKF Configuration
 ```yaml
@@ -489,7 +490,7 @@ Given two GPS coordinates, a `nav_msgs/Path` is planned and visible in Foxglove.
 ### Phase 3: Perception — Object Detection 👁️
 **Goal:** Detect pedestrians, vehicles, stop signs, and lanes in real-time on Jetson
 
-**Status:** In Progress — offline bag processing (PR #10), ROS2 node + Docker implemented
+**Status:** In Progress — offline bag processing, costmap generation, BEV projection, Nav2 integration all working (PRs #10, #12). Perception pipeline refactored into shared modules. TensorRT optimization and configurable pipeline added.
 
 **Prerequisites:** Phase 1 (camera streaming verified)
 
@@ -497,11 +498,12 @@ Given two GPS coordinates, a `nav_msgs/Path` is planned and visible in Foxglove.
 
 #### Approach
 - **YOLOv8n with INT8 quantization** via TensorRT on Jetson Orin Nano
-- Measured: **57 FPS (TensorRT INT8), 37 FPS (CUDA PyTorch), ~2 FPS (CPU)**
+- **YOLOP segmentation** with TensorRT FP16 backend (2.1x faster than PyTorch)
+- Configurable pipeline via `PipelineConfig` + YAML presets (`configs/default.yaml`, `fast.yaml`, `accurate.yaml`)
 - Publishes `vision_msgs/Detection2DArray` on `/perception/detections`
 - Detection classes: pedestrian, vehicle, stop sign, traffic light, lane markings
-- Optional YOLOP segmentation for drivable area + lane lines
-- Later: feed detections into Nav2 costmap for obstacle avoidance
+- YOLOP segmentation for drivable area + lane lines (can be skipped via `segmentation_model: "none"` for ~3x speedup)
+- Feed detections into Nav2 costmap for obstacle avoidance
 
 #### Alternative Approaches (if YOLOv8 doesn't fit)
 - `jetson-inference` + `ros_deep_learning` — simpler setup, built-in ROS2 node, has Vehicle/Person/RoadSign
@@ -519,16 +521,46 @@ Given two GPS coordinates, a `nav_msgs/Path` is planned and visible in Foxglove.
 - [x] Test detection on live camera feed (via bag playback on Jetson)
 - [x] Verify FPS is acceptable — **37 FPS (CUDA), 57 FPS (TensorRT INT8)** on Jetson Orin Nano
 - [x] Add detection overlay to rviz layout (perception overlay panel)
+- [x] BEV projection: depth + camera intrinsics → 3D point clouds with IMU rotation (`bev_projection_runner.py`)
+- [x] Ego-centric costmap generation: drivable area (cost 0), lane lines (cost 80), obstacles (cost 100), FOV boundary (cost 99) (`costmap_runner.py`)
+- [x] Nav2 integration: costmap → OccupancyGrid → Nav2 planner → nav_msgs/Path (`nav2_planner_runner.py`)
+- [x] Docker full-stack: Nav2 + foxglove_bridge + perception in one container (`Dockerfile.nav2`, `make full-stack`)
+- [x] YOLOP drivable area + lane line segmentation integrated into costmap
+- [x] Perception pipeline refactored into shared modules (PR #12):
+  - `projection.py` — shared geometry (IMU rotation, depth projection, mask extraction)
+  - `perception_pipeline.py` — PerceptionPipeline class (detect → project → rotate)
+  - `frame_source.py` — BagSource with playback pacing
+- [x] pytest-benchmark infrastructure (`make test`, `make benchmark`) for profiling on Mac and Jetson
+- [x] YOLOP TensorRT FP16 backend: exported seg-only ONNX → TRT engine, 2.1x speedup (80ms → 37.5ms on Jetson)
+- [x] Configurable perception pipeline (`PipelineConfig` dataclass + YAML presets):
+  - `configs/default.yaml` — current behavior (YOLOP + YOLOv8n)
+  - `configs/fast.yaml` — skip YOLOP, higher subsampling (~45 FPS)
+  - `configs/accurate.yaml` — dense subsampling + CUDA streams
+- [x] YOLOP postprocessing optimization: argmax at model resolution then nearest-neighbor upsample (saves computation on all devices)
+- [x] `--config` CLI arg wired through all runners + `CONFIG=` Makefile variable
+- [ ] CUDA stream concurrency for parallel YOLOP + YOLOv8 inference (implemented but untested on Jetson)
 - [ ] Evaluate detection quality for target classes (pedestrians, stop signs, vehicles)
 - [ ] If COCO classes insufficient, fine-tune on custom dataset (Roboflow)
-- [ ] Integrate detections into Nav2 costmap (obstacle layer from detections)
+- [ ] Live data source (replace BagSource with LiveSource reading from ROS2 topics)
 
-#### Jetson Benchmark Results (YOLOv8n, 640×640)
+#### Jetson Benchmark Results (Orin Nano, 640×640)
+
+**Individual models:**
 | Backend | Avg Latency | FPS |
 |---------|------------|-----|
-| CPU (PyTorch) | ~500ms | ~2 |
-| CUDA (PyTorch) | 26.7ms | 37.4 |
-| TensorRT INT8 | 17.7ms | 56.6 |
+| YOLOv8n CPU (PyTorch) | ~500ms | ~2 |
+| YOLOv8n CUDA (PyTorch) | 26.7ms | 37.4 |
+| YOLOv8n TensorRT INT8 | 17.7ms | 56.6 |
+| YOLOP CUDA (PyTorch) | 80.1ms | 12.5 |
+| YOLOP TensorRT FP16 | 37.5ms | 26.7 |
+
+**Full pipeline + costmap (end-to-end):**
+| Config | YOLOP | YOLOv8 | Total | FPS |
+|--------|-------|--------|-------|-----|
+| default (TRT) | 37.5ms | 20.9ms | ~64ms | ~15.6 |
+| fast (no seg) | skip | 20.9ms | ~22ms | ~45 |
+
+Non-inference code (projection, rotation, costmap build) is sub-millisecond — not a bottleneck.
 
 #### Deliverable
 Live bounding boxes on camera feed in Foxglove. `/detections` topic publishing `Detection2DArray` at 10+ FPS.
@@ -901,57 +933,52 @@ pip3 install numpy scipy transforms3d
 ## Project Directory Structure
 
 ```
-~/couch_ws/
-├── src/
-│   ├── couch_bringup/              # Launch files, params, rviz configs
-│   │   ├── CMakeLists.txt
-│   │   ├── package.xml
-│   │   ├── launch/
-│   │   │   ├── couch_bringup.launch.py
-│   │   │   ├── sensors.launch.py
-│   │   │   ├── navigation.launch.py
-│   │   │   └── slam.launch.py
-│   │   ├── config/
-│   │   │   ├── nav2_params.yaml
-│   │   │   ├── ekf_params.yaml
-│   │   │   ├── navsat_params.yaml
-│   │   │   └── slam_params.yaml
-│   │   └── foxglove/
-│   │       └── couch_layout.json
-│   │
-│   ├── couch_perception/           # Object detection + sensor processing
-│   │   ├── setup.py
-│   │   ├── package.xml
-│   │   ├── couch_perception/
-│   │   │   ├── __init__.py
-│   │   │   ├── yolo_detector.py       # YOLOv8 inference node
-│   │   │   ├── pointcloud_merger.py   # Phase 6
-│   │   │   └── marker_publisher.py    # Couch bounding box marker
-│   │   └── launch/
-│   │       └── perception.launch.py
-│   │
-│   ├── couch_hardware/             # Motor control, hardware interfaces
-│   │   ├── CMakeLists.txt
-│   │   ├── package.xml
-│   │   ├── src/
-│   │   │   └── couch_hardware_interface.cpp
-│   │   ├── include/
-│   │   │   └── couch_hardware/
-│   │   │       └── couch_hardware_interface.hpp
-│   │   ├── urdf/
-│   │   │   └── couch.urdf.xacro
-│   │   └── config/
-│   │       └── controllers.yaml
-│   │
-│   └── couch_msgs/                 # Custom messages (if needed)
-│       ├── CMakeLists.txt
-│       ├── package.xml
-│       └── msg/
-│           └── CouchStatus.msg
-│
-└── maps/
-    ├── house.yaml
-    └── house.pgm
+couch-vision/
+├── perception/                      # Python perception package (uv project)
+│   ├── pyproject.toml
+│   ├── Dockerfile                   # Perception-only container
+│   ├── Dockerfile.nav2              # Full-stack: Nav2 + foxglove_bridge + perception
+│   ├── docker-compose.yml
+│   ├── configs/                     # Pipeline presets
+│   │   ├── default.yaml             # YOLOP + YOLOv8n (current behavior)
+│   │   ├── fast.yaml                # Skip YOLOP, high subsampling (~45 FPS)
+│   │   └── accurate.yaml            # Dense subsampling + CUDA streams
+│   ├── src/couch_perception/
+│   │   ├── __init__.py
+│   │   ├── config.py                # PipelineConfig dataclass + YAML loading
+│   │   ├── perception_pipeline.py   # PerceptionPipeline: detect → project → rotate
+│   │   ├── projection.py            # Shared geometry (IMU rotation, depth projection)
+│   │   ├── frame_source.py          # BagSource + SensorStreams abstraction
+│   │   ├── costmap_runner.py        # Costmap generation + Foxglove viz
+│   │   ├── costmap_visualizer.py    # Costmap → color image rendering
+│   │   ├── bev_projection_runner.py # BEV point cloud projection + Foxglove viz
+│   │   ├── nav2_planner_runner.py   # Full Nav2 pipeline: perception + EKF + routing + planning
+│   │   ├── runner.py                # Simple 2D detection runner (no 3D)
+│   │   ├── ros_node.py              # ROS2 perception node
+│   │   ├── yolov8_detector.py       # YOLOv8 detection (auto: TensorRT > CUDA > MPS > CPU)
+│   │   ├── yolop_detector.py        # YOLOP segmentation (auto: TensorRT FP16 > CUDA > CPU)
+│   │   ├── camera_model.py          # Camera intrinsics + projection
+│   │   ├── bag_reader.py            # MCAP bag reader (SyncedFrame output)
+│   │   ├── ekf.py                   # EKF: IMU + GPS fusion
+│   │   ├── geo.py                   # GPS → ENU conversion
+│   │   └── visualization.py         # 2D detection overlay
+│   ├── tests/
+│   │   ├── conftest.py              # Shared fixtures (device, dummy frames)
+│   │   └── test_benchmark.py        # pytest-benchmark tests for all components
+│   └── scripts/
+│       ├── benchmark.py
+│       ├── export_tensorrt.py
+│       └── diagnose_projection.py
+├── bridge/
+│   └── ios_bridge.py                # iPhone TCP → ROS2 bridge
+├── CouchVision/                     # iOS app (Swift/Xcode)
+├── bags/                            # MCAP bag files (gitignored)
+├── foxglove/
+│   └── couch_layout.json
+├── rviz/
+│   └── couchvision.rviz
+├── Makefile                         # make full-stack, make costmap, make bev-projection, etc.
+└── SELF_DRIVING_STACK.md            # This file
 ```
 
 ---
@@ -1047,9 +1074,33 @@ This section is for Claude Code instances and other agents to record learnings, 
 
 - **Adding a new topic requires updating BOTH the iOS app AND the Python bridge.** The bridge (`bridge/ios_bridge.py`) manually parses CDR bytes for each message type. If you add a new topic/message on the iOS side but don't add a corresponding entry in `_topic_types` and a `_parse_*` method in the bridge, messages will be silently dropped (with a warning log). This is the most common mistake when adding new publishers. Always update: (1) iOS message struct, (2) CDREncoder, (3) sensor manager, (4) SensorCoordinator, (5) bridge `_topic_types` + `_parsers` + parser method.
 
+### Perception Pipeline Architecture (PR #12)
+
+The perception package was refactored to eliminate code duplication across runners:
+
+- **`PerceptionPipeline`** (`perception_pipeline.py`): Shared detect→project→rotate loop. Call `process_frame(SyncedFrame)` → get `PerceptionResult` with drivable_pts, lane_pts, det_pts, det_groups.
+- **`BagSource`** (`frame_source.py`): Wraps bag_reader with playback pacing. `open()` → `SensorStreams` (frames iterator + GPS fixes + IMU samples). Future `LiveSource` would subscribe to ROS2 topics.
+- **`projection.py`**: Shared geometry utilities (IMU rotation, depth camera model, mask/bbox pixel extraction). Public API — no more cross-module private function imports.
+- **Runners** are now thin entry points: create `BagSource` + `PerceptionPipeline`, loop over frames, publish results.
+
+### Docker Full-Stack (Dockerfile.nav2)
+
+The `make full-stack` command runs Nav2 + foxglove_bridge + perception in a single Docker container (via Colima on macOS). Key details:
+- Uses `foxglove_bridge` (C++ ROS2 node) to auto-forward ALL ROS2 topics to Foxglove on port 8765
+- Nav2 planner_server runs inside the container, receives costmaps via ROS2 topics
+- On macOS: requires Colima (`colima start --cpu 4 --memory 8`), NOT Docker Desktop
+- Foxglove connect to `ws://localhost:8765` to visualize camera, pointclouds, costmap, and planned path
+
 ### Helpful Commands
 <!-- Agents: add useful commands here -->
 - `make foxglove` — starts Foxglove WebSocket bridge on port 8765 (Linux/Jetson only). Connect from Foxglove desktop app at `ws://<jetson-ip>:8765`. Preferred over RViz2 for remote visualization — supports compressed images natively, has GPS map panel, runs on any OS.
+- `make full-stack BAG=<path>` — runs Nav2 + foxglove_bridge + perception in Docker. Connect Foxglove to `ws://localhost:8765`.
+- `make costmap BAG=<path>` — costmap generation + Foxglove visualization (no Nav2).
+- `make bev-projection BAG=<path>` — BEV point cloud projection + Foxglove visualization.
+- `make perception BAG=<path>` — simple 2D detection runner (video output).
+- `make test` — run perception pytest suite.
+- `make benchmark` — run pytest-benchmark profiling.
+- All perception targets accept `CONFIG=configs/fast.yaml` (or any YAML) to swap pipeline config.
 
 ### foxglove_bridge Build (Jetson)
 
@@ -1061,6 +1112,25 @@ foxglove_bridge is built from source on the Jetson at `~/ros2_jazzy/`. It requir
 4. **Build:** `colcon build --packages-select rosx_introspection foxglove_bridge --symlink-install --cmake-args -DBUILD_TESTING=OFF`
 
 **Does NOT build on macOS** — the foxglove SDK ships precompiled binaries for Linux only (x86_64 and aarch64). macOS/ARM64 is not supported.
+
+### TensorRT Optimization (Jetson Orin Nano)
+
+- **YOLOP full model fails TRT export** — the detection head causes "insufficient workspace" errors. Solution: export a segmentation-only wrapper that strips the detection head (only seg outputs are used anyway).
+- **YOLOP fp16 via `.half()`** — fails because input tensor stays float32 but weights become float16. Not a viable shortcut.
+- **torch.cuda.amp autocast** — 20% slower than fp32 for YOLOP on Jetson. Don't bother.
+- **torch.compile** — requires Triton, which is not available on Jetson. Won't work.
+- **TRT engine build** takes ~8 minutes on Jetson for YOLOP seg-only. Use `trtexec --memPoolSize=workspace:2048MiB` (not deprecated `--workspace` flag).
+- **YOLOPDetector auto-detects TRT**: if `weights/yolop_seg.engine` exists, uses TRT backend; otherwise falls back to PyTorch. Works seamlessly on Mac (no engine file → PyTorch).
+- **Postprocessing optimization**: argmax at model output resolution (80×80) then nearest-neighbor upsample to full resolution, instead of bilinear-upsampling float logits then argmax. Same output, less computation.
+
+### Configurable Perception Pipeline
+
+- `PipelineConfig` dataclass in `config.py` controls model selection, subsampling, device, CUDA streams.
+- `from_yaml(path)` loads YAML config; `preset(name)` loads built-in presets.
+- Setting `segmentation_model: "none"` skips YOLOP entirely — useful for detection-only use cases (~3x faster).
+- CUDA stream concurrency (`cuda_streams: true`) runs YOLOP and YOLOv8 on separate CUDA streams. Implemented but not yet benchmarked on Jetson.
+- All runners accept `--config` CLI arg. Makefile accepts `CONFIG=` variable.
+- Backward compatible: no config arg = default behavior (YOLOP + YOLOv8n).
 
 ### Architecture Decisions
 <!-- Agents: record decisions and rationale here -->
@@ -1083,5 +1153,5 @@ foxglove_bridge is built from source on the Jetson at `~/ros2_jazzy/`. It requir
 
 ---
 
-*Last updated: 2026-01-30*
-*Current phase: Phase 3 perception nearly complete (TensorRT INT8 exported, CUDA working on Jetson at 37-57 FPS, ROS2 node + Docker ready). Phase 2 EKF complete. Phase 1 data verification still open. Phase 0 hardware unblocked in parallel.*
+*Last updated: 2026-02-01*
+*Current phase: Phase 3 perception pipeline working end-to-end (costmap → Nav2 path planning in Docker). Phase 2 EKF consolidated into perception, Google Maps routing integrated. Phase 1 complete. Phase 0 hardware unblocked in parallel.*
