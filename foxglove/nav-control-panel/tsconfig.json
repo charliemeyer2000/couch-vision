@@ -4,7 +4,7 @@
   "compilerOptions": {
     "rootDir": "./src",
     "outDir": "./dist",
-    "lib": ["DOM"],
+    "lib": ["ES2020", "DOM"],
     "target": "es6",
     "noFallthroughCasesInSwitch": true,
     "noImplicitAny": true,
