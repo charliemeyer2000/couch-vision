@@ -1,0 +1,8 @@
+# Accurate config — full pipeline, lower subsampling for denser point clouds
+segmentation_model: yolop
+detection_model: yolov8n
+detection_confidence: 0.15
+subsample_drivable: 2
+subsample_lane: 1
+subsample_bbox: 4
+cuda_streams: true

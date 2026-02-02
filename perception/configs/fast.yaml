@@ -1,0 +1,9 @@
+# Fast config — detection only, higher subsampling
+# Skips YOLOP segmentation entirely (~45ms saved on Jetson)
+segmentation_model: none
+detection_model: yolov8n
+detection_confidence: 0.25
+subsample_drivable: 8
+subsample_lane: 4
+subsample_bbox: 16
+cuda_streams: false

@@ -117,17 +117,19 @@ verify:
 
 # === Perception ===
 
+CONFIG ?=
+
 perception:
-	cd perception && uv run couch-perception --bag $(abspath $(BAG)) --output output/
+	cd perception && uv run couch-perception --bag $(abspath $(BAG)) --output output/ $(if $(CONFIG),--config $(abspath $(CONFIG))) $(ARGS)
 
 bev-projection:
-	cd perception && uv run couch-bev-projection --bag $(abspath $(BAG)) $(ARGS)
+	cd perception && uv run couch-bev-projection --bag $(abspath $(BAG)) $(if $(CONFIG),--config $(abspath $(CONFIG))) $(ARGS)
 
 perception-node:
 	@$(ROS2_SETUP) && cd perception && ([ -f .venv/pyvenv.cfg ] && grep -q "include-system-site-packages = true" .venv/pyvenv.cfg || uv venv --python $(PERC_PYTHON) --system-site-packages) && uv sync --quiet && uv run python -m couch_perception.ros_node $(ARGS)
 
 costmap:
-	cd perception && uv run couch-costmap --bag $(abspath $(BAG)) $(ARGS)
+	cd perception && uv run couch-costmap --bag $(abspath $(BAG)) $(if $(CONFIG),--config $(abspath $(CONFIG))) $(ARGS)
 
 full-stack:
 	@[ -f .env ] && set -a && . ./.env && set +a; \

@@ -86,13 +86,17 @@ def _postprocess(
     pad_h_int = int(round(pad_h))
     pad_w_int = int(round(pad_w))
 
+    # Argmax at model resolution, then nearest-neighbor upsample class IDs.
+    # Cheaper than bilinear-upsampling float logits then argmax.
     da_crop = da_seg_out[:, :, pad_h_int : (_IMG_SIZE - pad_h_int), pad_w_int : (_IMG_SIZE - pad_w_int)]
-    da_up = torch.nn.functional.interpolate(da_crop, size=(img_h, img_w), mode="bilinear")
-    da_mask = torch.max(da_up, 1)[1].squeeze().cpu().numpy().astype(np.uint8)
+    da_cls = torch.max(da_crop, 1)[1].unsqueeze(1).float()
+    da_mask = torch.nn.functional.interpolate(da_cls, size=(img_h, img_w), mode="nearest")
+    da_mask = da_mask.squeeze().to(torch.uint8).cpu().numpy()
 
     ll_crop = ll_seg_out[:, :, pad_h_int : (_IMG_SIZE - pad_h_int), pad_w_int : (_IMG_SIZE - pad_w_int)]
-    ll_up = torch.nn.functional.interpolate(ll_crop, size=(img_h, img_w), mode="bilinear")
-    ll_mask = torch.max(ll_up, 1)[1].squeeze().cpu().numpy().astype(np.uint8)
+    ll_cls = torch.max(ll_crop, 1)[1].unsqueeze(1).float()
+    ll_mask = torch.nn.functional.interpolate(ll_cls, size=(img_h, img_w), mode="nearest")
+    ll_mask = ll_mask.squeeze().to(torch.uint8).cpu().numpy()
 
     return YOLOPResult(drivable_mask=da_mask, lane_mask=ll_mask)
 

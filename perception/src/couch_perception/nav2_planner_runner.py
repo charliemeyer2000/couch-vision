@@ -401,6 +401,7 @@ def process_bag(
     subsample_bbox: int = 8,
     playback_rate: float = 1.0,
     lookahead_m: float = 15.0,
+    config: "PipelineConfig | None" = None,
 ) -> None:
     """Process bag with EKF localization, Google Maps routing, and Nav2 planning."""
 
@@ -493,14 +494,17 @@ def process_bag(
     print("Nav2 planner is active!")
 
     # Load perception
-    pipeline = PerceptionPipeline(
-        device=device,
-        conf=conf,
-        model_path="weights/yolov8n.pt",
-        subsample_drivable=subsample_drivable,
-        subsample_lane=subsample_lane,
-        subsample_bbox=subsample_bbox,
-    )
+    from couch_perception.config import PipelineConfig
+
+    if config is None:
+        config = PipelineConfig(
+            device=device,
+            detection_confidence=conf,
+            subsample_drivable=subsample_drivable,
+            subsample_lane=subsample_lane,
+            subsample_bbox=subsample_bbox,
+        )
+    pipeline = PerceptionPipeline(config=config)
     print(f"YOLOv8 loaded (device={pipeline.device})")
 
     # Poses
@@ -688,6 +692,7 @@ def main() -> None:
         description="Nav2 path planning with EKF localization and Google Maps routing"
     )
     parser.add_argument("--bag", required=True, help="Path to .mcap bag file")
+    parser.add_argument("--config", default=None, help="Path to pipeline config YAML")
     parser.add_argument("--dest-lat", type=float, default=38.036830,
                         help="Destination latitude")
     parser.add_argument("--dest-lon", type=float, default=-78.503577,
@@ -703,6 +708,10 @@ def main() -> None:
                         help="Lookahead distance on Google Maps route (meters)")
     args = parser.parse_args()
 
+    from couch_perception.config import PipelineConfig
+
+    config = PipelineConfig.from_yaml(args.config) if args.config else None
+
     process_bag(
         bag_path=args.bag,
         dest_lat=args.dest_lat,
@@ -715,6 +724,7 @@ def main() -> None:
         subsample_bbox=args.subsample_bbox,
         playback_rate=args.playback_rate,
         lookahead_m=args.lookahead,
+        config=config,
     )
 
 

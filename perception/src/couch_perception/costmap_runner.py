@@ -248,16 +248,20 @@ def process_bag(
     subsample_lane: int = 2,
     subsample_bbox: int = 8,
     playback_rate: float = 1.0,
+    config: "PipelineConfig | None" = None,
 ) -> None:
     """Process a bag file, build costmaps, and publish via Foxglove WebSocket."""
+    from couch_perception.config import PipelineConfig
 
-    pipeline = PerceptionPipeline(
-        device=device,
-        conf=conf,
-        subsample_drivable=subsample_drivable,
-        subsample_lane=subsample_lane,
-        subsample_bbox=subsample_bbox,
-    )
+    if config is None:
+        config = PipelineConfig(
+            device=device,
+            detection_confidence=conf,
+            subsample_drivable=subsample_drivable,
+            subsample_lane=subsample_lane,
+            subsample_bbox=subsample_bbox,
+        )
+    pipeline = PerceptionPipeline(config=config)
     print(f"YOLOv8 loaded (device={pipeline.device})")
 
     listener = _Listener()
@@ -321,6 +325,7 @@ def main() -> None:
         description="Generate Nav2-compatible costmaps from perception on MCAP bags"
     )
     parser.add_argument("--bag", required=True, help="Path to .mcap bag file")
+    parser.add_argument("--config", default=None, help="Path to pipeline config YAML")
     parser.add_argument("--device", default=None, help="Torch device (cuda, mps, cpu)")
     parser.add_argument("--conf", type=float, default=0.3, help="YOLOv8 confidence threshold")
     parser.add_argument("--max-frames", type=int, default=None, help="Process at most N frames")
@@ -342,6 +347,10 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    from couch_perception.config import PipelineConfig
+
+    config = PipelineConfig.from_yaml(args.config) if args.config else None
+
     process_bag(
         bag_path=args.bag,
         device=args.device,
@@ -351,6 +360,7 @@ def main() -> None:
         subsample_lane=args.subsample_lane,
         subsample_bbox=args.subsample_bbox,
         playback_rate=args.playback_rate,
+        config=config,
     )
 
 
