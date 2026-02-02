@@ -523,7 +523,7 @@ Given two GPS coordinates, a `nav_msgs/Path` is planned and visible in Foxglove.
 - [x] Verify FPS is acceptable — **37 FPS (CUDA), 57 FPS (TensorRT INT8)** on Jetson Orin Nano
 - [x] Add detection overlay to rviz layout (perception overlay panel)
 - [x] BEV projection: depth + camera intrinsics → 3D point clouds with IMU rotation (`bev_projection_runner.py`)
-- [x] Ego-centric costmap generation: drivable area (cost 0), lane lines (cost 80), obstacles (cost 100), FOV boundary (cost 99) (`costmap_runner.py`)
+- [x] Ego-centric costmap generation: drivable area (cost 0), lane lines (cost 50), obstacles (cost 100), unseen (cost 98) (`costmap.py`)
 - [x] Nav2 integration: costmap → OccupancyGrid → Nav2 planner → nav_msgs/Path (`nav2_planner.py`)
 - [x] Docker full-stack: Nav2 + foxglove_bridge + perception in one container (`Dockerfile.nav2`, `make full-stack`)
 - [x] YOLOP drivable area + lane line segmentation integrated into costmap
@@ -973,7 +973,10 @@ couch-vision/
 ├── CouchVision/                     # iOS app (Swift/Xcode)
 ├── bags/                            # MCAP bag files (gitignored)
 ├── foxglove/
-│   └── couch_layout.json
+│   ├── couch_layout.json
+│   └── nav-control-panel/          # Foxglove extension (pnpm, TypeScript/React)
+│       ├── src/NavControlPanel.tsx  # Interactive nav panel (Leaflet map, GO button)
+│       └── src/index.ts
 ├── rviz/
 │   └── couchvision.rviz
 ├── Makefile                         # make full-stack, make costmap, make bev-projection, etc.
@@ -1091,6 +1094,22 @@ The `make full-stack` command runs Nav2 + foxglove_bridge + perception in a sing
 - On macOS: requires Colima (`colima start --cpu 4 --memory 8`), NOT Docker Desktop
 - Foxglove connect to `ws://localhost:8765` to visualize camera, pointclouds, costmap, and planned path
 
+### Foxglove Navigation Control Extension (PR #18)
+
+Custom Foxglove extension at `foxglove/nav-control-panel/` for interactive destination control:
+- **Leaflet map**: click=set destination, shift+click/right-click=set start, draggable markers
+- **GO button**: publishes to `/nav/set_destination` (std_msgs/String with JSON payload). Flashes green on send.
+- **Status bar**: shows backend destination vs panel destination (in sync / differs), EKF state, route points, API key status
+- **API key**: stored in localStorage. Backend key (from env var) takes precedence — warning only shows when neither panel nor backend has a key.
+- **Start location**: defaults to GPS, overridable via map or text input
+- Nav2 planner subscribes to `/nav/set_destination` and re-routes dynamically without restarting the pipeline
+- Nav2 planner publishes `/nav/status` (1Hz) with route state, enabling the sync indicator
+- Build: `cd foxglove/nav-control-panel && pnpm install && pnpm build`
+- Install: `pnpm local-install` (copies to `~/.foxglove-studio/extensions/`)
+- Panel appears as "Navigation Control [local]" in Foxglove panel dropdown
+- **CSP constraint**: Leaflet CSS injected inline (Electron blocks CDN scripts)
+- **Grid tuning (PR #18)**: 40m/0.3res → 20m/0.2res, lane cost 80→50, unseen areas collapsed into single cost 98 (was -1 unknown + 99 FOV boundary), Nav2 `allow_unknown=false`, inflation layer 1.0m radius, lookahead 15m→8m
+
 ### Helpful Commands
 <!-- Agents: add useful commands here -->
 - `make foxglove` — starts Foxglove WebSocket bridge on port 8765 (Linux/Jetson only). Connect from Foxglove desktop app at `ws://<jetson-ip>:8765`. Preferred over RViz2 for remote visualization — supports compressed images natively, has GPS map panel, runs on any OS.
@@ -1100,6 +1119,9 @@ The `make full-stack` command runs Nav2 + foxglove_bridge + perception in a sing
 - `make test` — run perception pytest suite.
 - `make benchmark` — run pytest-benchmark profiling.
 - Foxglove layout: import `foxglove/couch_layout.json` for sensor + nav2 visualization.
+- `make build-extension` — build Foxglove nav control extension (pnpm).
+- `make install-extension` — install extension to Foxglove desktop app.
+- `make lint-extension` — typecheck + ESLint + Prettier check.
 
 ### foxglove_bridge Build (Jetson)
 
@@ -1153,4 +1175,4 @@ foxglove_bridge is built from source on the Jetson at `~/ros2_jazzy/`. It requir
 ---
 
 *Last updated: 2026-02-02*
-*Current phase: Phase 3 perception + Nav2 working end-to-end in both bag replay and live mode (`make full-stack`). Standalone runners consolidated into `nav2_planner.py`. Phase 2 EKF fuses IMU + GPS + ARKit odom + Google Maps routing. Phase 1 complete. Phase 0 hardware unblocked in parallel.*
+*Current phase: Phase 3 perception + Nav2 working end-to-end in both bag replay and live mode (`make full-stack`). Foxglove extension for interactive destination control (PR #18). Costmap tuned for walking speed (20m grid, 0.2m res, unseen=98). Phase 2 EKF fuses IMU + GPS + ARKit odom + Google Maps routing. Phase 1 complete. Phase 0 hardware unblocked in parallel.*

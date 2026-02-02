@@ -12,7 +12,6 @@ iOS app that streams iPhone sensor data to ROS2 over TCP.
 |-----------|-------|----------------|
 | iOS App (Xcode) | ✅ | ❌ |
 | ROS2 Bridge | ✅ (dev) | ✅ (deploy) |
-| Foxglove Bridge | ❌ | ✅ |
 | Foxglove Viewer | ✅ | ❌ (headless) |
 
 **macOS** is for iOS development (Xcode + Swift) and visualization (Foxglove app).
@@ -30,10 +29,7 @@ make setup
 
 Installs: uv, xcodegen, SwiftLint, SwiftFormat, pre-commit, generates Xcode project.
 
-Optional — ROS2 for local testing (Apple Silicon native):
-```bash
-make setup-ros2
-```
+Optional — ROS2 for local testing (Apple Silicon native): `make setup` will prompt to install ROS2 at the end.
 
 ### Jetson Orin Nano (deployment)
 
@@ -80,21 +76,16 @@ make topics
 make hz T=/iphone/imu
 ```
 
-### 5. Visualize with Foxglove
+### 5. Visualize
 
-Start the Foxglove bridge on the Jetson:
+Use RViz2 on machines with ROS2 installed:
 ```bash
-ssh jetson-nano 'cd ~/couch-vision && make foxglove'
+make rviz
 ```
 
-Then open the [Foxglove desktop app](https://foxglove.dev) on your Mac and connect to:
-```
-ws://jetson-nano:8765
-```
+Or open [Foxglove](https://foxglove.dev) and connect to `ws://localhost:8765` (Docker full-stack) or `ws://jetson-nano:8765` (Jetson).
 
-All ROS2 topics on the Jetson are visible in Foxglove — compressed images, point clouds, IMU, GPS map, TF tree. No ROS2 installation needed on the viewing machine.
-
-> **Note:** `foxglove_bridge` only runs on the Jetson (Linux). The Foxglove *viewer* app runs on any OS. `make rviz` is available for local RViz2 on machines with ROS2 installed.
+Import `foxglove/couch_layout.json` for the default layout. Select "Navigation Control [local]" panel for interactive destination control (requires building the extension — see below).
 
 ## Bag Files
 
@@ -147,6 +138,9 @@ perception/          # Python perception package (uv project)
 │   ├── nav2_planner.py      # Nav2 + EKF + perception (bag or live)
 │   └── ...
 └── tests/           # pytest + pytest-benchmark
+foxglove/            # Foxglove config + extensions
+├── couch_layout.json  # Default panel layout
+└── nav-control-panel/ # Navigation Control extension (pnpm/TypeScript)
 scripts/             # Setup scripts
 ```
 
@@ -162,6 +156,11 @@ make bridge         # Start iOS TCP bridge
 # Perception + Nav2
 make full-stack BAG=path.mcap              # Perception + Nav2 (Docker, bag replay)
 make full-stack                            # Live mode (subscribes to ROS2 topics)
+
+# Foxglove Extension
+make build-extension    # Build nav control panel (pnpm)
+make install-extension  # Install to Foxglove desktop app
+make lint-extension     # Typecheck + ESLint + Prettier
 
 # Testing
 make test           # Run perception tests
@@ -183,7 +182,7 @@ make lint           # Run all linters (pre-commit)
 
 ### Pre-commit hooks
 
-Runs on commit: SwiftFormat, SwiftLint, ruff (Python).
+Runs on commit: SwiftFormat, SwiftLint, ruff (Python), ESLint + Prettier (TypeScript).
 
 Manual: `pre-commit run --all-files`
 
