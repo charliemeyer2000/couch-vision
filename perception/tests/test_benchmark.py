@@ -18,7 +18,7 @@ import torch
 
 from couch_perception.bag_reader import SyncedFrame
 from couch_perception.camera_model import make_camera_model
-from couch_perception.costmap_runner import build_costmap
+from couch_perception.costmap import build_costmap
 from couch_perception.projection import apply_imu_rotation, build_depth_camera_model, extract_mask_pixels
 
 

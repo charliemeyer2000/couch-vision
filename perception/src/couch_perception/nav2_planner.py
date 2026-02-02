@@ -42,7 +42,7 @@ from couch_perception.ekf import EKF
 from couch_perception.frame_source import BagSource, LiveSource, SensorStreams
 from couch_perception.geo import geodetic_to_enu, ROTUNDA_LAT, ROTUNDA_LON
 from couch_perception.perception_pipeline import PerceptionPipeline
-from couch_perception.costmap_runner import (
+from couch_perception.costmap import (
     build_costmap,
     GRID_CELLS,
     GRID_ORIGIN,

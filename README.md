@@ -142,9 +142,9 @@ perception/          # Python perception package (uv project)
 │   ├── perception_pipeline.py
 │   ├── yolov8_detector.py   # YOLOv8 (TensorRT > CUDA > MPS > CPU)
 │   ├── yolop_detector.py    # YOLOP (TensorRT FP16 > CUDA > CPU)
-│   ├── costmap_runner.py    # Costmap generation
-│   ├── bev_projection_runner.py
-│   ├── nav2_planner.py       # Nav2 + EKF + perception (bag or live)
+│   ├── costmap.py           # Costmap building logic
+│   ├── frame_source.py      # BagSource + LiveSource
+│   ├── nav2_planner.py      # Nav2 + EKF + perception (bag or live)
 │   └── ...
 └── tests/           # pytest + pytest-benchmark
 scripts/             # Setup scripts
@@ -159,12 +159,9 @@ make xcode          # Open Xcode project
 # ROS2 Bridge (Mac or Jetson)
 make bridge         # Start iOS TCP bridge
 
-# Perception
-make perception BAG=path.mcap              # Run YOLOv8+YOLOP on bag
-make costmap BAG=path.mcap                 # Generate costmap
-make bev-projection BAG=path.mcap          # BEV point cloud projection
-make full-stack BAG=path.mcap              # Perception + Nav2 (Docker)
-make perception BAG=path.mcap CONFIG=perception/configs/fast.yaml  # Use preset
+# Perception + Nav2
+make full-stack BAG=path.mcap              # Perception + Nav2 (Docker, bag replay)
+make full-stack                            # Live mode (subscribes to ROS2 topics)
 
 # Testing
 make test           # Run perception tests

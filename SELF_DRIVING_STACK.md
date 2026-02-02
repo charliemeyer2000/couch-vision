@@ -541,7 +541,7 @@ Given two GPS coordinates, a `nav_msgs/Path` is planned and visible in Foxglove.
 - [ ] CUDA stream concurrency for parallel YOLOP + YOLOv8 inference (implemented but untested on Jetson)
 - [ ] Evaluate detection quality for target classes (pedestrians, stop signs, vehicles)
 - [ ] If COCO classes insufficient, fine-tune on custom dataset (Roboflow)
-- [ ] Live data source (replace BagSource with LiveSource reading from ROS2 topics)
+- [x] Live data source: `LiveSource` in `frame_source.py` subscribes to ROS2 topics (PR #15)
 
 #### Jetson Benchmark Results (Orin Nano, 640×640)
 
@@ -948,12 +948,10 @@ couch-vision/
 │   │   ├── config.py                # PipelineConfig dataclass + YAML loading
 │   │   ├── perception_pipeline.py   # PerceptionPipeline: detect → project → rotate
 │   │   ├── projection.py            # Shared geometry (IMU rotation, depth projection)
-│   │   ├── frame_source.py          # BagSource + SensorStreams abstraction
-│   │   ├── costmap_runner.py        # Costmap generation + Foxglove viz
+│   │   ├── frame_source.py          # BagSource + LiveSource + SensorStreams
+│   │   ├── costmap.py               # Costmap building logic (build_costmap + grid constants)
 │   │   ├── costmap_visualizer.py    # Costmap → color image rendering
-│   │   ├── bev_projection_runner.py # BEV point cloud projection + Foxglove viz
-│   │   ├── nav2_planner.py   # Full Nav2 pipeline: perception + EKF + routing + planning
-│   │   ├── runner.py                # Simple 2D detection runner (no 3D)
+│   │   ├── nav2_planner.py          # Full Nav2 pipeline: perception + EKF + routing + planning
 │   │   ├── ros_node.py              # ROS2 perception node
 │   │   ├── yolov8_detector.py       # YOLOv8 detection (auto: TensorRT > CUDA > MPS > CPU)
 │   │   ├── yolop_detector.py        # YOLOP segmentation (auto: TensorRT FP16 > CUDA > CPU)
@@ -1079,9 +1077,10 @@ This section is for Claude Code instances and other agents to record learnings, 
 The perception package was refactored to eliminate code duplication across runners:
 
 - **`PerceptionPipeline`** (`perception_pipeline.py`): Shared detect→project→rotate loop. Call `process_frame(SyncedFrame)` → get `PerceptionResult` with drivable_pts, lane_pts, det_pts, det_groups.
-- **`BagSource`** (`frame_source.py`): Wraps bag_reader with playback pacing. `open()` → `SensorStreams` (frames iterator + GPS fixes + IMU samples). Future `LiveSource` would subscribe to ROS2 topics.
-- **`projection.py`**: Shared geometry utilities (IMU rotation, depth camera model, mask/bbox pixel extraction). Public API — no more cross-module private function imports.
-- **Runners** are now thin entry points: create `BagSource` + `PerceptionPipeline`, loop over frames, publish results.
+- **`BagSource` / `LiveSource`** (`frame_source.py`): Both produce `SensorStreams` (frames iterator + GPS fixes + IMU samples). `BagSource` reads MCAP bags with playback pacing. `LiveSource` subscribes to live ROS2 topics with `message_filters.ApproximateTimeSynchronizer` for image+depth sync.
+- **`projection.py`**: Shared geometry utilities (IMU rotation, depth camera model, mask/bbox pixel extraction).
+- **`costmap.py`**: Pure costmap building logic (`build_costmap` + grid constants). Extracted from the former `costmap_runner.py`.
+- **Single entry point**: `nav2_planner.py` handles both bag replay and live mode. Standalone runners (`runner.py`, `bev_projection_runner.py`, `costmap_runner.py`) were removed — their functionality is fully covered by `nav2_planner.py`.
 
 ### Docker Full-Stack (Dockerfile.nav2)
 
@@ -1094,13 +1093,12 @@ The `make full-stack` command runs Nav2 + foxglove_bridge + perception in a sing
 ### Helpful Commands
 <!-- Agents: add useful commands here -->
 - `make foxglove` — starts Foxglove WebSocket bridge on port 8765 (Linux/Jetson only). Connect from Foxglove desktop app at `ws://<jetson-ip>:8765`. Preferred over RViz2 for remote visualization — supports compressed images natively, has GPS map panel, runs on any OS.
-- `make full-stack BAG=<path>` — runs Nav2 + foxglove_bridge + perception in Docker. Connect Foxglove to `ws://localhost:8765`.
-- `make costmap BAG=<path>` — costmap generation + Foxglove visualization (no Nav2).
-- `make bev-projection BAG=<path>` — BEV point cloud projection + Foxglove visualization.
-- `make perception BAG=<path>` — simple 2D detection runner (video output).
+- `make full-stack BAG=<path>` — runs Nav2 + foxglove_bridge + perception in Docker (bag replay). Connect Foxglove to `ws://localhost:8765`.
+- `make full-stack` — live mode: subscribes to ROS2 topics from the iOS bridge. Requires bridge running.
+- `make full-stack DEST_LAT=38.036 DEST_LON=-78.503` — set navigation destination (defaults to UVA area).
 - `make test` — run perception pytest suite.
 - `make benchmark` — run pytest-benchmark profiling.
-- All perception targets accept `CONFIG=configs/fast.yaml` (or any YAML) to swap pipeline config.
+- Foxglove layout: import `foxglove/couch_layout.json` for sensor + nav2 visualization.
 
 ### foxglove_bridge Build (Jetson)
 
@@ -1153,5 +1151,5 @@ foxglove_bridge is built from source on the Jetson at `~/ros2_jazzy/`. It requir
 
 ---
 
-*Last updated: 2026-02-01*
-*Current phase: Phase 3 perception pipeline working end-to-end (costmap → Nav2 path planning in Docker). Phase 2 EKF consolidated into perception, Google Maps routing integrated. Phase 1 complete. Phase 0 hardware unblocked in parallel.*
+*Last updated: 2026-02-02*
+*Current phase: Phase 3 perception + Nav2 working end-to-end in both bag replay and live mode (`make full-stack`). Standalone runners consolidated into `nav2_planner.py`. Phase 2 EKF + Google Maps routing integrated. Phase 1 complete. Phase 0 hardware unblocked in parallel.*

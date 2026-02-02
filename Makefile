@@ -26,7 +26,7 @@ endif
 
 .PHONY: help setup xcode bridge \
         topics hz echo rviz bag bag-play verify \
-        perception bev-projection perception-node costmap full-stack \
+        perception-node full-stack \
         test benchmark lint deploy-jetson ip clean
 
 help:
@@ -49,11 +49,9 @@ help:
 	@echo "  make verify BAG=path                  Verify bag contents"
 	@echo ""
 	@echo "Perception:"
-	@echo "  make perception BAG=path.mcap         Run YOLOv8+YOLOP on bag"
-	@echo "  make perception-node                  Run live perception ROS2 node"
-	@echo "  make costmap BAG=path.mcap            Generate costmap from bag"
 	@echo "  make full-stack BAG=path.mcap         Perception + Nav2 planning (Docker, bag replay)"
 	@echo "  make full-stack                       Live mode — subscribes to ROS2 topics"
+	@echo "  make perception-node                  Run live perception ROS2 node (no Nav2)"
 	@echo ""
 	@echo "Testing:"
 	@echo "  make test                             Run perception tests"
@@ -120,17 +118,8 @@ verify:
 
 CONFIG ?=
 
-perception:
-	cd perception && uv run couch-perception --bag $(abspath $(BAG)) --output output/ $(if $(CONFIG),--config $(abspath $(CONFIG))) $(ARGS)
-
-bev-projection:
-	cd perception && uv run couch-bev-projection --bag $(abspath $(BAG)) $(if $(CONFIG),--config $(abspath $(CONFIG))) $(ARGS)
-
 perception-node:
 	@$(ROS2_SETUP) && cd perception && ([ -f .venv/pyvenv.cfg ] && grep -q "include-system-site-packages = true" .venv/pyvenv.cfg || uv venv --python $(PERC_PYTHON) --system-site-packages) && uv sync --quiet && uv run python -m couch_perception.ros_node $(ARGS)
-
-costmap:
-	cd perception && uv run couch-costmap --bag $(abspath $(BAG)) $(if $(CONFIG),--config $(abspath $(CONFIG))) $(ARGS)
 
 full-stack:
 	@[ -f .env ] && set -a && . ./.env && set +a; \
