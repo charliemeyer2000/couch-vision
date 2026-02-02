@@ -11,7 +11,17 @@ public final class LiveActivityManager {
     private var statsUpdateTimer: Timer?
     private weak var boundCoordinator: SensorCoordinator?
 
-    private init() {}
+    private init() {
+        endAllStaleActivities()
+    }
+
+    private func endAllStaleActivities() {
+        for activity in Activity<StreamingActivityAttributes>.activities {
+            Task {
+                await activity.end(nil, dismissalPolicy: .immediate)
+            }
+        }
+    }
 
     public func startActivity(coordinator: SensorCoordinator) {
         guard ActivityAuthorizationInfo().areActivitiesEnabled else {
@@ -72,7 +82,7 @@ public final class LiveActivityManager {
         boundCoordinator = nil
     }
 
-    private func endActivityImmediately() {
+    public func endActivityImmediately() {
         cancellables.removeAll()
         statsUpdateTimer?.invalidate()
         statsUpdateTimer = nil
@@ -152,15 +162,50 @@ public final class LiveActivityManager {
     }
 
     private func makeContentState(from coordinator: SensorCoordinator) -> StreamingActivityAttributes.ContentState {
-        StreamingActivityAttributes.ContentState(
+        let stats = coordinator.stats
+        let prefix = coordinator.config.topicPrefix
+        let staleCutoff = Date().addingTimeInterval(-3)
+
+        return StreamingActivityAttributes.ContentState(
             isConnected: coordinator.isConnected,
-            cameraActive: coordinator.cameraManager.state == .running,
-            lidarActive: coordinator.lidarManager.state == .running,
-            imuActive: coordinator.motionManager.state == .running,
-            gpsActive: coordinator.locationManager.state == .running,
-            environmentActive: coordinator.environmentManager.state == .running,
-            messageRate: coordinator.stats.values.reduce(0) { $0 + $1.averageHz },
-            bytesSent: coordinator.stats.values.reduce(0) { $0 + $1.bytesPublished }
+            cameraActive: coordinator.cameraManager.state == .running && hasRecentPublish(
+                stats: stats,
+                prefix: prefix,
+                containing: "camera",
+                since: staleCutoff
+            ),
+            lidarActive: coordinator.lidarManager.state == .running && hasRecentPublish(
+                stats: stats,
+                prefix: prefix,
+                containing: "lidar",
+                since: staleCutoff
+            ),
+            imuActive: coordinator.motionManager.state == .running && hasRecentPublish(
+                stats: stats,
+                prefix: prefix,
+                containing: "imu",
+                since: staleCutoff
+            ),
+            gpsActive: coordinator.locationManager.state == .running && hasRecentPublish(
+                stats: stats,
+                prefix: prefix,
+                containing: "gps",
+                since: staleCutoff
+            ),
+            environmentActive: coordinator.environmentManager.state == .running && hasRecentPublish(
+                stats: stats,
+                prefix: prefix,
+                containing: "magnetic_field",
+                since: staleCutoff
+            ),
+            messageRate: stats.values.reduce(0) { $0 + $1.averageHz },
+            bytesSent: stats.values.reduce(0) { $0 + $1.bytesPublished }
         )
+    }
+
+    private func hasRecentPublish(stats: [String: TopicStats], prefix: String, containing keyword: String, since cutoff: Date) -> Bool {
+        stats.contains { key, value in
+            key.hasPrefix(prefix) && key.contains(keyword) && (value.lastPublishTime ?? .distantPast) > cutoff
+        }
     }
 }

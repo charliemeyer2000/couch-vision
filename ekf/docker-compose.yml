@@ -1,7 +1,0 @@
-services:
-  ekf:
-    build: .
-    volumes:
-      - ../bags:/bags:ro
-      - ./output:/output
-    command: ["/bags/university_intersect_gps_only.mcap", "-o", "/output/dashboard.png", "--no-show"]

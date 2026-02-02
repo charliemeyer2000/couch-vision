@@ -1,7 +1,9 @@
 import SwiftUI
+import UIKit
 
 @main
 struct CouchVisionApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var coordinator: SensorCoordinator
     @Environment(\.scenePhase) private var scenePhase
 
@@ -26,5 +28,11 @@ struct CouchVisionApp: App {
                 break
             }
         }
+    }
+}
+
+final class AppDelegate: NSObject, UIApplicationDelegate {
+    func applicationWillTerminate(_ application: UIApplication) {
+        LiveActivityManager.shared.endActivityImmediately()
     }
 }

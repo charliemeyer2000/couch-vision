@@ -13,7 +13,7 @@ jobs:
     outputs:
       ios: ${{ steps.filter.outputs.ios }}
       bridge: ${{ steps.filter.outputs.bridge }}
-      ekf: ${{ steps.filter.outputs.ekf }}
+      perception: ${{ steps.filter.outputs.perception }}
       infra: ${{ steps.filter.outputs.infra }}
     steps:
       - uses: actions/checkout@v4
@@ -32,8 +32,15 @@ jobs:
               - 'bridge/uv.lock'
               - 'bridge/ios_bridge.py'
               - 'cyclonedds.xml'
-            ekf:
-              - 'ekf/**'
+            perception:
+              - 'perception/src/**'
+              - 'perception/Dockerfile*'
+              - 'perception/docker-compose*.yml'
+              - 'perception/pyproject.toml'
+              - 'perception/uv.lock'
+              - 'perception/config/**'
+              - 'perception/launch/**'
+              - 'perception/entrypoint_nav2.sh'
             infra:
               - 'infra/**'
 
@@ -225,26 +232,11 @@ jobs:
           path: bridge-image.tar.gz
           retention-days: 7
 
-  ekf-test:
-    name: EKF Tests
+  perception-docker:
+    name: Build & Publish Perception Docker Image
     runs-on: ubuntu-latest
-    needs: [changes]
-    if: needs.changes.outputs.ekf == 'true'
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
-
-      - name: Run tests
-        working-directory: ekf
-        run: uv run --extra dev pytest tests/ -v
-
-  ekf-docker:
-    name: Build & Publish EKF Docker Image
-    runs-on: ubuntu-latest
-    needs: [changes, ekf-test]
-    if: needs.changes.outputs.ekf == 'true'
+    needs: [lint, changes]
+    if: needs.changes.outputs.perception == 'true'
     steps:
       - uses: actions/checkout@v4
 
@@ -262,7 +254,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: charliemeyer2000/couch-vision-ekf
+          images: charliemeyer2000/couch-vision-perception
           tags: |
             type=sha
             type=raw,value=latest,enable={{is_default_branch}}
@@ -270,7 +262,8 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
-          context: ekf
+          context: perception
+          file: perception/Dockerfile.nav2
           push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -280,14 +273,14 @@ jobs:
       - name: Upload image as artifact
         if: github.event_name == 'pull_request'
         run: |
-          docker save charliemeyer2000/couch-vision-ekf:sha-${GITHUB_SHA::7} | gzip > ekf-image.tar.gz
+          docker save charliemeyer2000/couch-vision-perception:sha-${GITHUB_SHA::7} | gzip > perception-image.tar.gz
 
       - name: Upload artifact
         if: github.event_name == 'pull_request'
         uses: actions/upload-artifact@v4
         with:
-          name: ekf-docker-image
-          path: ekf-image.tar.gz
+          name: perception-docker-image
+          path: perception-image.tar.gz
           retention-days: 7
 
   infra:

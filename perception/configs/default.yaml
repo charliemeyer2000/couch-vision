@@ -1,0 +1,8 @@
+# Default config — matches current behavior
+segmentation_model: yolop
+detection_model: yolov8n
+detection_confidence: 0.3
+subsample_drivable: 4
+subsample_lane: 2
+subsample_bbox: 8
+cuda_streams: false
