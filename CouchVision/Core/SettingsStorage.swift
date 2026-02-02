@@ -6,6 +6,7 @@ enum SettingsStorage {
     private enum Key: String {
         case endpoint
         case topicPrefix
+        case selectedCamera
         case cameraResolution
         case cameraFrameRate
         case jpegQuality
@@ -23,6 +24,16 @@ enum SettingsStorage {
     static var topicPrefix: String {
         get { defaults.string(forKey: Key.topicPrefix.rawValue) ?? "/iphone" }
         set { defaults.set(newValue, forKey: Key.topicPrefix.rawValue) }
+    }
+
+    static var selectedCamera: CameraType? {
+        get {
+            guard let rawValue = defaults.string(forKey: Key.selectedCamera.rawValue) else {
+                return nil
+            }
+            return CameraType(rawValue: rawValue)
+        }
+        set { defaults.set(newValue?.rawValue, forKey: Key.selectedCamera.rawValue) }
     }
 
     static var cameraResolution: CameraConfig.Resolution {

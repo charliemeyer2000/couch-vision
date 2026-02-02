@@ -79,6 +79,15 @@ public enum CameraType: String, CaseIterable {
         self == .front ? .front : .back
     }
 
+    public var displayName: String {
+        switch self {
+        case .backWide: "Back Wide"
+        case .backUltraWide: "Back Ultra Wide"
+        case .backTelephoto: "Back Telephoto"
+        case .front: "Front"
+        }
+    }
+
     func frameId(prefix: String) -> String {
         "\(prefix)_camera_\(rawValue)"
     }
@@ -112,7 +121,17 @@ public final class CameraManager: NSObject, ObservableObject {
     }
 
     public var selectedCamera: CameraType = .backWide {
-        didSet { if state == .running, oldValue != selectedCamera { switchCamera(to: selectedCamera) } }
+        didSet {
+            if state == .running, oldValue != selectedCamera { switchCamera(to: selectedCamera) }
+        }
+    }
+
+    /// Returns the best default camera - prefers backWide, falls back to first available
+    public func bestAvailableCamera() -> CameraType? {
+        if availableCameras.contains(.backWide) {
+            return .backWide
+        }
+        return availableCameras.first
     }
 
     private var captureSession: AVCaptureSession?
@@ -126,8 +145,23 @@ public final class CameraManager: NSObject, ObservableObject {
 
     override public init() {
         super.init()
-        updateAvailableCameras()
+        updateAvailableCamerasSync()
+        // Auto-select best available camera if default isn't available
+        if !availableCameras.contains(selectedCamera), let best = availableCameras.first {
+            selectedCamera = best
+        }
         checkAvailability()
+    }
+
+    /// Synchronous version for init - updates availableCameras immediately
+    private func updateAvailableCamerasSync() {
+        var available: [CameraType] = []
+        for cameraType in CameraType.allCases {
+            if getDevice(for: cameraType) != nil {
+                available.append(cameraType)
+            }
+        }
+        availableCameras = available
     }
 
     private func updateAvailableCameras() {

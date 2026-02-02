@@ -99,6 +99,11 @@ public final class SensorCoordinator: ObservableObject {
         )
 
         cameraManager = CameraManager()
+        // Load saved camera selection if available and valid for this device
+        if let savedCamera = SettingsStorage.selectedCamera,
+           cameraManager.availableCameras.contains(savedCamera) {
+            cameraManager.selectedCamera = savedCamera
+        }
         cameraManager.config = CameraConfig(
             resolution: SettingsStorage.cameraResolution,
             frameRate: SettingsStorage.cameraFrameRate,
