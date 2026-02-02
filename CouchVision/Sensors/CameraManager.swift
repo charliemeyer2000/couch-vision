@@ -272,7 +272,7 @@ public final class CameraManager: NSObject, ObservableObject {
 
     private func switchCamera(to cameraType: CameraType) {
         guard availableCameras.contains(cameraType) else {
-            Log.app.warning("Camera \(cameraType) not available on this device")
+            Log.app.warning("Camera \(cameraType.rawValue) not available on this device")
             return
         }
 
