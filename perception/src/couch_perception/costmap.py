@@ -2,10 +2,9 @@
 
 Builds a Nav2-compatible occupancy grid centered at (0,0) with:
   - Drivable area → cost 0 (free)
-  - Lane lines → cost 80 (soft barrier)
+  - Lane lines → cost 50 (soft barrier, crossable)
   - Obstacles → cost 100 (lethal)
-  - Outside 120° FOV → cost 99 (high cost)
-  - Unknown → cost -1
+  - Unseen (outside FOV + unknown) → cost 98 (strongly avoided)
 """
 
 from __future__ import annotations
@@ -16,15 +15,14 @@ import numpy as np
 
 from couch_perception.costmap_visualizer import (
     COST_FREE,
-    COST_FOV_BOUNDARY,
     COST_LANE,
     COST_LETHAL,
-    COST_UNKNOWN,
+    COST_UNSEEN,
 )
 
 # Grid parameters
-GRID_SIZE_M = 40.0
-GRID_RESOLUTION = 0.3
+GRID_SIZE_M = 20.0
+GRID_RESOLUTION = 0.2
 GRID_CELLS = int(GRID_SIZE_M / GRID_RESOLUTION)
 GRID_ORIGIN = -GRID_SIZE_M / 2.0
 
@@ -98,9 +96,7 @@ def build_costmap(
     Returns:
         (GRID_CELLS, GRID_CELLS) int8 array with Nav2-compatible cost values.
     """
-    grid = np.full((GRID_CELLS, GRID_CELLS), COST_UNKNOWN, dtype=np.int8)
-
-    grid[~_FOV_MASK] = COST_FOV_BOUNDARY
+    grid = np.full((GRID_CELLS, GRID_CELLS), COST_UNSEEN, dtype=np.int8)
     grid[_EGO_DRIVABLE_MASK] = COST_FREE
 
     if drivable_pts is not None and len(drivable_pts) > 0:

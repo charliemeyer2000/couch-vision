@@ -4,19 +4,17 @@ import cv2
 import numpy as np
 
 
-# Cost value constants
-COST_UNKNOWN = -1 # not the end of the world to drive on
+# Cost value constants (Nav2 OccupancyGrid: 0=free, 100=lethal, -1=unknown)
 COST_FREE = 0
-COST_LANE = 80
-COST_FOV_BOUNDARY = 99
+COST_LANE = 50
+COST_UNSEEN = 98
 COST_LETHAL = 100
 
 # BGR colors for visualization
 _COLOR_MAP = {
-    COST_UNKNOWN: (0, 0, 0),        # black
     COST_FREE: (0, 200, 0),         # green
     COST_LANE: (0, 200, 200),       # yellow
-    COST_FOV_BOUNDARY: (50, 50, 50),  # dark gray
+    COST_UNSEEN: (50, 50, 50),      # dark gray
     COST_LETHAL: (0, 0, 220),       # red
 }
 
@@ -25,7 +23,7 @@ def costmap_to_color_image(grid: np.ndarray) -> np.ndarray:
     """Convert a costmap (int8 values) to a BGR color image.
 
     Args:
-        grid: (H, W) array with values in {-1, 0, 80, 99, 100}.
+        grid: (H, W) array with values in {0, 50, 98, 100}.
 
     Returns:
         (H, W, 3) uint8 BGR image.

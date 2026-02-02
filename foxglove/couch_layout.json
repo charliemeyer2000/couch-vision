@@ -101,7 +101,8 @@
       "xAxisVal": "timestamp",
       "followingViewWidth": 30
     },
-    "TopicList!topics": {}
+    "RosOut!logs": {},
+    "Navigation Control!navctrl": {}
   },
   "globalVariables": {},
   "userNodes": {},
@@ -124,14 +125,19 @@
     },
     "second": {
       "direction": "column",
-      "first": "map!gps",
+      "first": "Navigation Control!navctrl",
       "second": {
         "direction": "column",
-        "first": "Plot!imu",
-        "second": "TopicList!topics",
-        "splitPercentage": 60
+        "first": "map!gps",
+        "second": {
+          "direction": "column",
+          "first": "Plot!imu",
+          "second": "RosOut!logs",
+          "splitPercentage": 60
+        },
+        "splitPercentage": 50
       },
-      "splitPercentage": 40
+      "splitPercentage": 45
     },
     "splitPercentage": 70
   }

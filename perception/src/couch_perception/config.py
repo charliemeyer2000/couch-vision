@@ -36,8 +36,9 @@ class PipelineConfig:
 
     # Inference device: "cuda", "mps", "cpu", or None (auto-detect)
     device: str | None = None
-    # Run detection + segmentation on separate CUDA streams
-    cuda_streams: bool = True
+    # Run detection + segmentation on separate CUDA streams (thread pool is
+    # faster on both CPU and Jetson TensorRT, so this defaults to False)
+    cuda_streams: bool = False
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> PipelineConfig:

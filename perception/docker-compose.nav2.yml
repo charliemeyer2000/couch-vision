@@ -3,6 +3,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.nav2
+      args:
+        DOCKER_ARCH: "${DOCKER_ARCH:-amd64}"
+    runtime: "${DOCKER_RUNTIME:-runc}"
     ports:
       - "8765:8765"
     volumes:

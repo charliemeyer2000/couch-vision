@@ -1,8 +1,12 @@
 #!/bin/bash
 set -e
 
-# Source ROS2
-source /opt/ros/jazzy/setup.bash
+# Source ROS2 (install path differs between ros:jazzy and dustynv images)
+if [ -f /opt/ros/jazzy/setup.bash ]; then
+    source /opt/ros/jazzy/setup.bash
+elif [ -f /opt/ros/jazzy/install/setup.bash ]; then
+    source /opt/ros/jazzy/install/setup.bash
+fi
 export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 
 # Launch Nav2 planner stack in background
@@ -16,7 +20,11 @@ sleep 5
 # Run our planner node.
 # Source the venv but keep ROS2 system packages on PYTHONPATH.
 echo "Starting Nav2 planner..."
-source /perception/.venv/bin/activate
+if [ -f /perception/.venv/bin/activate ]; then
+    source /perception/.venv/bin/activate
+elif [ -f /opt/venv/bin/activate ]; then
+    source /opt/venv/bin/activate
+fi
 export PYTHONPATH="/perception/src:${PYTHONPATH}"
 
 if [ -n "$LIVE_MODE" ]; then

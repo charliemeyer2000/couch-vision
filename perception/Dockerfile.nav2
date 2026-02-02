@@ -1,39 +1,66 @@
-FROM ros:jazzy
+# Multi-arch Dockerfile for Nav2 perception pipeline.
+#   amd64 (Mac/CI): ros:jazzy (Python 3.12) + CPU torch
+#   arm64 (Jetson):  dustynv/pytorch (Python 3.12) + CUDA torch in /opt/venv
+#
+# DOCKER_ARCH is set by docker-compose based on host architecture.
 
-# Install Nav2 + perception deps
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ros-jazzy-navigation2 \
-    ros-jazzy-nav2-bringup \
-    ros-jazzy-nav2-simple-commander \
-    ros-jazzy-nav2-planner \
-    ros-jazzy-nav2-costmap-2d \
-    ros-jazzy-nav2-lifecycle-manager \
-    ros-jazzy-nav2-navfn-planner \
-    ros-jazzy-tf2-ros \
-    ros-jazzy-foxglove-bridge \
-    ros-jazzy-vision-msgs \
-    ros-jazzy-rmw-cyclonedds-cpp \
-    python3-numpy \
-    python3-opencv \
-    git \
-    && rm -rf /var/lib/apt/lists/*
+ARG DOCKER_ARCH=amd64
+
+FROM dustynv/pytorch:2.7-r36.4.0-cu128-24.04 AS base-arm64
+FROM ros:jazzy AS base-amd64
+FROM base-${DOCKER_ARCH} AS base
+
+# Re-declare after FROM so it's available in RUN
+ARG DOCKER_ARCH=amd64
+
+# amd64: install Nav2 + deps via apt (packages exist in ros:jazzy repos)
+# arm64: dustynv/pytorch already has numpy, opencv, torch+CUDA in /opt/venv.
+#        Nav2 apt packages don't exist for this image — skip them.
+RUN if [ "$DOCKER_ARCH" = "amd64" ]; then \
+        apt-get update && apt-get install -y --no-install-recommends \
+            ros-jazzy-navigation2 \
+            ros-jazzy-nav2-bringup \
+            ros-jazzy-nav2-simple-commander \
+            ros-jazzy-nav2-planner \
+            ros-jazzy-nav2-costmap-2d \
+            ros-jazzy-nav2-lifecycle-manager \
+            ros-jazzy-nav2-navfn-planner \
+            ros-jazzy-tf2-ros \
+            ros-jazzy-foxglove-bridge \
+            ros-jazzy-vision-msgs \
+            ros-jazzy-rmw-cyclonedds-cpp \
+            python3-numpy python3-opencv git \
+        && rm -rf /var/lib/apt/lists/*; \
+    else \
+        apt-get update && apt-get install -y --no-install-recommends git libgl1 libglib2.0-0 \
+        && rm -rf /var/lib/apt/lists/*; \
+    fi
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 
 WORKDIR /perception
 
 COPY pyproject.toml ./
-# The pyproject.toml pins torch<=2.8.0 with a Jetson-only index for Linux.
-# Override: install torch CPU from PyPI first, then install the package
-# with relaxed resolution so the pre-installed torch satisfies the constraint.
-RUN uv venv --system-site-packages \
-    && uv pip install \
-       torch torchvision --index-url https://download.pytorch.org/whl/cpu \
-    && UV_EXTRA_INDEX_URL=https://download.pytorch.org/whl/cpu \
-       uv pip install --index-strategy unsafe-best-match --override /dev/stdin -e . <<'OVERRIDES'
-torch>=2.0
-torchvision>=0.15
-OVERRIDES
+
+# Install project deps.
+# arm64 (dustynv): CUDA torch is pre-installed in /opt/venv. Install our deps
+#   into that same venv using pip. Symlink .venv -> /opt/venv for entrypoint.
+# amd64: create fresh venv with uv, install CPU torch + deps.
+RUN printf 'torch>=2.0\ntorchvision>=0.15\n' > /tmp/overrides.txt && \
+    if [ "$DOCKER_ARCH" = "arm64" ]; then \
+        ln -sf /opt/venv /perception/.venv && \
+        PIP_INDEX_URL=https://pypi.org/simple/ \
+        PIP_EXTRA_INDEX_URL="" \
+        /opt/venv/bin/python3 -m pip install -e .; \
+    else \
+        TORCH_INDEX="https://download.pytorch.org/whl/cpu"; \
+        PY_VER=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"); \
+        uv venv --python "python${PY_VER}" --system-site-packages; \
+        uv pip install torch torchvision --index-url "$TORCH_INDEX"; \
+        UV_EXTRA_INDEX_URL="$TORCH_INDEX" \
+        uv pip install --index-strategy unsafe-best-match \
+            --override /tmp/overrides.txt -e .; \
+    fi
 
 COPY src/ src/
 COPY config/ config/

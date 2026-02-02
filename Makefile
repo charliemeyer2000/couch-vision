@@ -123,10 +123,17 @@ perception-node:
 
 full-stack:
 	@[ -f .env ] && set -a && . ./.env && set +a; \
+	ARCH=$$(if [ "$$(uname -m)" = "aarch64" ]; then echo arm64; else echo amd64; fi); \
+	RUNTIME=$$(if command -v nvidia-smi >/dev/null 2>&1; then echo nvidia; else echo runc; fi); \
 	cd perception && \
 	$(if $(BAG),BAG_FILE=$(patsubst bags/%,%,$(BAG)) PLAYBACK_RATE=$(or $(RATE),1.0),LIVE_MODE=1 TOPIC_PREFIX=$(or $(PREFIX),/iphone) NETWORK_MODE=host) \
 	DEST_LAT=$(or $(DEST_LAT),38.036830) DEST_LON=$(or $(DEST_LON),-78.503577) LOOKAHEAD=$(or $(LOOKAHEAD),15.0) \
-	docker compose -f docker-compose.nav2.yml up --build
+	DOCKER_RUNTIME=$$RUNTIME DOCKER_ARCH=$$ARCH \
+	docker compose -f docker-compose.nav2.yml build --build-arg DOCKER_ARCH=$$ARCH && \
+	$(if $(BAG),BAG_FILE=$(patsubst bags/%,%,$(BAG)) PLAYBACK_RATE=$(or $(RATE),1.0),LIVE_MODE=1 TOPIC_PREFIX=$(or $(PREFIX),/iphone) NETWORK_MODE=host) \
+	DEST_LAT=$(or $(DEST_LAT),38.036830) DEST_LON=$(or $(DEST_LON),-78.503577) LOOKAHEAD=$(or $(LOOKAHEAD),15.0) \
+	DOCKER_RUNTIME=$$RUNTIME DOCKER_ARCH=$$ARCH \
+	docker compose -f docker-compose.nav2.yml up
 
 # === Testing ===
 
@@ -145,6 +152,17 @@ lint:
 
 deploy-jetson:
 	ssh jetson-nano 'cd ~/couch-vision && git pull'
+
+# === Foxglove Extension ===
+
+build-extension:
+	cd foxglove/nav-control-panel && pnpm install && pnpm build
+
+install-extension:
+	cd foxglove/nav-control-panel && pnpm local-install
+
+lint-extension:
+	cd foxglove/nav-control-panel && pnpm typecheck && pnpm lint && pnpm format:check
 
 # === Utilities ===
 

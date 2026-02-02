@@ -15,6 +15,7 @@ jobs:
       bridge: ${{ steps.filter.outputs.bridge }}
       perception: ${{ steps.filter.outputs.perception }}
       infra: ${{ steps.filter.outputs.infra }}
+      foxglove: ${{ steps.filter.outputs.foxglove }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -43,6 +44,8 @@ jobs:
               - 'perception/entrypoint_nav2.sh'
             infra:
               - 'infra/**'
+            foxglove:
+              - 'foxglove/**'
 
   lint:
     name: Lint
@@ -52,6 +55,18 @@ jobs:
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Foxglove extension deps
+        working-directory: foxglove/nav-control-panel
+        run: pnpm install --frozen-lockfile
 
       - name: Install tools
         run: brew install swiftlint swiftformat pre-commit
@@ -198,6 +213,44 @@ jobs:
             --benchmark-disable \
             -v
 
+  foxglove-extension:
+    name: Foxglove Extension
+    runs-on: ubuntu-latest
+    needs: [changes]
+    if: needs.changes.outputs.foxglove == 'true'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: foxglove/nav-control-panel/pnpm-lock.yaml
+
+      - name: Install dependencies
+        working-directory: foxglove/nav-control-panel
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        working-directory: foxglove/nav-control-panel
+        run: pnpm typecheck
+
+      - name: Lint
+        working-directory: foxglove/nav-control-panel
+        run: pnpm lint
+
+      - name: Format check
+        working-directory: foxglove/nav-control-panel
+        run: pnpm format:check
+
+      - name: Build
+        working-directory: foxglove/nav-control-panel
+        run: pnpm build
+
   bridge-docker:
     name: Build & Publish Bridge Docker Image
     runs-on: ubuntu-latest
@@ -278,6 +331,9 @@ jobs:
             type=sha
             type=raw,value=latest,enable={{is_default_branch}}
 
+      # CI builds amd64 only. arm64 (Jetson) builds natively on-device via
+      # `make full-stack` because the Jetson base image (dustynv/pytorch)
+      # requires CUDA/TensorRT and is too slow to cross-compile via QEMU.
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
@@ -289,7 +345,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Upload image as artifact
+      - name: Save image for PR testing
         if: github.event_name == 'pull_request'
         run: |
           docker save charliemeyer2000/couch-vision-perception:sha-${GITHUB_SHA::7} | gzip > perception-image.tar.gz

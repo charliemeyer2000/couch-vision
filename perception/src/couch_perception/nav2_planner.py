@@ -11,10 +11,13 @@ Visualization via foxglove_bridge (ws://localhost:8765).
 """
 
 import argparse
+import copy
+import json
 import math
 import os
 import threading
 import time
+from concurrent.futures import Future, ThreadPoolExecutor
 
 import cv2
 import numpy as np
@@ -28,10 +31,10 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy
 from nav_msgs.msg import OccupancyGrid, Path
-from geometry_msgs.msg import PoseStamped
+from geometry_msgs.msg import PointStamped, PoseStamped
 from sensor_msgs.msg import CompressedImage, Image, Imu, PointCloud2, PointField, NavSatFix
 from visualization_msgs.msg import Marker
-from std_msgs.msg import Header, ColorRGBA
+from std_msgs.msg import Header, ColorRGBA, String
 from builtin_interfaces.msg import Time as RosTime, Duration as RosDuration
 
 from nav2_simple_commander.robot_navigator import BasicNavigator
@@ -107,13 +110,22 @@ def _get_google_maps_route(
     return snapped
 
 
+_TMERC_PROJ = (
+    f"+proj=tmerc +lat_0={ROTUNDA_LAT} +lon_0={ROTUNDA_LON} "
+    f"+k=1 +x_0=0 +y_0=0 +ellps=WGS84 +datum=WGS84 +units=m +no_defs"
+)
+
+
+def _enu_to_geodetic(x: float, y: float) -> tuple[float, float]:
+    """Convert ENU (x=east, y=north) back to (lat, lon)."""
+    tfm = Transformer.from_crs(_TMERC_PROJ, "EPSG:4326", always_xy=True)
+    lon, lat = tfm.transform(x, y)
+    return lat, lon
+
+
 def _route_to_enu(route_gps: list[tuple[float, float]]) -> np.ndarray:
     """Convert GPS route to ENU coordinates relative to Rotunda. Returns (N, 2)."""
-    proj_string = (
-        f"+proj=tmerc +lat_0={ROTUNDA_LAT} +lon_0={ROTUNDA_LON} "
-        f"+k=1 +x_0=0 +y_0=0 +ellps=WGS84 +datum=WGS84 +units=m +no_defs"
-    )
-    tfm = Transformer.from_crs("EPSG:4326", proj_string, always_xy=True)
+    tfm = Transformer.from_crs("EPSG:4326", _TMERC_PROJ, always_xy=True)
     return np.array(
         [tfm.transform(lon, lat) for lat, lon in route_gps], dtype=np.float64
     )
@@ -351,7 +363,7 @@ class Nav2Planner:
         config: PipelineConfig,
         dest_lat: float = 38.036830,
         dest_lon: float = -78.503577,
-        lookahead_m: float = 15.0,
+        lookahead_m: float = 8.0,
         republish_sensors: bool = True,
     ) -> None:
         self._node = node
@@ -408,6 +420,17 @@ class Nav2Planner:
         self._pc_lanes_pub = node.create_publisher(PointCloud2, "/perception/pointcloud/lanes", qos)
         self._pc_det_pub = node.create_publisher(PointCloud2, "/perception/pointcloud/detections", qos)
 
+        # Dynamic destination control (from Foxglove panel)
+        self._status_pub = node.create_publisher(String, "/nav/status", qos)
+        self._dest_sub = node.create_subscription(
+            String, "/nav/set_destination", self._on_destination_command, qos,
+        )
+        self._status_timer = node.create_timer(1.0, self._publish_status)
+        self._start_override: tuple[float, float] | None = None
+        self._clicked_sub = node.create_subscription(
+            PointStamped, "/clicked_point", self._on_clicked_point, qos,
+        )
+
         if republish_sensors:
             self._camera_pub = node.create_publisher(CompressedImage, "/camera/image/compressed", qos)
             self._depth_pub = node.create_publisher(Image, "/camera/depth/image", qos)
@@ -422,6 +445,11 @@ class Nav2Planner:
         self._start_pose.header.frame_id = "map"
         self._start_pose.pose.orientation.w = 1.0
 
+        # Async Nav2 planning
+        self._planning_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="nav2_plan")
+        self._plan_future: Future | None = None
+        self._latest_path: Path | None = None
+
         # EKF tracking indices
         self._gps_idx = 0
         self._imu_idx = 0
@@ -433,6 +461,46 @@ class Nav2Planner:
         self._gps_cov_cache: list[np.ndarray] = []
 
         self._frame_num = 0
+
+    def _on_clicked_point(self, msg: PointStamped) -> None:
+        """Handle clicked point from Foxglove 3D panel — set as new destination."""
+        x, y = msg.point.x, msg.point.y
+        lat, lon = _enu_to_geodetic(x, y)
+        print(f"\nClicked point: ENU=({x:.1f}, {y:.1f}) → dest=({lat:.6f}, {lon:.6f})")
+        self._dest_lat = lat
+        self._dest_lon = lon
+        self._route_resolved = False
+        self._route_enu = None
+
+    def _on_destination_command(self, msg: String) -> None:
+        try:
+            data = json.loads(msg.data)
+            self._dest_lat = data["dest_lat"]
+            self._dest_lon = data["dest_lon"]
+            if data.get("api_key"):
+                self._api_key = data["api_key"]
+            if "lookahead_m" in data:
+                self._lookahead_m = data["lookahead_m"]
+            if data.get("start_lat") is not None and data.get("start_lon") is not None:
+                self._start_override = (data["start_lat"], data["start_lon"])
+            self._route_resolved = False
+            self._route_enu = None
+            print(f"\nDestination updated: ({self._dest_lat}, {self._dest_lon})")
+        except Exception as e:
+            print(f"\nFailed to parse destination command: {e}")
+
+    def _publish_status(self) -> None:
+        status = {
+            "api_key_configured": bool(self._api_key),
+            "route_resolved": self._route_resolved,
+            "current_dest_lat": self._dest_lat,
+            "current_dest_lon": self._dest_lon,
+            "route_points": len(self._route_enu) if self._route_enu is not None else 0,
+            "ekf_initialized": self._ekf.initialized,
+        }
+        msg = String()
+        msg.data = json.dumps(status)
+        self._status_pub.publish(msg)
 
     def run(self, streams: SensorStreams) -> None:
         """Process frames from any source. Blocks until source is exhausted or interrupted."""
@@ -485,13 +553,17 @@ class Nav2Planner:
         print(f"  ARKit frame aligned (dt={nearest.timestamp - gps_timestamp:.2f}s)")
 
     def _try_resolve_route(self, gps_fixes: list[GpsFix]) -> None:
-        """Query Google Maps route on first GPS fix (one-time)."""
+        """Query Google Maps route on first GPS fix or when destination changes."""
         if self._route_resolved or not self._api_key or not gps_fixes:
             return
         self._route_resolved = True
-        g0 = gps_fixes[0]
-        print(f"Querying Google Maps: ({g0.latitude:.6f}, {g0.longitude:.6f}) → ({self._dest_lat}, {self._dest_lon})")
-        route_gps = _get_google_maps_route(g0.latitude, g0.longitude, self._dest_lat, self._dest_lon, self._api_key)
+        if self._start_override:
+            start_lat, start_lon = self._start_override
+            self._start_override = None
+        else:
+            start_lat, start_lon = gps_fixes[0].latitude, gps_fixes[0].longitude
+        print(f"Querying Google Maps: ({start_lat:.6f}, {start_lon:.6f}) → ({self._dest_lat}, {self._dest_lon})")
+        route_gps = _get_google_maps_route(start_lat, start_lon, self._dest_lat, self._dest_lon, self._api_key)
         if route_gps:
             route_xy = _route_to_enu(route_gps)
             self._route_enu = _resample_path(route_xy, step_size=0.5)
@@ -570,7 +642,7 @@ class Nav2Planner:
         goal_x = np.clip(goal_x, -half, half)
         goal_y = np.clip(goal_y, -half, half)
 
-        if self._republish_sensors:
+        if self._republish_sensors and self._frame_num % 2 == 0:
             cam_msg = CompressedImage()
             cam_msg.header = _header(frame.timestamp, "camera")
             cam_msg.format = "jpeg"
@@ -628,31 +700,41 @@ class Nav2Planner:
         self._goal_marker_pub.publish(_make_goal_marker(goal_x, goal_y, frame.timestamp))
         self._ego_marker_pub.publish(_make_ego_marker(frame.timestamp))
 
-        # Nav2 planning
-        self._goal_pose.header.stamp = _stamp_from_epoch(frame.timestamp)
-        self._goal_pose.pose.position.x = float(goal_x)
-        self._goal_pose.pose.position.y = float(goal_y)
-        self._start_pose.header.stamp = self._goal_pose.header.stamp
+        # Collect previous planning result (non-blocking)
+        if self._plan_future is not None and self._plan_future.done():
+            try:
+                path = self._plan_future.result()
+                if path and path.poses:
+                    path.header = _header(frame.timestamp)
+                    self._path_pub.publish(path)
+                    self._latest_path = path
+            except Exception as e:
+                if self._frame_num % 10 == 0:
+                    print(f"\nPlanner failed: {e}")
+            self._plan_future = None
 
-        path = None
-        try:
-            path = self._navigator.getPath(self._start_pose, self._goal_pose, planner_id="GridBased")
-        except Exception as e:
-            if self._frame_num % 10 == 0:
-                print(f"\nPlanner failed: {e}")
+        # Submit new Nav2 planning in background
+        if self._plan_future is None:
+            goal_pose = copy.deepcopy(self._goal_pose)
+            goal_pose.header.stamp = _stamp_from_epoch(frame.timestamp)
+            goal_pose.pose.position.x = float(goal_x)
+            goal_pose.pose.position.y = float(goal_y)
+            start_pose = copy.deepcopy(self._start_pose)
+            start_pose.header.stamp = goal_pose.header.stamp
+            self._plan_future = self._planning_executor.submit(
+                self._navigator.getPath, start_pose, goal_pose, planner_id="GridBased",
+            )
 
-        if path and path.poses:
-            path.header = _header(frame.timestamp)
-            self._path_pub.publish(path)
-
-        self._costmap_img_pub.publish(
-            _path_to_costmap_image(grid, path, goal_x, goal_y)
-        )
+        # Throttled costmap image (expensive PNG encode) — every 3rd frame
+        if self._frame_num % 3 == 0:
+            self._costmap_img_pub.publish(
+                _path_to_costmap_image(grid, self._latest_path, goal_x, goal_y)
+            )
 
         dt = time.perf_counter() - t0
         self._frame_num += 1
         if self._frame_num % 5 == 0:
-            n_poses = len(path.poses) if path and path.poses else 0
+            n_poses = len(self._latest_path.poses) if self._latest_path and self._latest_path.poses else 0
             print(
                 f"\rFrame {self._frame_num}: path={n_poses} poses, "
                 f"{len(result.detections)} det, {1/dt:.1f} FPS, "
@@ -663,6 +745,9 @@ class Nav2Planner:
 
     def shutdown(self) -> None:
         """Clean up Nav2 and ROS2 resources."""
+        self._status_timer.cancel()
+        self._planning_executor.shutdown(wait=False)
+        self._pipeline.shutdown()
         self._navigator.lifecycleShutdown()
 
 
@@ -688,7 +773,7 @@ def main() -> None:
     parser.add_argument("--subsample-lane", type=int, default=2)
     parser.add_argument("--subsample-bbox", type=int, default=8)
     parser.add_argument("--playback-rate", type=float, default=1.0)
-    parser.add_argument("--lookahead", type=float, default=15.0,
+    parser.add_argument("--lookahead", type=float, default=8.0,
                         help="Lookahead distance on Google Maps route (meters)")
     args = parser.parse_args()
 
