@@ -7,6 +7,7 @@ detect/project/rotate loop.
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -125,6 +126,11 @@ class PerceptionPipeline:
             self._det_stream = torch.cuda.Stream()
             self._seg_stream = torch.cuda.Stream()
 
+        # Thread pool for parallel CPU inference (torch releases GIL during forward)
+        self._cpu_executor: ThreadPoolExecutor | None = None
+        if not self._use_streams and self.yolo is not None and self.yolop is not None:
+            self._cpu_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="inference")
+
         self._cam_model: CameraModel | None = None
         self._depth_cam_model: CameraModel | None = None
 
@@ -135,6 +141,12 @@ class PerceptionPipeline:
         if self.yolop:
             return str(self.yolop.device)
         return "cpu"
+
+    def shutdown(self) -> None:
+        """Clean up thread pool resources."""
+        if self._cpu_executor:
+            self._cpu_executor.shutdown(wait=False)
+            self._cpu_executor = None
 
     def _ensure_camera_model(self, frame: SyncedFrame) -> None:
         if self._cam_model is None:
@@ -160,6 +172,11 @@ class PerceptionPipeline:
 
             torch.cuda.synchronize()
             return detections, yolop_result
+
+        if self._cpu_executor:
+            det_future = self._cpu_executor.submit(self.yolo.detect, image)
+            seg_future = self._cpu_executor.submit(self.yolop.detect, image)
+            return det_future.result(), seg_future.result()
 
         detections = self.yolo.detect(image) if self.yolo else []
         yolop_result = self.yolop.detect(image) if self.yolop else None

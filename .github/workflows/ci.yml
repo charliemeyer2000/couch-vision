@@ -15,6 +15,7 @@ jobs:
       bridge: ${{ steps.filter.outputs.bridge }}
       perception: ${{ steps.filter.outputs.perception }}
       infra: ${{ steps.filter.outputs.infra }}
+      foxglove: ${{ steps.filter.outputs.foxglove }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -43,6 +44,8 @@ jobs:
               - 'perception/entrypoint_nav2.sh'
             infra:
               - 'infra/**'
+            foxglove:
+              - 'foxglove/**'
 
   lint:
     name: Lint
@@ -197,6 +200,42 @@ jobs:
             -k "TestProjection or TestCostmap" \
             --benchmark-disable \
             -v
+
+  foxglove-extension:
+    name: Foxglove Extension
+    runs-on: ubuntu-latest
+    needs: [changes]
+    if: needs.changes.outputs.foxglove == 'true'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: foxglove/nav-control-panel/pnpm-lock.yaml
+
+      - name: Install dependencies
+        working-directory: foxglove/nav-control-panel
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        working-directory: foxglove/nav-control-panel
+        run: pnpm typecheck
+
+      - name: Lint
+        working-directory: foxglove/nav-control-panel
+        run: pnpm lint
+
+      - name: Format check
+        working-directory: foxglove/nav-control-panel
+        run: pnpm format:check
+
+      - name: Build
+        working-directory: foxglove/nav-control-panel
+        run: pnpm build
 
   bridge-docker:
     name: Build & Publish Bridge Docker Image

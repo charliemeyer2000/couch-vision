@@ -1,0 +1,16 @@
+{
+  "extends": "create-foxglove-extension/tsconfig/tsconfig.json",
+  "include": ["./src/**/*"],
+  "compilerOptions": {
+    "rootDir": "./src",
+    "outDir": "./dist",
+    "lib": ["DOM"],
+    "target": "es6",
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitAny": true,
+    "noImplicitReturns": true,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "forceConsistentCasingInFileNames": true
+  }
+}

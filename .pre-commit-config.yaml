@@ -59,6 +59,16 @@ repos:
         pass_filenames: true
         require_serial: true
 
+  # === TypeScript/Foxglove: ESLint + Prettier ===
+  - repo: local
+    hooks:
+      - id: foxglove-lint
+        name: Foxglove Extension Lint
+        entry: bash -c 'cd foxglove/nav-control-panel && pnpm lint && pnpm format:check'
+        language: system
+        files: ^foxglove/nav-control-panel/src/
+        pass_filenames: false
+
 # Config version
 default_language_version:
   python: python3

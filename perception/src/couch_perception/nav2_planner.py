@@ -11,11 +11,13 @@ Visualization via foxglove_bridge (ws://localhost:8765).
 """
 
 import argparse
+import copy
 import json
 import math
 import os
 import threading
 import time
+from concurrent.futures import Future, ThreadPoolExecutor
 
 import cv2
 import numpy as np
@@ -29,7 +31,7 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy
 from nav_msgs.msg import OccupancyGrid, Path
-from geometry_msgs.msg import PoseStamped
+from geometry_msgs.msg import PointStamped, PoseStamped
 from sensor_msgs.msg import CompressedImage, Image, Imu, PointCloud2, PointField, NavSatFix
 from visualization_msgs.msg import Marker
 from std_msgs.msg import Header, ColorRGBA, String
@@ -106,6 +108,17 @@ def _get_google_maps_route(
 
     print(f"Google Maps: {len(snapped)} snapped points")
     return snapped
+
+
+def _enu_to_geodetic(x: float, y: float) -> tuple[float, float]:
+    """Convert ENU (x=east, y=north) back to (lat, lon) via inverse tmerc projection."""
+    proj_string = (
+        f"+proj=tmerc +lat_0={ROTUNDA_LAT} +lon_0={ROTUNDA_LON} "
+        f"+k=1 +x_0=0 +y_0=0 +ellps=WGS84 +datum=WGS84 +units=m +no_defs"
+    )
+    tfm = Transformer.from_crs(proj_string, "EPSG:4326", always_xy=True)
+    lon, lat = tfm.transform(x, y)
+    return lat, lon
 
 
 def _route_to_enu(route_gps: list[tuple[float, float]]) -> np.ndarray:
@@ -416,6 +429,9 @@ class Nav2Planner:
         )
         self._status_timer = node.create_timer(1.0, self._publish_status)
         self._start_override: tuple[float, float] | None = None
+        self._clicked_sub = node.create_subscription(
+            PointStamped, "/clicked_point", self._on_clicked_point, qos,
+        )
 
         if republish_sensors:
             self._camera_pub = node.create_publisher(CompressedImage, "/camera/image/compressed", qos)
@@ -431,6 +447,11 @@ class Nav2Planner:
         self._start_pose.header.frame_id = "map"
         self._start_pose.pose.orientation.w = 1.0
 
+        # Async Nav2 planning
+        self._planning_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="nav2_plan")
+        self._plan_future: Future | None = None
+        self._latest_path: Path | None = None
+
         # EKF tracking indices
         self._gps_idx = 0
         self._imu_idx = 0
@@ -442,6 +463,17 @@ class Nav2Planner:
         self._gps_cov_cache: list[np.ndarray] = []
 
         self._frame_num = 0
+
+    def _on_clicked_point(self, msg: PointStamped) -> None:
+        """Handle clicked point from Foxglove 3D panel — set as new destination."""
+        x, y = msg.point.x, msg.point.y
+        lat, lon = _enu_to_geodetic(x, y)
+        print(f"\nClicked point: ENU=({x:.1f}, {y:.1f}) → GPS=({lat:.6f}, {lon:.6f})")
+        self._dest_lat = lat
+        self._dest_lon = lon
+        self._route_resolved = False
+        self._route_enu = None
+        print(f"Destination updated to ({lat:.6f}, {lon:.6f}). Will re-route on next frame.")
 
     def _on_destination_command(self, msg: String) -> None:
         try:
@@ -613,7 +645,7 @@ class Nav2Planner:
         goal_x = np.clip(goal_x, -half, half)
         goal_y = np.clip(goal_y, -half, half)
 
-        if self._republish_sensors:
+        if self._republish_sensors and self._frame_num % 2 == 0:
             cam_msg = CompressedImage()
             cam_msg.header = _header(frame.timestamp, "camera")
             cam_msg.format = "jpeg"
@@ -671,31 +703,40 @@ class Nav2Planner:
         self._goal_marker_pub.publish(_make_goal_marker(goal_x, goal_y, frame.timestamp))
         self._ego_marker_pub.publish(_make_ego_marker(frame.timestamp))
 
-        # Nav2 planning
-        self._goal_pose.header.stamp = _stamp_from_epoch(frame.timestamp)
-        self._goal_pose.pose.position.x = float(goal_x)
-        self._goal_pose.pose.position.y = float(goal_y)
-        self._start_pose.header.stamp = self._goal_pose.header.stamp
+        # Collect previous planning result (non-blocking)
+        if self._plan_future is not None and self._plan_future.done():
+            try:
+                path = self._plan_future.result()
+                if path and path.poses:
+                    path.header = _header(frame.timestamp)
+                    self._path_pub.publish(path)
+                    self._latest_path = path
+            except Exception:
+                pass
+            self._plan_future = None
 
-        path = None
-        try:
-            path = self._navigator.getPath(self._start_pose, self._goal_pose, planner_id="GridBased")
-        except Exception as e:
-            if self._frame_num % 10 == 0:
-                print(f"\nPlanner failed: {e}")
+        # Submit new Nav2 planning in background
+        if self._plan_future is None:
+            goal_pose = copy.deepcopy(self._goal_pose)
+            goal_pose.header.stamp = _stamp_from_epoch(frame.timestamp)
+            goal_pose.pose.position.x = float(goal_x)
+            goal_pose.pose.position.y = float(goal_y)
+            start_pose = copy.deepcopy(self._start_pose)
+            start_pose.header.stamp = goal_pose.header.stamp
+            self._plan_future = self._planning_executor.submit(
+                self._navigator.getPath, start_pose, goal_pose, planner_id="GridBased",
+            )
 
-        if path and path.poses:
-            path.header = _header(frame.timestamp)
-            self._path_pub.publish(path)
-
-        self._costmap_img_pub.publish(
-            _path_to_costmap_image(grid, path, goal_x, goal_y)
-        )
+        # Throttled costmap image (expensive PNG encode) — every 3rd frame
+        if self._frame_num % 3 == 0:
+            self._costmap_img_pub.publish(
+                _path_to_costmap_image(grid, self._latest_path, goal_x, goal_y)
+            )
 
         dt = time.perf_counter() - t0
         self._frame_num += 1
         if self._frame_num % 5 == 0:
-            n_poses = len(path.poses) if path and path.poses else 0
+            n_poses = len(self._latest_path.poses) if self._latest_path and self._latest_path.poses else 0
             print(
                 f"\rFrame {self._frame_num}: path={n_poses} poses, "
                 f"{len(result.detections)} det, {1/dt:.1f} FPS, "
@@ -707,6 +748,8 @@ class Nav2Planner:
     def shutdown(self) -> None:
         """Clean up Nav2 and ROS2 resources."""
         self._status_timer.cancel()
+        self._planning_executor.shutdown(wait=False)
+        self._pipeline.shutdown()
         self._navigator.lifecycleShutdown()
 
 

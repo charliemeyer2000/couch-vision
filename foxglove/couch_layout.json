@@ -102,7 +102,7 @@
       "followingViewWidth": 30
     },
     "RosOut!logs": {},
-    "Teleop!navcontrol": {}
+    "Navigation Control!navctrl": {}
   },
   "globalVariables": {},
   "userNodes": {},
@@ -125,7 +125,7 @@
     },
     "second": {
       "direction": "column",
-      "first": "Teleop!navcontrol",
+      "first": "Navigation Control!navctrl",
       "second": {
         "direction": "column",
         "first": "map!gps",

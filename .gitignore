@@ -38,6 +38,11 @@ infra/*.tfstate.backup
 infra/.terraform.lock.hcl
 infra/lambda/*.zip
 
+# Foxglove extensions
+foxglove/nav-control-panel/node_modules/
+foxglove/nav-control-panel/dist/
+*.tsbuildinfo
+
 # models
 *.pt
 *.engine

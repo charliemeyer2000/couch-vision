@@ -146,6 +146,17 @@ lint:
 deploy-jetson:
 	ssh jetson-nano 'cd ~/couch-vision && git pull'
 
+# === Foxglove Extension ===
+
+build-extension:
+	cd foxglove/nav-control-panel && pnpm install && pnpm build
+
+install-extension:
+	cd foxglove/nav-control-panel && pnpm local-install
+
+lint-extension:
+	cd foxglove/nav-control-panel && pnpm typecheck && pnpm lint && pnpm format:check
+
 # === Utilities ===
 
 ip:
