@@ -396,10 +396,23 @@ class Nav2Planner:
         self._route_enu: np.ndarray | None = None
         self._route_resolved = False
 
-        # Nav2
+        # Nav2 — use node's executor (already spinning on background thread)
+        # instead of BasicNavigator._waitForNodeToActivate which creates a
+        # conflicting executor.
         print("Waiting for Nav2 planner server...")
         self._navigator = BasicNavigator()
-        self._navigator._waitForNodeToActivate("planner_server")
+        from lifecycle_msgs.srv import GetState
+        cli = node.create_client(GetState, "/planner_server/get_state")
+        while not cli.wait_for_service(timeout_sec=2.0):
+            print("  planner_server not yet available...")
+        while True:
+            future = cli.call_async(GetState.Request())
+            while not future.done():
+                time.sleep(0.1)
+            if future.result() and future.result().current_state.id == 3:
+                break
+            time.sleep(0.5)
+        node.destroy_client(cli)
         print("Nav2 planner is active!")
 
         # ROS2 publishers
