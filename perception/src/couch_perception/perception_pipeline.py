@@ -59,8 +59,8 @@ def _resolve_detection_model(config: PipelineConfig) -> str | None:
     pt = weights_dir / f"{name}.pt"
     if pt.exists():
         return str(pt)
-    # Let ultralytics handle download
-    return f"{name}.pt"
+    # Download into weights dir so TRT engines persist on the volume mount
+    return str(weights_dir / f"{name}.pt")
 
 
 class PerceptionPipeline:

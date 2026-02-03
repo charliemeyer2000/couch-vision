@@ -21,8 +21,7 @@ from couch_perception.bag_reader import (
     ImuSample,
     OdomSample,
     SyncedFrame,
-    read_gps_imu_and_odom,
-    read_synced_frames,
+    read_all_streams,
 )
 
 
@@ -56,11 +55,15 @@ class BagSource:
         self.max_frames = max_frames
 
     def open(self) -> SensorStreams:
-        """Open the bag and return all sensor streams."""
-        gps_fixes, imu_samples, odom_samples = read_gps_imu_and_odom(self.bag_path)
-        frames = self._paced_frames()
+        """Open the bag and return all sensor streams.
+
+        Uses a single-pass reader: first pass reads lightweight scalar data
+        (GPS/IMU/odom), second pass streams image+depth frames lazily.
+        """
+        frames_iter, gps_fixes, imu_samples, odom_samples = read_all_streams(self.bag_path)
+        self._raw_frames = frames_iter
         return SensorStreams(
-            frames=frames,
+            frames=self._paced_frames(),
             gps_fixes=gps_fixes,
             imu_samples=imu_samples,
             odom_samples=odom_samples,
@@ -72,7 +75,7 @@ class BagSource:
         prev_wall_time: float | None = None
         count = 0
 
-        for frame in read_synced_frames(self.bag_path):
+        for frame in self._raw_frames:
             if self.max_frames is not None and count >= self.max_frames:
                 return
 
