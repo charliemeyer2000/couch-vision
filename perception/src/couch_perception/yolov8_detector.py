@@ -27,18 +27,26 @@ def _auto_device() -> str:
     return "cpu"
 
 
+_WEIGHTS_DIR = Path(__file__).resolve().parent.parent.parent / "weights"
+
+
 def _find_model(model_path: str, device: str) -> str:
     """Prefer TensorRT engine; auto-export on CUDA if .pt exists."""
     p = Path(model_path)
     engine = p.with_suffix(".engine")
     if engine.exists():
         return str(engine)
-    if device == "cuda" and p.exists():
-        print(f"Exporting TensorRT engine from {p} (this takes ~10 min on Jetson Orin)...")
-        model = YOLO(str(p))
-        model.export(format="engine", half=True)
-        if engine.exists():
-            return str(engine)
+    if device == "cuda":
+        # Check weights dir for .pt even if model_path is a bare name
+        pt = p if p.exists() else _WEIGHTS_DIR / p.name
+        if pt.exists():
+            print(f"Exporting TensorRT engine from {pt} (this takes ~10 min on Jetson Orin)...")
+            model = YOLO(str(pt))
+            exported = model.export(format="engine", half=True)
+            if exported and Path(exported).exists():
+                return str(exported)
+            if engine.exists():
+                return str(engine)
     return model_path
 
 
