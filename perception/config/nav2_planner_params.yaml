@@ -6,7 +6,7 @@ planner_server:
       plugin: "nav2_navfn_planner::NavfnPlanner"
       tolerance: 0.5
       use_astar: true
-      allow_unknown: false
+      allow_unknown: true
 
 global_costmap:
   global_costmap:
@@ -20,7 +20,7 @@ global_costmap:
       resolution: 0.2
       origin_x: -10.0
       origin_y: -10.0
-      track_unknown_space: false
+      track_unknown_space: true
       rolling_window: false
       always_send_full_costmap: true
       plugins: ["static_layer", "inflation_layer"]

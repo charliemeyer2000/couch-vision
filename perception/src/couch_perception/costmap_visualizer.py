@@ -7,7 +7,7 @@ import numpy as np
 # Cost value constants (Nav2 OccupancyGrid: 0=free, 100=lethal, -1=unknown)
 COST_FREE = 0
 COST_LANE = 50
-COST_UNSEEN = 98
+COST_UNSEEN = -1
 COST_LETHAL = 100
 
 # BGR colors for visualization
