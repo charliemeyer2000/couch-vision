@@ -1,0 +1,41 @@
+rtabmap:
+  ros__parameters:
+    frame_id: base_link
+    odom_frame_id: odom
+    map_frame_id: map
+
+    subscribe_depth: true
+    subscribe_rgb: true
+    subscribe_odom: true
+    odom_sensor_sync: true
+    approx_sync: true
+    queue_size: 10
+
+    publish_tf: true
+    wait_for_transform: 0.2
+
+    Mem/IncrementalMemory: "true"
+    Mem/InitWMWithAllNodes: "false"
+    Rtabmap/DetectionRate: "1.0"
+    Rtabmap/TimeThr: "0.0"
+    Rtabmap/MemoryThr: "0"
+
+    Kp/MaxFeatures: "200"
+    Kp/DetectorStrategy: "6"
+    GFTT/MinDistance: "7"
+
+    Kp/NNStrategy: "1"
+    Kp/MaxDepth: "5.0"
+
+    Grid/Sensor: "1"
+    Grid/RangeMax: "5.0"
+    Grid/RangeMin: "0.1"
+    Grid/CellSize: "0.2"
+    Grid/3D: "false"
+    Grid/MaxGroundHeight: "0.1"
+    Grid/MaxObstacleHeight: "2.0"
+
+    Db/Sqlite3InMemory: "true"
+
+    rgb/image_transport: "compressed"
+    depth/image_transport: "raw"

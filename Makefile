@@ -26,7 +26,7 @@ endif
 
 .PHONY: help setup xcode bridge \
         topics hz echo rviz bag bag-play verify \
-        perception-node full-stack \
+        perception-node full-stack full-stack-slam \
         test benchmark lint deploy-jetson ip clean
 
 help:
@@ -51,6 +51,8 @@ help:
 	@echo "Perception:"
 	@echo "  make full-stack BAG=path.mcap         Perception + Nav2 planning (Docker, bag replay)"
 	@echo "  make full-stack                       Live mode — subscribes to ROS2 topics"
+	@echo "  make full-stack-slam BAG=path.mcap    Full stack with RTAB-Map SLAM enabled"
+	@echo "  make full-stack SLAM=1 BAG=...        Alternative: enable SLAM via variable"
 	@echo "  make perception-node                  Run live perception ROS2 node (no Nav2)"
 	@echo ""
 	@echo "Testing:"
@@ -128,12 +130,18 @@ full-stack:
 	cd perception && \
 	$(if $(BAG),BAG_FILE=$(patsubst bags/%,%,$(BAG)) PLAYBACK_RATE=$(or $(RATE),1.0),LIVE_MODE=1 TOPIC_PREFIX=$(or $(PREFIX),/iphone) NETWORK_MODE=host) \
 	DEST_LAT=$(or $(DEST_LAT),38.036830) DEST_LON=$(or $(DEST_LON),-78.503577) LOOKAHEAD=$(or $(LOOKAHEAD),15.0) \
+	ENABLE_SLAM=$(or $(SLAM),0) \
 	DOCKER_RUNTIME=$$RUNTIME DOCKER_ARCH=$$ARCH \
 	docker compose -f docker-compose.nav2.yml build --build-arg DOCKER_ARCH=$$ARCH && \
 	$(if $(BAG),BAG_FILE=$(patsubst bags/%,%,$(BAG)) PLAYBACK_RATE=$(or $(RATE),1.0),LIVE_MODE=1 TOPIC_PREFIX=$(or $(PREFIX),/iphone) NETWORK_MODE=host) \
 	DEST_LAT=$(or $(DEST_LAT),38.036830) DEST_LON=$(or $(DEST_LON),-78.503577) LOOKAHEAD=$(or $(LOOKAHEAD),15.0) \
+	ENABLE_SLAM=$(or $(SLAM),0) \
 	DOCKER_RUNTIME=$$RUNTIME DOCKER_ARCH=$$ARCH \
 	docker compose -f docker-compose.nav2.yml up
+
+# SLAM-enabled full stack (convenience target)
+full-stack-slam:
+	SLAM=1 $(MAKE) full-stack $(MAKEFLAGS)
 
 # === Testing ===
 

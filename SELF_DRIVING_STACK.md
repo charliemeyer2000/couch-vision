@@ -532,8 +532,9 @@ Given two GPS coordinates, a `nav_msgs/Path` is planned and visible in Foxglove.
   - `perception_pipeline.py` — PerceptionPipeline class (detect → project → rotate)
   - `frame_source.py` — BagSource with playback pacing
 - [x] pytest-benchmark infrastructure (`make test`, `make benchmark`) for profiling on Mac and Jetson
-- [x] TensorRT auto-export on first CUDA run: YOLOP (PyTorch → ONNX → TRT FP16) and YOLOv8 (.pt → engine via ultralytics). Engines saved to volume-mounted `weights/` dir and persist across container restarts.
+- [x] TensorRT auto-export on first CUDA run: YOLOP (PyTorch → ONNX → TRT FP16) and YOLOv8 (.pt → engine via ultralytics). Engines saved to volume-mounted `weights/` dir and persist across container restarts. (PR #19)
 - [x] Streaming bag reader: single pass for scalar data (GPS/IMU/odom), lazy second pass for image+depth. No longer loads all frames into memory — fixed Jetson OOM on large bags.
+- [x] Nav2 planner costmap fix: COST_UNSEEN changed from 98 to -1 (OccupancyGrid unknown), `allow_unknown: true` and `track_unknown_space: true` in nav2_planner_params.yaml. Config volume-mounted to Docker for hot-reload without rebuild.
 - [x] YOLOP TensorRT FP16 backend: exported seg-only ONNX → TRT engine, 2.1x speedup (80ms → 37.5ms on Jetson)
 - [x] Configurable perception pipeline (`PipelineConfig` dataclass + YAML presets):
   - `configs/default.yaml` — current behavior (YOLOP + YOLOv8n)
@@ -1200,5 +1201,5 @@ foxglove_bridge is built from source on the Jetson at `~/ros2_jazzy/`. It requir
 
 ---
 
-*Last updated: 2026-02-02*
-*Current phase: Phase 3 perception + Nav2 working end-to-end in both bag replay and live mode (`make full-stack`). Foxglove extension for interactive destination control (PR #18). Costmap tuned for walking speed (20m grid, 0.2m res, unseen=98). Phase 2 EKF fuses IMU + GPS + ARKit odom + Google Maps routing. Phase 1 complete. Phase 0 hardware unblocked in parallel.*
+*Last updated: 2026-02-03*
+*Current phase: Phase 3 perception + Nav2 working end-to-end in both bag replay and live mode (`make full-stack`). TRT engines auto-export on first Jetson run (PR #19). Costmap fix: COST_UNSEEN=-1, allow_unknown=true enables planning through unseen areas. Foxglove extension for interactive destination control (PR #18). Phase 2 EKF fuses IMU + GPS + ARKit odom + Google Maps routing. Phase 1 complete. Phase 0 hardware unblocked in parallel.*
