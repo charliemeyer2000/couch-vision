@@ -27,12 +27,18 @@ def _auto_device() -> str:
     return "cpu"
 
 
-def _find_model(model_path: str) -> str:
-    """Prefer TensorRT engine over PyTorch weights if available."""
+def _find_model(model_path: str, device: str) -> str:
+    """Prefer TensorRT engine; auto-export on CUDA if .pt exists."""
     p = Path(model_path)
     engine = p.with_suffix(".engine")
     if engine.exists():
         return str(engine)
+    if device == "cuda" and p.exists():
+        print(f"Exporting TensorRT engine from {p} (this takes ~10 min on Jetson Orin)...")
+        model = YOLO(str(p))
+        model.export(format="engine", half=True)
+        if engine.exists():
+            return str(engine)
     return model_path
 
 
@@ -49,10 +55,10 @@ class Detection:
 
 class YOLOv8Detector:
     def __init__(self, model_path: str = "yolov8n.pt", conf_threshold: float = 0.3, device: str | None = None) -> None:
-        resolved = _find_model(model_path)
-        self.model = YOLO(resolved)
         self.conf_threshold = conf_threshold
         self.device = device or _auto_device()
+        resolved = _find_model(model_path, self.device)
+        self.model = YOLO(resolved)
         self._relevant_class_ids = list(RELEVANT_CLASSES.keys())
 
     def detect(self, frame: np.ndarray) -> list[Detection]:

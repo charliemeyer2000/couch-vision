@@ -114,6 +114,50 @@ make full-stack BAG=bags/your_bag.mcap
 # Connect Foxglove to ws://localhost:8765
 ```
 
+## Perception Stack
+
+The perception pipeline runs YOLOv8 (object detection) + YOLOP (drivable area / lane segmentation) and feeds results into Nav2 for path planning.
+
+### Running with Docker
+
+```bash
+make full-stack BAG=bags/your_bag.mcap   # bag replay mode
+make full-stack                           # live mode (subscribes to ROS2 topics)
+```
+
+This auto-detects the platform:
+- **Jetson (aarch64):** uses `nvidia` container runtime, CUDA + TensorRT inference
+- **Mac/x86 (amd64):** CPU-only PyTorch inference
+
+Connect Foxglove to `ws://localhost:8765` to visualize.
+
+### TensorRT engine auto-export
+
+On the first CUDA run, TRT engines are built automatically from weights:
+- **YOLOv8:** exports from `.pt` via ultralytics (~10 min on Orin)
+- **YOLOP:** exports PyTorch → ONNX → TRT FP16 (~8 min on Orin)
+
+Engines are saved to `perception/weights/` which is volume-mounted, so they persist between container restarts. Delete `*.engine` files to force re-export (needed when TensorRT version changes).
+
+### Weights
+
+Place model weights in `perception/weights/`:
+- `yolov8n.pt` — downloaded automatically by ultralytics on first run
+- `yolop_repo/` — cloned automatically from GitHub on first run
+- `*.engine` — TRT engines, auto-exported on first CUDA run
+
+### Jetson setup
+
+CI only builds amd64 Docker images. On Jetson, the image builds locally on first `make full-stack`:
+
+```bash
+ssh jetson-nano
+cd ~/couch-vision
+make full-stack BAG=bags/your_bag.mcap
+```
+
+First run takes longer (Docker build + TRT engine export). Subsequent runs start in seconds.
+
 ## Development
 
 ### Project structure

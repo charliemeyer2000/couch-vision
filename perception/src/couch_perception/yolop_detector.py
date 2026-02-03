@@ -21,6 +21,7 @@ _WEIGHTS_DIR = Path(__file__).resolve().parent.parent.parent / "weights"
 _YOLOP_REPO_DIR = _WEIGHTS_DIR / "yolop_repo"
 _WEIGHTS_PATH = _YOLOP_REPO_DIR / "weights" / "End-to-end.pth"
 _TRT_ENGINE_PATH = _WEIGHTS_DIR / "yolop_seg.engine"
+_ONNX_PATH = _WEIGHTS_DIR / "yolop_seg.onnx"
 
 _normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 _transform = transforms.Compose([transforms.ToTensor(), _normalize])
@@ -112,10 +113,72 @@ class YOLOPDetector:
         self.device = torch.device(device) if device else _get_device()
         self._use_trt = False
 
-        if _TRT_ENGINE_PATH.exists() and self.device.type == "cuda":
+        if self.device.type == "cuda":
+            if not _TRT_ENGINE_PATH.exists():
+                self._export_trt_engine()
             self._init_trt()
         else:
             self._init_pytorch()
+
+    def _export_trt_engine(self) -> None:
+        """Export ONNX (if needed) then build TensorRT FP16 engine."""
+        if not _ONNX_PATH.exists():
+            self._export_onnx()
+
+        import tensorrt as trt
+
+        print(f"Building TensorRT FP16 engine from {_ONNX_PATH} (this takes ~8 min on Jetson Orin)...")
+        logger = trt.Logger(trt.Logger.WARNING)
+        builder = trt.Builder(logger)
+        network = builder.create_network(1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH))
+        parser = trt.OnnxParser(network, logger)
+
+        with open(_ONNX_PATH, "rb") as f:
+            if not parser.parse(f.read()):
+                for i in range(parser.num_errors):
+                    print(f"  ONNX parse error: {parser.get_error(i)}")
+                raise RuntimeError("Failed to parse YOLOP ONNX model")
+
+        config = builder.create_builder_config()
+        config.set_memory_pool_limit(trt.MemoryPoolType.WORKSPACE, 1 << 30)
+        config.set_flag(trt.BuilderFlag.FP16)
+
+        engine_bytes = builder.build_serialized_network(network, config)
+        if engine_bytes is None:
+            raise RuntimeError("TensorRT engine build failed")
+
+        _TRT_ENGINE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with open(_TRT_ENGINE_PATH, "wb") as f:
+            f.write(engine_bytes)
+        print(f"TensorRT engine saved to {_TRT_ENGINE_PATH}")
+
+    def _export_onnx(self) -> None:
+        """Export YOLOP PyTorch weights to ONNX."""
+        _ensure_yolop_repo()
+        _ensure_weights()
+
+        repo_str = str(_YOLOP_REPO_DIR)
+        if repo_str not in sys.path:
+            sys.path.insert(0, repo_str)
+
+        from lib.config import cfg
+        from lib.models import get_net
+
+        print(f"Exporting YOLOP to ONNX at {_ONNX_PATH}...")
+        model = get_net(cfg)
+        checkpoint = torch.load(_WEIGHTS_PATH, map_location="cpu", weights_only=False)
+        model.load_state_dict(checkpoint["state_dict"])
+        model.eval()
+
+        dummy = torch.randn(1, 3, _IMG_SIZE, _IMG_SIZE)
+        torch.onnx.export(
+            model, dummy, str(_ONNX_PATH),
+            opset_version=11,
+            input_names=["input"],
+            output_names=["det", "drivable", "lane"],
+            dynamic_axes=None,
+        )
+        print(f"ONNX exported to {_ONNX_PATH}")
 
     def _init_trt(self) -> None:
         import tensorrt as trt
