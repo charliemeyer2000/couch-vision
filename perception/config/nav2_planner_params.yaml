@@ -38,4 +38,4 @@ lifecycle_manager:
   ros__parameters:
     autostart: true
     node_names: ["planner_server"]
-    bond_timeout: 10.0
+    bond_timeout: 60.0
