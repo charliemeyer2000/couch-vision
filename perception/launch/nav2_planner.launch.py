@@ -41,6 +41,18 @@ def generate_launch_description():
         parameters=[nav2_params],
     )
 
+    republish_rgb = Node(
+        condition=IfCondition(slam_enabled),
+        package="image_transport",
+        executable="republish",
+        name="republish_rgb",
+        parameters=[{"in_transport": "compressed", "out_transport": "raw"}],
+        remappings=[
+            ("in/compressed", "/camera/image/compressed"),
+            ("out", "/camera/image"),
+        ],
+    )
+
     rtabmap_slam = Node(
         condition=IfCondition(slam_enabled),
         package="rtabmap_slam",
@@ -49,10 +61,10 @@ def generate_launch_description():
         output="screen",
         parameters=[rtabmap_params],
         remappings=[
-            ("rgb/image", [topic_prefix, "/camera/arkit/image"]),
-            ("rgb/camera_info", [topic_prefix, "/camera/arkit/camera_info"]),
-            ("depth/image", [topic_prefix, "/lidar/depth/image"]),
-            ("odom", [topic_prefix, "/odom"]),
+            ("rgb/image", "/camera/image"),
+            ("rgb/camera_info", "/camera/camera_info"),
+            ("depth/image", "/camera/depth/image"),
+            ("odom", "/odom"),
         ],
     )
 
@@ -90,6 +102,7 @@ def generate_launch_description():
             enable_slam_arg,
             topic_prefix_arg,
             planner,
+            republish_rgb,
             rtabmap_slam,
             static_tf_map_odom,
             static_tf_odom_base,
