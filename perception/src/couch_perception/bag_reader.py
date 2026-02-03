@@ -74,26 +74,30 @@ class SyncedFrame:
     orientation: np.ndarray | None = None  # quaternion (x, y, z, w) from IMU
 
 
-def read_synced_frames(
+def read_all_streams(
     bag_path: str | Path,
     image_suffix: str = "image/compressed",
     depth_suffix: str = "depth/image",
     camera_info_suffix: str = "camera_info",
     imu_suffix: str = "imu",
+    gps_suffix: str = "gps/fix",
+    odom_suffix: str = "odom",
     max_time_diff: float = 0.1,
-) -> Iterator[SyncedFrame]:
-    """Read time-synchronized compressed images, depth maps, camera info, and IMU.
+) -> tuple[Iterator[SyncedFrame], list[GpsFix], list[ImuSample], list[OdomSample]]:
+    """Single-pass streaming bag reader. Reads GPS/IMU/odom (small) into memory,
+    then yields synced image+depth frames on-the-fly without buffering all images.
 
-    Yields SyncedFrame tuples where each compressed image is matched to
-    the nearest depth image and IMU orientation within max_time_diff seconds.
-    Camera intrinsics are read once (assumed static).
+    Returns (frames_iterator, gps_fixes, imu_samples, odom_samples).
+    GPS/IMU/odom are fully loaded; frames are streamed lazily.
     """
     from mcap.reader import make_reader
     from mcap_ros2.decoder import DecoderFactory
 
-    images: list[tuple[float, np.ndarray]] = []
-    depths: list[tuple[float, np.ndarray]] = []
-    imu_orientations: list[tuple[float, np.ndarray]] = []
+    # First pass: read only lightweight scalar topics (GPS, IMU, odom, camera_info).
+    # Skip images/depth to avoid OOM.
+    gps_fixes: list[GpsFix] = []
+    imu_samples: list[ImuSample] = []
+    odom_samples: list[OdomSample] = []
     intrinsics: CameraIntrinsics | None = None
 
     with Path(bag_path).open("rb") as f:
@@ -111,84 +115,7 @@ def read_synced_frames(
                     frame_id=ros_msg.header.frame_id,
                 )
 
-            elif channel.topic.endswith(image_suffix):
-                if hasattr(ros_msg, "format") and hasattr(ros_msg, "data"):
-                    buf = np.frombuffer(ros_msg.data, dtype=np.uint8)
-                    img = cv2.imdecode(buf, cv2.IMREAD_COLOR)
-                    if img is not None:
-                        images.append((ts, img))
-
-            elif channel.topic.endswith(depth_suffix):
-                if ros_msg.encoding == "32FC1":
-                    depth = np.frombuffer(ros_msg.data, dtype=np.float32).reshape(
-                        ros_msg.height, ros_msg.width
-                    )
-                elif ros_msg.encoding == "16UC1":
-                    depth = np.frombuffer(ros_msg.data, dtype=np.uint16).reshape(
-                        ros_msg.height, ros_msg.width
-                    ).astype(np.float32) / 1000.0  # mm to meters
-                else:
-                    continue
-                depths.append((ts, depth))
-
-            elif channel.topic.endswith(imu_suffix) and hasattr(ros_msg, "orientation"):
-                o = ros_msg.orientation
-                quat = np.array([o.x, o.y, o.z, o.w], dtype=np.float64)
-                imu_orientations.append((ts, quat))
-
-    if intrinsics is None:
-        raise ValueError(f"No CameraInfo found matching suffix '{camera_info_suffix}'")
-
-    # Match each image to nearest depth and IMU orientation by timestamp
-    depth_idx = 0
-    imu_idx = 0
-    for img_ts, img in images:
-        # Advance depth index to closest match
-        while depth_idx < len(depths) - 1 and abs(depths[depth_idx + 1][0] - img_ts) < abs(depths[depth_idx][0] - img_ts):
-            depth_idx += 1
-        if depth_idx >= len(depths) or abs(depths[depth_idx][0] - img_ts) > max_time_diff:
-            continue
-
-        # Advance IMU index to closest match
-        orientation = None
-        if imu_orientations:
-            while imu_idx < len(imu_orientations) - 1 and abs(imu_orientations[imu_idx + 1][0] - img_ts) < abs(imu_orientations[imu_idx][0] - img_ts):
-                imu_idx += 1
-            if abs(imu_orientations[imu_idx][0] - img_ts) <= max_time_diff:
-                orientation = imu_orientations[imu_idx][1]
-
-        yield SyncedFrame(
-            timestamp=img_ts,
-            image=img,
-            depth=depths[depth_idx][1],
-            intrinsics=intrinsics,
-            orientation=orientation,
-        )
-
-
-def read_gps_imu_and_odom(
-    bag_path: str | Path,
-    gps_suffix: str = "gps/fix",
-    imu_suffix: str = "imu",
-    odom_suffix: str = "odom",
-) -> tuple[list[GpsFix], list[ImuSample], list[OdomSample]]:
-    """Read all GPS fixes, IMU samples, and odometry from an MCAP bag.
-
-    Returns (gps_fixes, imu_samples, odom_samples) sorted by timestamp.
-    """
-    from mcap.reader import make_reader
-    from mcap_ros2.decoder import DecoderFactory
-
-    gps_fixes: list[GpsFix] = []
-    imu_samples: list[ImuSample] = []
-    odom_samples: list[OdomSample] = []
-
-    with Path(bag_path).open("rb") as f:
-        reader = make_reader(f, decoder_factories=[DecoderFactory()])
-        for _schema, channel, message, ros_msg in reader.iter_decoded_messages():
-            ts = message.log_time / 1e9
-
-            if channel.topic.endswith(gps_suffix):
+            elif channel.topic.endswith(gps_suffix):
                 gps_fixes.append(GpsFix(
                     timestamp=ts,
                     latitude=ros_msg.latitude,
@@ -229,4 +156,93 @@ def read_gps_imu_and_odom(
     gps_fixes.sort(key=lambda g: g.timestamp)
     imu_samples.sort(key=lambda s: s.timestamp)
     odom_samples.sort(key=lambda o: o.timestamp)
-    return gps_fixes, imu_samples, odom_samples
+
+    if intrinsics is None:
+        raise ValueError(f"No CameraInfo found matching suffix '{camera_info_suffix}'")
+
+    # Build IMU timestamp index for fast nearest-neighbor lookup
+    imu_times = np.array([s.timestamp for s in imu_samples]) if imu_samples else np.array([])
+
+    def _stream_frames() -> Iterator[SyncedFrame]:
+        """Second pass: stream image+depth, sync on-the-fly, yield one frame at a time."""
+        pending_depth: tuple[float, np.ndarray] | None = None
+        imu_idx = 0
+
+        with Path(bag_path).open("rb") as f2:
+            reader2 = make_reader(f2, decoder_factories=[DecoderFactory()])
+            for _schema, channel, message, ros_msg in reader2.iter_decoded_messages():
+                ts = message.log_time / 1e9
+
+                if channel.topic.endswith(depth_suffix):
+                    if ros_msg.encoding == "32FC1":
+                        depth = np.frombuffer(ros_msg.data, dtype=np.float32).reshape(
+                            ros_msg.height, ros_msg.width
+                        )
+                    elif ros_msg.encoding == "16UC1":
+                        depth = np.frombuffer(ros_msg.data, dtype=np.uint16).reshape(
+                            ros_msg.height, ros_msg.width
+                        ).astype(np.float32) / 1000.0
+                    else:
+                        continue
+                    pending_depth = (ts, depth)
+
+                elif channel.topic.endswith(image_suffix):
+                    if not (hasattr(ros_msg, "format") and hasattr(ros_msg, "data")):
+                        continue
+                    buf = np.frombuffer(ros_msg.data, dtype=np.uint8)
+                    img = cv2.imdecode(buf, cv2.IMREAD_COLOR)
+                    if img is None:
+                        continue
+
+                    # Match to nearest depth
+                    if pending_depth is None:
+                        continue
+                    depth_ts, depth = pending_depth
+                    if abs(depth_ts - ts) > max_time_diff:
+                        continue
+
+                    # Match to nearest IMU orientation
+                    orientation = None
+                    if len(imu_times) > 0:
+                        while imu_idx < len(imu_times) - 1 and imu_times[imu_idx] < ts:
+                            imu_idx += 1
+                        if abs(imu_times[imu_idx] - ts) <= max_time_diff:
+                            orientation = imu_samples[imu_idx].orientation
+
+                    yield SyncedFrame(
+                        timestamp=ts,
+                        image=img,
+                        depth=depth,
+                        intrinsics=intrinsics,
+                        orientation=orientation,
+                    )
+
+    return _stream_frames(), gps_fixes, imu_samples, odom_samples
+
+
+# Legacy API wrappers for backward compatibility
+def read_synced_frames(
+    bag_path: str | Path,
+    image_suffix: str = "image/compressed",
+    depth_suffix: str = "depth/image",
+    camera_info_suffix: str = "camera_info",
+    imu_suffix: str = "imu",
+    max_time_diff: float = 0.1,
+) -> Iterator[SyncedFrame]:
+    frames, _, _, _ = read_all_streams(
+        bag_path, image_suffix, depth_suffix, camera_info_suffix, imu_suffix,
+        max_time_diff=max_time_diff,
+    )
+    return frames
+
+
+def read_gps_imu_and_odom(
+    bag_path: str | Path,
+    gps_suffix: str = "gps/fix",
+    imu_suffix: str = "imu",
+    odom_suffix: str = "odom",
+) -> tuple[list[GpsFix], list[ImuSample], list[OdomSample]]:
+    _, gps, imu, odom = read_all_streams(
+        bag_path, gps_suffix=gps_suffix, imu_suffix=imu_suffix, odom_suffix=odom_suffix,
+    )
+    return gps, imu, odom
