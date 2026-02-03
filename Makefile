@@ -130,18 +130,14 @@ full-stack:
 	cd perception && \
 	$(if $(BAG),BAG_FILE=$(patsubst bags/%,%,$(BAG)) PLAYBACK_RATE=$(or $(RATE),1.0),LIVE_MODE=1 TOPIC_PREFIX=$(or $(PREFIX),/iphone) NETWORK_MODE=host) \
 	DEST_LAT=$(or $(DEST_LAT),38.036830) DEST_LON=$(or $(DEST_LON),-78.503577) LOOKAHEAD=$(or $(LOOKAHEAD),15.0) \
-	ENABLE_SLAM=$(or $(SLAM),0) \
+	ENABLE_SLAM=1 \
 	DOCKER_RUNTIME=$$RUNTIME DOCKER_ARCH=$$ARCH \
 	docker compose -f docker-compose.nav2.yml build --build-arg DOCKER_ARCH=$$ARCH && \
 	$(if $(BAG),BAG_FILE=$(patsubst bags/%,%,$(BAG)) PLAYBACK_RATE=$(or $(RATE),1.0),LIVE_MODE=1 TOPIC_PREFIX=$(or $(PREFIX),/iphone) NETWORK_MODE=host) \
 	DEST_LAT=$(or $(DEST_LAT),38.036830) DEST_LON=$(or $(DEST_LON),-78.503577) LOOKAHEAD=$(or $(LOOKAHEAD),15.0) \
-	ENABLE_SLAM=$(or $(SLAM),0) \
+	ENABLE_SLAM=1 \
 	DOCKER_RUNTIME=$$RUNTIME DOCKER_ARCH=$$ARCH \
 	docker compose -f docker-compose.nav2.yml up
-
-# SLAM-enabled full stack (convenience target)
-full-stack-slam:
-	SLAM=1 $(MAKE) full-stack $(MAKEFLAGS)
 
 # === Testing ===
 

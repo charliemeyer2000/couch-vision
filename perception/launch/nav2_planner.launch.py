@@ -49,12 +49,11 @@ def generate_launch_description():
         output="screen",
         parameters=[rtabmap_params],
         remappings=[
-            ("rgb/image", [topic_prefix, "/camera/arkit/image/compressed"]),
+            ("rgb/image", [topic_prefix, "/camera/arkit/image"]),
             ("rgb/camera_info", [topic_prefix, "/camera/arkit/camera_info"]),
             ("depth/image", [topic_prefix, "/lidar/depth/image"]),
             ("odom", [topic_prefix, "/odom"]),
         ],
-        arguments=["--delete_db_on_start"],
     )
 
     static_tf_map_odom = Node(
