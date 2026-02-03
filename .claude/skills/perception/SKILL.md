@@ -21,11 +21,13 @@ The perception stack lives in `perception/` and has two modes:
 
 ### Key Files
 
-- `src/couch_perception/yolov8_detector.py` — YOLOv8 wrapper. Auto-detects device (cuda > mps > cpu) and prefers `.engine` over `.pt` if available.
-- `src/couch_perception/yolop_detector.py` — YOLOP wrapper. Clones hustvl/YOLOP repo on first run. Also auto-detects device.
+- `src/couch_perception/yolov8_detector.py` — YOLOv8 wrapper. Auto-detects device (cuda > mps > cpu) and prefers `.engine` over `.pt` if available. Auto-exports TRT engine on first CUDA run (~10 min on Orin).
+- `src/couch_perception/yolop_detector.py` — YOLOP wrapper. Clones hustvl/YOLOP repo on first run. Auto-exports TRT FP16 engine on first CUDA run (PyTorch → ONNX → TRT, ~8 min on Orin).
 - `src/couch_perception/ros_node.py` — ROS2 node. Publishes to `/perception/detections`, `/perception/overlay/compressed`, `/perception/lane_mask`, `/perception/drivable_mask`.
 - `src/couch_perception/runner.py` — Offline CLI entry point.
-- `scripts/export_tensorrt.py` — Export YOLOv8n to TensorRT INT8 engine.
+- `src/couch_perception/bag_reader.py` — MCAP bag reader. Streaming two-pass: scalar data in memory, image+depth streamed lazily. Critical for Jetson (avoids OOM on large bags).
+- `src/couch_perception/frame_source.py` — `BagSource` (bag replay with pacing) + `LiveSource` (ROS2 subscriptions). Both yield `SensorStreams`.
+- `scripts/export_tensorrt.py` — Export YOLOv8n to TensorRT INT8 engine (manual, usually not needed since auto-export exists).
 - `scripts/benchmark.py` — Benchmark PyTorch vs TensorRT inference speed.
 
 ## Platform Differences
@@ -123,3 +125,11 @@ ROS2 must be sourced before creating the venv: `source ~/ros2_jazzy/install/setu
 ### NumPy crash on Jetson
 
 Jetson torch 2.8.0 needs `numpy<2`. This is enforced via `sys_platform == 'linux'` marker in pyproject.toml.
+
+### Jetson OOM on large bags
+
+The streaming bag reader (`bag_reader.py`) fixed this. If you see OOM, check that `read_all_streams()` is being used (not the old `read_synced_frames` which loaded everything into memory). A 6.9GB bag now uses ~2.1GB RAM.
+
+### TRT engines not persisting across container restarts
+
+Engines must be saved to the volume-mounted `weights/` directory. `yolov8_detector.py` resolves `.pt` paths relative to `_WEIGHTS_DIR` so ultralytics downloads and exports into the mounted volume. If engines disappear, check that `./weights:/perception/weights` is in docker-compose.yml.

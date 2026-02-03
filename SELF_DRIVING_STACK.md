@@ -532,6 +532,8 @@ Given two GPS coordinates, a `nav_msgs/Path` is planned and visible in Foxglove.
   - `perception_pipeline.py` — PerceptionPipeline class (detect → project → rotate)
   - `frame_source.py` — BagSource with playback pacing
 - [x] pytest-benchmark infrastructure (`make test`, `make benchmark`) for profiling on Mac and Jetson
+- [x] TensorRT auto-export on first CUDA run: YOLOP (PyTorch → ONNX → TRT FP16) and YOLOv8 (.pt → engine via ultralytics). Engines saved to volume-mounted `weights/` dir and persist across container restarts.
+- [x] Streaming bag reader: single pass for scalar data (GPS/IMU/odom), lazy second pass for image+depth. No longer loads all frames into memory — fixed Jetson OOM on large bags.
 - [x] YOLOP TensorRT FP16 backend: exported seg-only ONNX → TRT engine, 2.1x speedup (80ms → 37.5ms on Jetson)
 - [x] Configurable perception pipeline (`PipelineConfig` dataclass + YAML presets):
   - `configs/default.yaml` — current behavior (YOLOP + YOLOv8n)
@@ -562,6 +564,16 @@ Given two GPS coordinates, a `nav_msgs/Path` is planned and visible in Foxglove.
 | fast (no seg) | skip | 20.9ms | ~22ms | ~45 |
 
 Non-inference code (projection, rotation, costmap build) is sub-millisecond — not a bottleneck.
+
+**Full-stack benchmarks (Jetson Orin Nano, 6.9GB bag, TRT engines):**
+| Metric | Value |
+|--------|-------|
+| Perception FPS | 8.6–17.3, median ~12 |
+| GPU utilization | 99% (GR3D_FREQ) |
+| CPU utilization | 38% user, 52% idle |
+| RAM usage | 2.1 / 7.6 GB (28%) |
+| Power draw | 5.9W total, 2.0W CPU+GPU |
+| Thermal | 47°C (well below 97°C throttle) |
 
 #### Deliverable
 Live bounding boxes on camera feed in Foxglove. `/detections` topic publishing `Detection2DArray` at 10+ FPS.
@@ -1093,6 +1105,17 @@ The `make full-stack` command runs Nav2 + foxglove_bridge + perception in a sing
 - Nav2 planner_server runs inside the container, receives costmaps via ROS2 topics
 - On macOS: requires Colima (`colima start --cpu 4 --memory 8`), NOT Docker Desktop
 - Foxglove connect to `ws://localhost:8765` to visualize camera, pointclouds, costmap, and planned path
+- **Multi-arch**: `dustynv/pytorch:r36.4.0` base on Jetson (arm64), `ros:jazzy` on amd64/Mac. CI builds amd64 only; Jetson builds locally.
+- **Volume mounts**: `./weights:/perception/weights` persists TRT engines and downloaded `.pt` files across container restarts
+- **Jetson Docker**: requires `nvidia` container runtime. If `permission denied` on Docker socket, run `sudo usermod -aG docker $USER` and re-login.
+
+### Streaming Bag Reader
+
+`bag_reader.py` uses a two-pass approach to avoid loading all images into memory:
+1. **First pass**: reads lightweight scalar topics (GPS, IMU, odom, camera_info) into lists
+2. **Second pass**: lazy iterator streams image+depth frames one at a time, syncing with nearest depth/IMU on-the-fly
+
+This is critical for Jetson (8GB shared RAM). The old approach loaded all decoded frames into memory, causing OOM on bags >1GB. The streaming reader processes a 6.9GB bag using only ~2.1GB RAM.
 
 ### Foxglove Navigation Control Extension (PR #18)
 
@@ -1136,6 +1159,8 @@ foxglove_bridge is built from source on the Jetson at `~/ros2_jazzy/`. It requir
 
 ### TensorRT Optimization (Jetson Orin Nano)
 
+- **TRT engines auto-export on first CUDA run.** No manual export step needed. YOLOP: `_export_onnx()` → `_export_trt_engine()` (PyTorch → ONNX → TRT FP16). YOLOv8: `ultralytics model.export(format="engine", half=True)`.
+- **Auto-export takes ~10 min per model on Orin Nano.** First `make full-stack` run is slow; subsequent runs start in seconds since engines are cached in volume-mounted `weights/` dir.
 - **YOLOP full model fails TRT export** — the detection head causes "insufficient workspace" errors. Solution: export a segmentation-only wrapper that strips the detection head (only seg outputs are used anyway).
 - **YOLOP fp16 via `.half()`** — fails because input tensor stays float32 but weights become float16. Not a viable shortcut.
 - **torch.cuda.amp autocast** — 20% slower than fp32 for YOLOP on Jetson. Don't bother.
@@ -1143,6 +1168,7 @@ foxglove_bridge is built from source on the Jetson at `~/ros2_jazzy/`. It requir
 - **TRT engine build** takes ~8 minutes on Jetson for YOLOP seg-only. Use `trtexec --memPoolSize=workspace:2048MiB` (not deprecated `--workspace` flag).
 - **YOLOPDetector auto-detects TRT**: if `weights/yolop_seg.engine` exists, uses TRT backend; otherwise falls back to PyTorch. Works seamlessly on Mac (no engine file → PyTorch).
 - **Postprocessing optimization**: argmax at model output resolution (80×80) then nearest-neighbor upsample to full resolution, instead of bilinear-upsampling float logits then argmax. Same output, less computation.
+- **Delete `*.engine` to force re-export** — needed when TensorRT version changes (e.g. JetPack upgrade).
 
 ### Configurable Perception Pipeline
 
