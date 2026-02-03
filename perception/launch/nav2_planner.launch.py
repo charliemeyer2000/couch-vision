@@ -2,7 +2,6 @@
 
 import os
 from launch import LaunchDescription
-from launch.actions import TimerAction
 from launch_ros.actions import Node
 
 
@@ -21,23 +20,8 @@ def generate_launch_description():
         parameters=[params_file],
     )
 
-    # Delay lifecycle_manager so planner_server has time to register its services
-    lifecycle = TimerAction(
-        period=3.0,
-        actions=[
-            Node(
-                package="nav2_lifecycle_manager",
-                executable="lifecycle_manager",
-                name="lifecycle_manager",
-                output="screen",
-                parameters=[params_file],
-            ),
-        ],
-    )
-
     return LaunchDescription([
         planner,
-        lifecycle,
         # Static TF: map → base_link (identity — ego-centric)
         Node(
             package="tf2_ros",

@@ -786,10 +786,7 @@ class Nav2Planner:
         self._status_timer.cancel()
         self._planning_executor.shutdown(wait=False)
         self._pipeline.shutdown()
-        try:
-            self._navigator.lifecycleShutdown()
-        except RuntimeError:
-            pass  # executor already spinning from background thread
+        self._navigator.destroyNode()
 
 
 # ── CLI entry point ───────────────────────────────────────────────────────
