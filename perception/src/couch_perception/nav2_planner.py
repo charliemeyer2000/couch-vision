@@ -396,23 +396,48 @@ class Nav2Planner:
         self._route_enu: np.ndarray | None = None
         self._route_resolved = False
 
-        # Nav2 — use node's executor (already spinning on background thread)
-        # instead of BasicNavigator._waitForNodeToActivate which creates a
-        # conflicting executor.
+        # Nav2 — manually manage lifecycle transitions since autostart=false
+        # (avoids race where lifecycle_manager times out configuring planner_server)
         print("Waiting for Nav2 planner server...")
         self._navigator = BasicNavigator()
-        from lifecycle_msgs.srv import GetState
-        cli = node.create_client(GetState, "/planner_server/get_state")
-        while not cli.wait_for_service(timeout_sec=2.0):
+        from lifecycle_msgs.srv import ChangeState, GetState
+        from lifecycle_msgs.msg import Transition
+
+        get_state = node.create_client(GetState, "/planner_server/get_state")
+        change_state = node.create_client(ChangeState, "/planner_server/change_state")
+        while not get_state.wait_for_service(timeout_sec=2.0):
             print("  planner_server not yet available...")
-        while True:
-            future = cli.call_async(GetState.Request())
-            while not future.done():
+        change_state.wait_for_service(timeout_sec=5.0)
+
+        def _get_state() -> int:
+            f = get_state.call_async(GetState.Request())
+            while not f.done():
                 time.sleep(0.1)
-            if future.result() and future.result().current_state.id == 3:
-                break
-            time.sleep(0.5)
-        node.destroy_client(cli)
+            return f.result().current_state.id if f.result() else -1
+
+        def _change_state(transition_id: int) -> bool:
+            req = ChangeState.Request()
+            req.transition = Transition(id=transition_id)
+            f = change_state.call_async(req)
+            while not f.done():
+                time.sleep(0.1)
+            return f.result().success if f.result() else False
+
+        state = _get_state()
+        # 1=unconfigured, 2=inactive, 3=active
+        if state == 1:
+            print("  Configuring planner_server...")
+            _change_state(Transition.TRANSITION_CONFIGURE)
+            while _get_state() != 2:
+                time.sleep(0.5)
+        state = _get_state()
+        if state == 2:
+            print("  Activating planner_server...")
+            _change_state(Transition.TRANSITION_ACTIVATE)
+            while _get_state() != 3:
+                time.sleep(0.5)
+        node.destroy_client(get_state)
+        node.destroy_client(change_state)
         print("Nav2 planner is active!")
 
         # ROS2 publishers

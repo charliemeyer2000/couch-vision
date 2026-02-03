@@ -14,8 +14,9 @@ echo "Starting Nav2 planner server..."
 ros2 launch /perception/launch/nav2_planner.launch.py &
 NAV2_PID=$!
 
-# Give Nav2 time to initialize
-sleep 5
+# Give Nav2 time to initialize (planner_server needs time to set up
+# costmap plugins before lifecycle_manager tries to configure it)
+sleep 10
 
 # Run our planner node.
 # Source the venv but keep ROS2 system packages on PYTHONPATH.
