@@ -36,9 +36,8 @@ global_costmap:
 
 lifecycle_manager:
   ros__parameters:
-    autostart: true
+    autostart: false
     node_names: ["planner_server"]
     bond_timeout: 60.0
     attempt_respawn_reconnection: true
     bond_respawn_max_duration: 30.0
-    service_call_timeout: 10.0
