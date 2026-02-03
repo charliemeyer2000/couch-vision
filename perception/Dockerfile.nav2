@@ -13,28 +13,35 @@ FROM base-${DOCKER_ARCH} AS base
 # Re-declare after FROM so it's available in RUN
 ARG DOCKER_ARCH=amd64
 
-# amd64: install Nav2 + deps via apt (packages exist in ros:jazzy repos)
-# arm64: dustynv/pytorch already has numpy, opencv, torch+CUDA in /opt/venv.
-#        Nav2 apt packages don't exist for this image — skip them.
-RUN if [ "$DOCKER_ARCH" = "amd64" ]; then \
+# Both platforms need Nav2 + ROS2.
+# amd64 (ros:jazzy): ROS2 repos are pre-configured.
+# arm64 (dustynv/pytorch): No ROS2 — add the apt repo first.
+RUN if [ "$DOCKER_ARCH" = "arm64" ]; then \
         apt-get update && apt-get install -y --no-install-recommends \
-            ros-jazzy-navigation2 \
-            ros-jazzy-nav2-bringup \
-            ros-jazzy-nav2-simple-commander \
-            ros-jazzy-nav2-planner \
-            ros-jazzy-nav2-costmap-2d \
-            ros-jazzy-nav2-lifecycle-manager \
-            ros-jazzy-nav2-navfn-planner \
-            ros-jazzy-tf2-ros \
-            ros-jazzy-foxglove-bridge \
-            ros-jazzy-vision-msgs \
-            ros-jazzy-rmw-cyclonedds-cpp \
-            python3-numpy python3-opencv git \
-        && rm -rf /var/lib/apt/lists/*; \
+            curl gnupg2 lsb-release libgl1 libglib2.0-0 && \
+        curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key \
+            -o /usr/share/keyrings/ros-archive-keyring.gpg && \
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(lsb_release -cs) main" \
+            > /etc/apt/sources.list.d/ros2.list && \
+        apt-get update; \
     else \
-        apt-get update && apt-get install -y --no-install-recommends git libgl1 libglib2.0-0 \
-        && rm -rf /var/lib/apt/lists/*; \
-    fi
+        apt-get update; \
+    fi && \
+    apt-get install -y --no-install-recommends \
+        ros-jazzy-ros-base \
+        ros-jazzy-navigation2 \
+        ros-jazzy-nav2-bringup \
+        ros-jazzy-nav2-simple-commander \
+        ros-jazzy-nav2-planner \
+        ros-jazzy-nav2-costmap-2d \
+        ros-jazzy-nav2-lifecycle-manager \
+        ros-jazzy-nav2-navfn-planner \
+        ros-jazzy-tf2-ros \
+        ros-jazzy-foxglove-bridge \
+        ros-jazzy-vision-msgs \
+        ros-jazzy-rmw-cyclonedds-cpp \
+        python3-numpy git \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 
