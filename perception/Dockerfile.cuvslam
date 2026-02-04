@@ -1,0 +1,57 @@
+# Dockerfile for cuVSLAM + nvblox on Jetson (arm64 only).
+# Uses NVIDIA Isaac ROS base image with GPU-accelerated SLAM.
+#
+# This image is Jetson-only. For amd64/Mac, use Dockerfile.rtabmap.
+#
+# Note: Isaac ROS 3.2+ supports ROS2 Jazzy. Earlier versions use Humble.
+# Update the base image tag as newer releases become available.
+
+FROM nvcr.io/nvidia/isaac/ros:arm64-ros2_jazzy AS base
+
+# Nav2 and ROS2 packages
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ros-jazzy-navigation2 \
+    ros-jazzy-nav2-bringup \
+    ros-jazzy-nav2-simple-commander \
+    ros-jazzy-nav2-planner \
+    ros-jazzy-nav2-costmap-2d \
+    ros-jazzy-nav2-lifecycle-manager \
+    ros-jazzy-nav2-navfn-planner \
+    ros-jazzy-tf2-ros \
+    ros-jazzy-foxglove-bridge \
+    ros-jazzy-vision-msgs \
+    ros-jazzy-rmw-cyclonedds-cpp \
+    ros-jazzy-image-transport-plugins \
+    python3-numpy git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Isaac ROS Visual SLAM and nvblox (from NVIDIA apt repo in base image)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ros-jazzy-isaac-ros-visual-slam \
+    ros-jazzy-isaac-ros-nvblox \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
+
+WORKDIR /perception
+
+COPY pyproject.toml ./
+
+# Isaac ROS base has Python 3.10 with CUDA torch pre-installed.
+# Install our deps into a venv that inherits system packages.
+RUN PY_VER=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')") && \
+    uv venv --python "python${PY_VER}" --system-site-packages && \
+    uv pip install -e .
+
+COPY src/ src/
+COPY config/ config/
+COPY launch/ launch/
+COPY entrypoint_nav2.sh /entrypoint_nav2.sh
+RUN chmod +x /entrypoint_nav2.sh
+
+ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+
+EXPOSE 8765
+
+ENTRYPOINT ["/entrypoint_nav2.sh"]
+CMD ["--bag", "/bags/bag.mcap"]

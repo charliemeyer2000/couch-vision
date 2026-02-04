@@ -373,6 +373,7 @@ class Nav2Planner:
         self._dest_lon = dest_lon
         self._lookahead_m = lookahead_m
         self._republish_sensors = republish_sensors
+        self._slam_backend = os.environ.get("SLAM_BACKEND", "rtabmap")
 
         # Perception
         self._pipeline = PerceptionPipeline(config=config)
@@ -478,6 +479,9 @@ class Nav2Planner:
             self._odom_pub = node.create_publisher(Odometry, "/odom", qos)
             self._imu_pub = node.create_publisher(Imu, "/imu", qos)
             self._gps_pub = node.create_publisher(NavSatFix, "/gps/fix", qos)
+            # Grayscale image for cuVSLAM (expects mono8)
+            if self._slam_backend == "cuvslam":
+                self._camera_gray_pub = node.create_publisher(Image, "/camera/image_gray", qos)
 
         # Poses
         self._goal_pose = PoseStamped()
@@ -768,6 +772,18 @@ class Nav2Planner:
             _, cam_buf = cv2.imencode(".jpg", rgb_resized, [cv2.IMWRITE_JPEG_QUALITY, 80])
             cam_msg.data = cam_buf.tobytes()
             self._camera_pub.publish(cam_msg)
+
+            # Grayscale for cuVSLAM (mono8 format)
+            if self._slam_backend == "cuvslam":
+                gray = cv2.cvtColor(rgb_resized, cv2.COLOR_BGR2GRAY)
+                gray_msg = Image()
+                gray_msg.header = _header(frame.timestamp, "camera")
+                gray_msg.height, gray_msg.width = gray.shape
+                gray_msg.encoding = "mono8"
+                gray_msg.is_bigendian = False
+                gray_msg.step = gray_msg.width
+                gray_msg.data = gray.tobytes()
+                self._camera_gray_pub.publish(gray_msg)
 
             self._camera_info_pub.publish(
                 self._make_camera_info_scaled(frame.intrinsics, frame.timestamp, target_w, target_h)

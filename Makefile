@@ -6,6 +6,10 @@ BRIDGE_PORT ?= 7447
 BAG ?= bags/2026-01-29_12-10-44/walk_around_university_all_data.mcap
 BAG_DIR ?= bags
 
+# SLAM backend selection: none, rtabmap (default), cuvslam (Jetson only)
+SLAM_BACKEND ?= rtabmap
+SLAM_DOCKERFILE := $(if $(filter cuvslam,$(SLAM_BACKEND)),Dockerfile.cuvslam,Dockerfile.rtabmap)
+
 # ROS2 setup — searches common install locations, uses CycloneDDS
 ROS2_SETUP := export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp; \
 			  export CYCLONEDDS_URI=file://$(realpath cyclonedds.xml); \
@@ -26,7 +30,7 @@ endif
 
 .PHONY: help setup xcode bridge \
         topics hz echo rviz bag bag-play verify \
-        perception-node full-stack full-stack-slam \
+        perception-node full-stack full-stack-cuvslam \
         test benchmark lint deploy-jetson ip clean
 
 help:
@@ -49,10 +53,10 @@ help:
 	@echo "  make verify BAG=path                  Verify bag contents"
 	@echo ""
 	@echo "Perception:"
-	@echo "  make full-stack BAG=path.mcap         Perception + Nav2 planning (Docker, bag replay)"
+	@echo "  make full-stack BAG=path.mcap         Perception + Nav2 + RTAB-Map SLAM (default)"
 	@echo "  make full-stack                       Live mode — subscribes to ROS2 topics"
-	@echo "  make full-stack-slam BAG=path.mcap    Full stack with RTAB-Map SLAM enabled"
-	@echo "  make full-stack SLAM=1 BAG=...        Alternative: enable SLAM via variable"
+	@echo "  make full-stack-cuvslam BAG=...       Full stack with cuVSLAM + nvblox (Jetson only)"
+	@echo "  make full-stack SLAM_BACKEND=none     Disable SLAM (static TF only)"
 	@echo "  make perception-node                  Run live perception ROS2 node (no Nav2)"
 	@echo ""
 	@echo "Testing:"
@@ -130,14 +134,17 @@ full-stack:
 	cd perception && \
 	$(if $(BAG),BAG_FILE=$(patsubst bags/%,%,$(BAG)) PLAYBACK_RATE=$(or $(RATE),1.0),LIVE_MODE=1 TOPIC_PREFIX=$(or $(PREFIX),/iphone) NETWORK_MODE=host) \
 	DEST_LAT=$(or $(DEST_LAT),38.036830) DEST_LON=$(or $(DEST_LON),-78.503577) LOOKAHEAD=$(or $(LOOKAHEAD),15.0) \
-	ENABLE_SLAM=1 \
+	SLAM_BACKEND=$(SLAM_BACKEND) SLAM_DOCKERFILE=$(SLAM_DOCKERFILE) \
 	DOCKER_RUNTIME=$$RUNTIME DOCKER_ARCH=$$ARCH \
 	docker compose -f docker-compose.nav2.yml build --build-arg DOCKER_ARCH=$$ARCH && \
 	$(if $(BAG),BAG_FILE=$(patsubst bags/%,%,$(BAG)) PLAYBACK_RATE=$(or $(RATE),1.0),LIVE_MODE=1 TOPIC_PREFIX=$(or $(PREFIX),/iphone) NETWORK_MODE=host) \
 	DEST_LAT=$(or $(DEST_LAT),38.036830) DEST_LON=$(or $(DEST_LON),-78.503577) LOOKAHEAD=$(or $(LOOKAHEAD),15.0) \
-	ENABLE_SLAM=1 \
+	SLAM_BACKEND=$(SLAM_BACKEND) SLAM_DOCKERFILE=$(SLAM_DOCKERFILE) \
 	DOCKER_RUNTIME=$$RUNTIME DOCKER_ARCH=$$ARCH \
 	docker compose -f docker-compose.nav2.yml up
+
+full-stack-cuvslam:
+	$(MAKE) full-stack SLAM_BACKEND=cuvslam
 
 # === Testing ===
 

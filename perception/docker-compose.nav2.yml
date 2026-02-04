@@ -2,7 +2,7 @@ services:
   nav2-planner:
     build:
       context: .
-      dockerfile: Dockerfile.nav2
+      dockerfile: "${SLAM_DOCKERFILE:-Dockerfile.rtabmap}"
       args:
         DOCKER_ARCH: "${DOCKER_ARCH:-amd64}"
     runtime: "${DOCKER_RUNTIME:-runc}"
@@ -12,7 +12,7 @@ services:
       - ./weights:/perception/weights
       - ./config:/perception/config:ro
       - ../bags:/bags:ro
-      - rtabmap-data:/root/.ros
+      - slam-data:/root/.ros
     environment:
       - GOOGLE_MAPS_API_KEY=${GOOGLE_MAPS_API_KEY:-}
       - LIVE_MODE=${LIVE_MODE:-}
@@ -20,7 +20,7 @@ services:
       - DEST_LAT=${DEST_LAT:-38.036830}
       - DEST_LON=${DEST_LON:--78.503577}
       - LOOKAHEAD=${LOOKAHEAD:-15.0}
-      - ENABLE_SLAM=${ENABLE_SLAM:-0}
+      - SLAM_BACKEND=${SLAM_BACKEND:-rtabmap}
     network_mode: "${NETWORK_MODE:-bridge}"
     command: [
       "--bag", "/bags/${BAG_FILE:-walk_around_university_all_data.mcap}",
@@ -31,4 +31,4 @@ services:
     ]
 
 volumes:
-  rtabmap-data:
+  slam-data:

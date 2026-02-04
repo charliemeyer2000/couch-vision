@@ -1,0 +1,37 @@
+# nvblox parameters for dense 3D mapping with cuVSLAM.
+# Creates occupancy grid from depth images for Nav2 costmap.
+#
+# nvblox runs alongside cuVSLAM, consuming depth + pose to build a 3D map,
+# then outputs 2D slices as OccupancyGrid for navigation.
+
+nvblox_node:
+  ros__parameters:
+    # Voxel resolution (meters)
+    voxel_size: 0.05
+
+    # Map type: static_occupancy for navigation costmaps
+    # Options: static_occupancy, static_tsdf, dynamic
+    map_type: "static_occupancy"
+
+    # 2D slice parameters for OccupancyGrid output
+    slice_height: 0.5
+    esdf_distance_slice: true
+
+    # Sensor range limits (meters)
+    max_integration_distance_m: 5.0
+    min_integration_distance_m: 0.1
+
+    # Frame IDs
+    global_frame: "map"
+
+    # Integration settings
+    max_tsdf_update_hz: 10.0
+    max_mesh_update_hz: 5.0
+    max_esdf_update_hz: 5.0
+
+    # Memory management
+    clear_outside_radius_m: 10.0
+    clearing_enabled: true
+
+    # Output topics (remapped in launch file)
+    # /nvblox_node/static_map_slice -> /map for Nav2

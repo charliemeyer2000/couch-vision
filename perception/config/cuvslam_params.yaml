@@ -1,0 +1,40 @@
+# Isaac ROS cuVSLAM parameters for CouchVision.
+# GPU-accelerated visual SLAM using stereo/mono camera input.
+#
+# cuVSLAM expects grayscale mono8 images. The nav2_planner.py publishes
+# grayscale to /camera/image_gray when SLAM_BACKEND=cuvslam.
+
+visual_slam_node:
+  ros__parameters:
+    # Camera configuration
+    num_cameras: 1
+    camera_optical_frames: ["camera"]
+
+    # Frame IDs (must match TF tree)
+    map_frame: "map"
+    odom_frame: "odom"
+    base_frame: "base_link"
+
+    # Disable IMU fusion (using external odometry from ARKit)
+    enable_imu_fusion: false
+
+    # Disable ground constraint (not a wheeled robot on flat ground)
+    enable_ground_constraint: false
+
+    # Enable full SLAM (localization + mapping)
+    enable_localization_n_mapping: true
+
+    # Publish TF
+    publish_odom_to_base_tf: true
+    publish_map_to_odom_tf: true
+
+    # Image processing
+    rectified_images: true
+    img_jitter_threshold_ms: 35.0
+
+    # Feature tracking
+    max_num_features: 500
+    feature_threshold: 20
+
+    # Verbosity (0=quiet, 1=info, 2=debug)
+    verbosity: 1
