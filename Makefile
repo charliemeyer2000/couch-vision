@@ -30,7 +30,7 @@ endif
 
 .PHONY: help setup xcode bridge \
         topics hz echo rviz bag bag-play verify \
-        perception-node full-stack full-stack-help full-stack-cuvslam \
+        perception-node full-stack full-stack-help \
         test benchmark lint deploy-jetson ip clean
 
 help:
@@ -177,9 +177,6 @@ full-stack-help:
 	@echo ""
 	@echo "  # Disable SLAM entirely"
 	@echo "  make full-stack BAG=bags/walk.mcap SLAM_BACKEND=none"
-	@echo ""
-	@echo "SHORTCUTS"
-	@echo "  make full-stack-cuvslam BAG=...   Same as SLAM_BACKEND=cuvslam"
 
 full-stack:
 ifeq ($(HELP),1)
@@ -200,9 +197,6 @@ else
 	DOCKER_RUNTIME=$$RUNTIME DOCKER_ARCH=$$ARCH \
 	docker compose -f docker-compose.nav2.yml up
 endif
-
-full-stack-cuvslam:
-	$(MAKE) full-stack SLAM_BACKEND=cuvslam
 
 # === Testing ===
 
