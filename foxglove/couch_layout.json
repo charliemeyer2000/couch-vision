@@ -141,7 +141,7 @@
       "followingViewWidth": 30
     },
     "RosOut!logs": {},
-    "Navigation Control [local]!navctrl": {}
+    "Navigation Control.Navigation Control!navctrl": {}
   },
   "globalVariables": {},
   "userNodes": {},
@@ -169,7 +169,7 @@
     },
     "second": {
       "direction": "column",
-      "first": "Navigation Control [local]!navctrl",
+      "first": "Navigation Control.Navigation Control!navctrl",
       "second": {
         "direction": "column",
         "first": "map!gps",
