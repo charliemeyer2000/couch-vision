@@ -7,6 +7,7 @@ rtabmap:
     subscribe_depth: true
     subscribe_rgb: true
     subscribe_odom: true
+    subscribe_imu: false
     odom_sensor_sync: true
     approx_sync: true
     queue_size: 10
@@ -52,5 +53,5 @@ rtabmap:
 
     Db/Sqlite3InMemory: "true"
 
-    rgb/image_transport: "compressed"
+    rgb/image_transport: "raw"
     depth/image_transport: "raw"

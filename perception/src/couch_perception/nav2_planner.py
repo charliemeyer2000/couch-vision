@@ -11,6 +11,7 @@ Visualization via foxglove_bridge (ws://localhost:8765).
 """
 
 import argparse
+import bisect
 import copy
 import json
 import math
@@ -44,6 +45,7 @@ from couch_perception.config import PipelineConfig
 from couch_perception.ekf import EKF
 from couch_perception.frame_source import BagSource, LiveSource, SensorStreams
 from couch_perception.geo import geodetic_to_enu, ROTUNDA_LAT, ROTUNDA_LON
+from couch_perception.gpu_utils import resize_image, resize_depth
 from couch_perception.perception_pipeline import PerceptionPipeline
 from couch_perception.costmap import (
     build_costmap,
@@ -584,16 +586,20 @@ class Nav2Planner:
         return msg
 
     def _publish_odom_nearest(self, timestamp: float, odom_samples: list[OdomSample]) -> None:
-        """Publish the odom sample nearest to the given timestamp."""
+        """Publish the odom sample nearest to the given timestamp (O(log n) binary search)."""
         if not odom_samples or not hasattr(self, "_odom_pub"):
             return
-        best_idx = 0
-        best_diff = abs(odom_samples[0].timestamp - timestamp)
-        for i, sample in enumerate(odom_samples):
-            diff = abs(sample.timestamp - timestamp)
-            if diff < best_diff:
-                best_diff = diff
-                best_idx = i
+        # Binary search for insertion point
+        idx = bisect.bisect_left(odom_samples, timestamp, key=lambda o: o.timestamp)
+        # Compare neighbors to find closest
+        if idx == 0:
+            best_idx = 0
+        elif idx == len(odom_samples):
+            best_idx = len(odom_samples) - 1
+        elif timestamp - odom_samples[idx - 1].timestamp <= odom_samples[idx].timestamp - timestamp:
+            best_idx = idx - 1
+        else:
+            best_idx = idx
         sample = odom_samples[best_idx]
         msg = Odometry()
         msg.header.stamp.sec = int(sample.timestamp)
@@ -753,8 +759,8 @@ class Nav2Planner:
             # Resize RGB and depth to common resolution for RTAB-Map SLAM
             # RGB is 1920x1440, depth is 256x192 - they must match for SLAM
             target_w, target_h = 512, 384
-            rgb_resized = cv2.resize(frame.image, (target_w, target_h), interpolation=cv2.INTER_AREA)
-            depth_resized = cv2.resize(frame.depth, (target_w, target_h), interpolation=cv2.INTER_NEAREST)
+            rgb_resized = resize_image(frame.image, (target_w, target_h), cv2.INTER_AREA)
+            depth_resized = resize_depth(frame.depth, (target_w, target_h))
 
             cam_msg = CompressedImage()
             cam_msg.header = _header(frame.timestamp, "camera")

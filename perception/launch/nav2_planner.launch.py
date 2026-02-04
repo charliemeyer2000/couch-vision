@@ -64,6 +64,7 @@ def generate_launch_description():
             ("rgb/image", "/camera/image"),
             ("rgb/camera_info", "/camera/camera_info"),
             ("depth/image", "/camera/depth/image"),
+            ("depth/camera_info", "/camera/camera_info"),
             ("odom", "/odom"),
         ],
     )

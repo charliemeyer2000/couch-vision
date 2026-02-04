@@ -584,7 +584,7 @@ Live bounding boxes on camera feed in Foxglove. `/detections` topic publishing `
 ### Phase 4: SLAM 🗺️
 **Goal:** Build and localize in a map
 
-**Status:** Not Started
+**Status:** In Progress — RTAB-Map integrated into Nav2 Docker stack (PR #20), WM=6+ keyframes working
 
 **Prerequisites:** Phase 1 (camera + depth streaming), Phase 2 (EKF odometry)
 
@@ -593,13 +593,16 @@ Live bounding boxes on camera feed in Foxglove. `/detections` topic publishing `
 - [ ] **Stretch: Isaac ROS Visual SLAM** — GPU-accelerated but tight on Orin Nano (8GB shared memory), requires raw images
 
 #### Tasks — RTAB-Map
-- [ ] Install: `sudo apt install ros-jazzy-rtabmap-ros`
-- [ ] Set up image_transport compressed subscriber (RTAB-Map supports this natively)
-- [ ] Create launch file with correct topic remapping (see below)
-- [ ] Test SLAM with manual driving (teleop or carry phone around)
-- [ ] Verify map quality in Foxglove
-- [ ] Test loop closure
-- [ ] Save map
+- [x] Install: `ros-jazzy-rtabmap-ros` added to Dockerfile.nav2
+- [x] Set up image_transport compressed subscriber (republish node decompresses to raw)
+- [x] Create launch file with correct topic remapping (`nav2_planner.launch.py`)
+- [x] Fix RGB/depth resolution mismatch: resize both to 512×384 for SLAM (was 1920×1440 RGB, 256×192 depth)
+- [x] Scale camera intrinsics to match resized images
+- [x] Tune RTAB-Map params for keyframe creation (ORB features, rehearsal threshold, intermediate nodes)
+- [x] Test SLAM with bag replay — WM=6+ keyframes, `/map` OccupancyGrid published
+- [ ] Test loop closure detection
+- [ ] Verify map quality in Foxglove (map panel + trajectory)
+- [ ] Test with live iPhone data
 
 #### Tasks — Common
 - [ ] Drive couch around entire operating area
@@ -607,23 +610,42 @@ Live bounding boxes on camera feed in Foxglove. `/detections` topic publishing `
 - [ ] Save map: `ros2 run nav2_map_server map_saver_cli -f ~/maps/house`
 - [ ] Test localization with saved map (restart and relocalize)
 
-#### RTAB-Map Launch
-```bash
-ros2 launch rtabmap_launch rtabmap.launch.py \
-  rgb_topic:=/iphone/camera/back_wide/image/compressed \
-  depth_topic:=/iphone/lidar/depth/image \
-  camera_info_topic:=/iphone/camera/back_wide/camera_info \
-  frame_id:=base_link \
-  approx_sync:=true \
-  qos:=2
+#### RTAB-Map Integration (Working)
+
+RTAB-Map is integrated into the Nav2 Docker stack via `perception/launch/nav2_planner.launch.py`. Key configuration:
+
+**Launch file** (`nav2_planner.launch.py`):
+- Republish node: decompresses `/camera/image/compressed` → `/camera/image` (raw)
+- RTAB-Map node: subscribes to `/camera/image`, `/camera/depth/image`, `/camera/camera_info`
+- Static TF: `odom→base_link`, `base_link→camera`
+- SLAM always enabled (was optional via `ENABLE_SLAM` env var, now always on)
+
+**Critical fix: RGB/depth resolution mismatch** (`nav2_planner.py`):
+- Original: RGB 1920×1440, depth 256×192 — RTAB-Map ignored depth for feature detection
+- Fix: Both resized to 512×384 in `nav2_planner.py` before publishing
+- Camera intrinsics scaled proportionally via `_make_camera_info_scaled()`
+
+**RTAB-Map params** (`perception/config/rtabmap_params.yaml`):
+```yaml
+Kp/MaxFeatures: "500"           # ORB features per frame
+Kp/DetectorStrategy: "6"        # ORB detector
+Vis/FeatureType: "6"            # Must match detector
+Mem/RehearsalSimilarity: "0.2"  # Lower = more distinct keyframes
+Vis/MinInliers: "15"            # Reject bad keyframes
+Rtabmap/CreateIntermediateNodes: "true"  # Denser graph
 ```
 
-Note: If RTAB-Map doesn't accept compressed directly on `rgb_topic`, use image_transport republish:
+**Run:**
 ```bash
-ros2 run image_transport republish compressed raw \
-  --ros-args \
-  -r in/compressed:=/iphone/camera/back_wide/image/compressed \
-  -r out:=/iphone/camera/back_wide/image_raw
+make full-stack BAG=bags/walk_around_university_all_data.mcap
+# Connect Foxglove to ws://localhost:8765
+# Look for WM=N in logs (N > 1 means SLAM is working)
+```
+
+**Verify SLAM is working:**
+```bash
+docker compose -f perception/docker-compose.nav2.yml logs | grep "WM="
+# Should show: (local map=2, WM=6) or higher
 ```
 
 #### Deliverable
@@ -1180,6 +1202,33 @@ foxglove_bridge is built from source on the Jetson at `~/ros2_jazzy/`. It requir
 - All runners accept `--config` CLI arg. Makefile accepts `CONFIG=` variable.
 - Backward compatible: no config arg = default behavior (YOLOP + YOLOv8n).
 
+### RTAB-Map SLAM Integration (PR #20)
+
+RTAB-Map SLAM was integrated into the Nav2 Docker stack. Key learnings:
+
+**Root cause of WM=1 (only 1 keyframe):**
+- RGB images (1920×1440) and depth images (256×192) had different resolutions
+- RTAB-Map warning: `"RGB size modulo depth size is not 0. Ignoring depth mask for feature detection"`
+- Without depth mask, feature detection was poor, leading to only 1 keyframe
+
+**Fix:**
+- Resize both RGB and depth to common resolution (512×384) before publishing
+- Scale camera intrinsics to match: `fx_new = fx_old * (new_width / old_width)`
+- Added `_make_camera_info_scaled()` method to `nav2_planner.py`
+
+**RTAB-Map tuning for more keyframes:**
+- `Kp/MaxFeatures: "500"` — more ORB features (was 200)
+- `Vis/FeatureType: "6"` — must match `Kp/DetectorStrategy` (ORB)
+- `Mem/RehearsalSimilarity: "0.2"` — lower = less keyframe merging (was 0.3)
+- `Rtabmap/CreateIntermediateNodes: "true"` — denser pose graph
+
+**Result:** WM=6-7 keyframes, `/map` OccupancyGrid published, `/mapPath` trajectory visible
+
+**Visualization in Foxglove:**
+- `/map` — OccupancyGrid (enable in 3D panel topics)
+- `/mapPath` — SLAM trajectory
+- Zoom in close — map is small (~4m initially)
+
 ### Architecture Decisions
 <!-- Agents: record decisions and rationale here -->
 - **No VLA for now.** Team considered NVIDIA Alpamayo but it requires 24GB+ VRAM (won't fit on Orin Nano's 8GB). Classical perception stack (YOLO + Nav2) is more debuggable and faster. VLA can be explored later on workstation as a parallel "advisor" that doesn't control the couch directly.
@@ -1201,5 +1250,5 @@ foxglove_bridge is built from source on the Jetson at `~/ros2_jazzy/`. It requir
 
 ---
 
-*Last updated: 2026-02-03*
-*Current phase: Phase 3 perception + Nav2 working end-to-end in both bag replay and live mode (`make full-stack`). TRT engines auto-export on first Jetson run (PR #19). Costmap fix: COST_UNSEEN=-1, allow_unknown=true enables planning through unseen areas. Foxglove extension for interactive destination control (PR #18). Phase 2 EKF fuses IMU + GPS + ARKit odom + Google Maps routing. Phase 1 complete. Phase 0 hardware unblocked in parallel.*
+*Last updated: 2026-02-04*
+*Current phase: Phase 4 SLAM in progress — RTAB-Map integrated with WM=6+ keyframes (PR #20). Phase 3 perception + Nav2 working end-to-end. TRT engines auto-export on first Jetson run (PR #19). Foxglove extension for interactive destination control (PR #18). Phase 2 EKF fuses IMU + GPS + ARKit odom + Google Maps routing. Phase 1 complete. Phase 0 hardware unblocked in parallel.*
