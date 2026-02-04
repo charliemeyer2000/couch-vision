@@ -559,6 +559,30 @@ class Nav2Planner:
         msg.p = [fx, 0.0, cx, 0.0, 0.0, fy, cy, 0.0, 0.0, 0.0, 1.0, 0.0]
         return msg
 
+    def _make_camera_info_scaled(
+        self, intrinsics: CameraIntrinsics, timestamp: float, target_w: int, target_h: int
+    ) -> CameraInfo:
+        """Convert CameraIntrinsics to a ROS CameraInfo message, scaled to target resolution."""
+        msg = CameraInfo()
+        msg.header.stamp.sec = int(timestamp)
+        msg.header.stamp.nanosec = int((timestamp - int(timestamp)) * 1e9)
+        msg.header.frame_id = "camera"
+        msg.width = target_w
+        msg.height = target_h
+        msg.distortion_model = intrinsics.distortion_model
+        msg.d = intrinsics.D.flatten().tolist()
+        # Scale intrinsics to target resolution
+        scale_x = target_w / intrinsics.width
+        scale_y = target_h / intrinsics.height
+        fx = intrinsics.K[0, 0] * scale_x
+        fy = intrinsics.K[1, 1] * scale_y
+        cx = intrinsics.K[0, 2] * scale_x
+        cy = intrinsics.K[1, 2] * scale_y
+        msg.k = [fx, 0.0, cx, 0.0, fy, cy, 0.0, 0.0, 1.0]
+        msg.r = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+        msg.p = [fx, 0.0, cx, 0.0, 0.0, fy, cy, 0.0, 0.0, 0.0, 1.0, 0.0]
+        return msg
+
     def _publish_odom_nearest(self, timestamp: float, odom_samples: list[OdomSample]) -> None:
         """Publish the odom sample nearest to the given timestamp."""
         if not odom_samples or not hasattr(self, "_odom_pub"):
@@ -726,22 +750,30 @@ class Nav2Planner:
         goal_y = np.clip(goal_y, -half, half)
 
         if self._republish_sensors and self._frame_num % 2 == 0:
+            # Resize RGB and depth to common resolution for RTAB-Map SLAM
+            # RGB is 1920x1440, depth is 256x192 - they must match for SLAM
+            target_w, target_h = 512, 384
+            rgb_resized = cv2.resize(frame.image, (target_w, target_h), interpolation=cv2.INTER_AREA)
+            depth_resized = cv2.resize(frame.depth, (target_w, target_h), interpolation=cv2.INTER_NEAREST)
+
             cam_msg = CompressedImage()
             cam_msg.header = _header(frame.timestamp, "camera")
             cam_msg.format = "jpeg"
-            _, cam_buf = cv2.imencode(".jpg", frame.image, [cv2.IMWRITE_JPEG_QUALITY, 80])
+            _, cam_buf = cv2.imencode(".jpg", rgb_resized, [cv2.IMWRITE_JPEG_QUALITY, 80])
             cam_msg.data = cam_buf.tobytes()
             self._camera_pub.publish(cam_msg)
 
-            self._camera_info_pub.publish(self._make_camera_info(frame.intrinsics, frame.timestamp))
+            self._camera_info_pub.publish(
+                self._make_camera_info_scaled(frame.intrinsics, frame.timestamp, target_w, target_h)
+            )
 
             depth_msg = Image()
             depth_msg.header = _header(frame.timestamp, "camera")
-            depth_msg.height, depth_msg.width = frame.depth.shape[:2]
+            depth_msg.height, depth_msg.width = target_h, target_w
             depth_msg.encoding = "32FC1"
             depth_msg.is_bigendian = False
-            depth_msg.step = depth_msg.width * 4
-            depth_msg.data = frame.depth.tobytes()
+            depth_msg.step = target_w * 4
+            depth_msg.data = depth_resized.tobytes()
             self._depth_pub.publish(depth_msg)
 
             self._publish_odom_nearest(frame.timestamp, odom_samples)
