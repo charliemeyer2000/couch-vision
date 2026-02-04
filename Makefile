@@ -30,7 +30,7 @@ endif
 
 .PHONY: help setup xcode bridge \
         topics hz echo rviz bag bag-play verify \
-        perception-node full-stack full-stack-cuvslam \
+        perception-node full-stack full-stack-help full-stack-cuvslam \
         test benchmark lint deploy-jetson ip clean
 
 help:
@@ -53,10 +53,9 @@ help:
 	@echo "  make verify BAG=path                  Verify bag contents"
 	@echo ""
 	@echo "Perception:"
-	@echo "  make full-stack BAG=path.mcap         Perception + Nav2 + RTAB-Map SLAM (default)"
+	@echo "  make full-stack BAG=path.mcap         Perception + Nav2 + SLAM (bag replay)"
 	@echo "  make full-stack                       Live mode — subscribes to ROS2 topics"
-	@echo "  make full-stack-cuvslam BAG=...       Full stack with cuVSLAM + nvblox (Jetson only)"
-	@echo "  make full-stack SLAM_BACKEND=none     Disable SLAM (static TF only)"
+	@echo "  make full-stack HELP=1                Show all full-stack options"
 	@echo "  make perception-node                  Run live perception ROS2 node (no Nav2)"
 	@echo ""
 	@echo "Testing:"
@@ -127,7 +126,65 @@ CONFIG ?=
 perception-node:
 	@$(ROS2_SETUP) && cd perception && ([ -f .venv/pyvenv.cfg ] && grep -q "include-system-site-packages = true" .venv/pyvenv.cfg || uv venv --python $(PERC_PYTHON) --system-site-packages) && uv sync --quiet && uv run python -m couch_perception.ros_node $(ARGS)
 
+full-stack-help:
+	@echo "make full-stack — Run the full perception + Nav2 + SLAM pipeline"
+	@echo ""
+	@echo "DESCRIPTION"
+	@echo "  Runs YOLOv8 + YOLOP perception, EKF localization, Google Maps routing,"
+	@echo "  Nav2 path planning, and optional SLAM in a Docker container."
+	@echo "  Visualization via Foxglove at ws://localhost:8765"
+	@echo ""
+	@echo "MODES"
+	@echo "  Bag replay (default):  make full-stack BAG=path/to/file.mcap"
+	@echo "  Live mode:             make full-stack  (no BAG, subscribes to ROS2 topics)"
+	@echo ""
+	@echo "OPTIONS"
+	@echo "  BAG=<path>             Path to MCAP bag file for replay mode"
+	@echo "                         If omitted, runs in live mode subscribing to ROS2 topics"
+	@echo ""
+	@echo "  RATE=<float>           Playback rate multiplier for bag replay (default: 1.0)"
+	@echo "                         Use 0.5 for half speed, 2.0 for double speed"
+	@echo ""
+	@echo "  PREFIX=<string>        Topic prefix for live mode (default: /iphone)"
+	@echo "                         Subscribes to PREFIX/camera/image, PREFIX/imu, etc."
+	@echo ""
+	@echo "  SLAM_BACKEND=<backend> SLAM algorithm to use (default: rtabmap)"
+	@echo "                           none    - No SLAM, static TF publishers only"
+	@echo "                           rtabmap - RTAB-Map visual SLAM (works on Mac + Jetson)"
+	@echo "                           cuvslam - Isaac ROS cuVSLAM + nvblox (Jetson only)"
+	@echo ""
+	@echo "  DEST_LAT=<float>       Destination latitude in decimal degrees"
+	@echo "                         (default: 38.036830 — UVA Rotunda)"
+	@echo ""
+	@echo "  DEST_LON=<float>       Destination longitude in decimal degrees"
+	@echo "                         (default: -78.503577 — UVA Rotunda)"
+	@echo ""
+	@echo "  LOOKAHEAD=<float>      Lookahead distance in meters for path following"
+	@echo "                         (default: 15.0)"
+	@echo ""
+	@echo "ENVIRONMENT"
+	@echo "  GOOGLE_MAPS_API_KEY    Required for route planning. Set in .env file or export."
+	@echo ""
+	@echo "EXAMPLES"
+	@echo "  # Replay a bag with RTAB-Map SLAM"
+	@echo "  make full-stack BAG=bags/walk.mcap"
+	@echo ""
+	@echo "  # Replay at 2x speed with custom destination"
+	@echo "  make full-stack BAG=bags/walk.mcap RATE=2.0 DEST_LAT=38.0 DEST_LON=-78.5"
+	@echo ""
+	@echo "  # Live mode with cuVSLAM on Jetson"
+	@echo "  make full-stack SLAM_BACKEND=cuvslam"
+	@echo ""
+	@echo "  # Disable SLAM entirely"
+	@echo "  make full-stack BAG=bags/walk.mcap SLAM_BACKEND=none"
+	@echo ""
+	@echo "SHORTCUTS"
+	@echo "  make full-stack-cuvslam BAG=...   Same as SLAM_BACKEND=cuvslam"
+
 full-stack:
+ifeq ($(HELP),1)
+	@$(MAKE) --no-print-directory full-stack-help
+else
 	@[ -f .env ] && set -a && . ./.env && set +a; \
 	ARCH=$$(if [ "$$(uname -m)" = "aarch64" ]; then echo arm64; else echo amd64; fi); \
 	RUNTIME=$$(if command -v nvidia-smi >/dev/null 2>&1; then echo nvidia; else echo runc; fi); \
@@ -142,6 +199,7 @@ full-stack:
 	SLAM_BACKEND=$(SLAM_BACKEND) SLAM_DOCKERFILE=$(SLAM_DOCKERFILE) \
 	DOCKER_RUNTIME=$$RUNTIME DOCKER_ARCH=$$ARCH \
 	docker compose -f docker-compose.nav2.yml up
+endif
 
 full-stack-cuvslam:
 	$(MAKE) full-stack SLAM_BACKEND=cuvslam
