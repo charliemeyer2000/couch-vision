@@ -92,6 +92,14 @@ def generate_launch_description():
         arguments=["0", "0", "0", "0", "0", "0", "base_link", "camera"],
     )
 
+    static_tf_base_imu = Node(
+        condition=IfCondition(slam_enabled),
+        package="tf2_ros",
+        executable="static_transform_publisher",
+        name="static_tf_base_imu",
+        arguments=["0", "0", "0", "0", "0", "0", "base_link", "imu"],
+    )
+
     foxglove = Node(
         package="foxglove_bridge",
         executable="foxglove_bridge",
@@ -116,6 +124,7 @@ def generate_launch_description():
             static_tf_map_odom,
             static_tf_odom_base,
             static_tf_base_camera,
+            static_tf_base_imu,
             foxglove,
         ]
     )
