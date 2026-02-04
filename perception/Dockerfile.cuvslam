@@ -3,10 +3,20 @@
 #
 # This image is Jetson-only. For amd64/Mac, use Dockerfile.rtabmap.
 #
-# Note: Isaac ROS 3.2+ supports ROS2 Jazzy. Earlier versions use Humble.
-# Update the base image tag as newer releases become available.
+# SETUP REQUIRED:
+# Isaac ROS doesn't provide simple pre-built images. You must:
+# 1. Install Isaac ROS CLI: https://nvidia-isaac-ros.github.io/getting_started/index.html
+# 2. Run: isaac-ros init docker
+# 3. Build the Isaac ROS image which generates a hash-tagged image
+# 4. Update the FROM line below with your local image tag
+#
+# The base image tag format is: nvcr.io/isaac/ros:noble-ros2_jazzy_{hash}-arm64
+# Run `docker images | grep isaac` after setup to find your image tag.
+#
+# For simpler SLAM, use SLAM_BACKEND=rtabmap instead.
 
-FROM nvcr.io/nvidia/isaac/ros:arm64-ros2_jazzy AS base
+# TODO: Replace with your local Isaac ROS image tag after running isaac-ros init
+FROM nvcr.io/isaac/ros:noble-ros2_jazzy-arm64 AS base
 
 # Nav2 and ROS2 packages
 RUN apt-get update && apt-get install -y --no-install-recommends \
