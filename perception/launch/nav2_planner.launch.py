@@ -27,12 +27,6 @@ def generate_launch_description():
     enable_slam = LaunchConfiguration("enable_slam")
     slam_enabled = PythonExpression(["'", enable_slam, "' == '1'"])
 
-    topic_prefix_arg = DeclareLaunchArgument(
-        "topic_prefix",
-        default_value=EnvironmentVariable("TOPIC_PREFIX", default_value="/iphone"),
-    )
-    topic_prefix = LaunchConfiguration("topic_prefix")
-
     planner = Node(
         package="nav2_planner",
         executable="planner_server",
@@ -117,7 +111,6 @@ def generate_launch_description():
     return LaunchDescription(
         [
             enable_slam_arg,
-            topic_prefix_arg,
             planner,
             republish_rgb,
             rtabmap_slam,

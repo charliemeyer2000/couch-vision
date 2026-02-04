@@ -21,26 +21,19 @@ rtabmap:
     Rtabmap/TimeThr: "0.0"
     Rtabmap/MemoryThr: "0"
 
-    # ORB features - increase for better keyframe creation
+    # ORB feature detector
     Kp/MaxFeatures: "500"
-    Kp/DetectorStrategy: "6"  # ORB
-    Vis/FeatureType: "6"      # ORB - must match detector!
+    Kp/DetectorStrategy: "6"
+    Vis/FeatureType: "6"
     GFTT/MinDistance: "5"
 
     Kp/NNStrategy: "1"
     Kp/MaxDepth: "5.0"
 
-    # Disable odom features for external odometry
     Mem/UseOdomFeatures: "false"
-
-    # Lower rehearsal threshold to keep more keyframes distinct
     Mem/RehearsalSimilarity: "0.2"
     Kp/BadSignRatio: "0.5"
-
-    # Minimum features for valid keyframe - reject bad early frames
     Vis/MinInliers: "15"
-
-    # Create intermediate nodes for denser graph
     Rtabmap/CreateIntermediateNodes: "true"
 
     Grid/Sensor: "1"

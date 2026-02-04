@@ -43,6 +43,7 @@ RTAB-Map (Real-Time Appearance-Based Mapping) provides visual SLAM for CouchVisi
 | `perception/launch/nav2_planner.launch.py` | ROS2 launch file with RTAB-Map node |
 | `perception/config/rtabmap_params.yaml` | RTAB-Map configuration |
 | `perception/src/couch_perception/nav2_planner.py` | Python script that publishes resized images |
+| `perception/src/couch_perception/gpu_utils.py` | GPU-accelerated image resize (cv2.cuda on Jetson) |
 
 ## Running SLAM
 
@@ -75,10 +76,12 @@ Original problem:
 
 Fix in `nav2_planner.py`:
 ```python
-# Resize both to common resolution
-target_w, target_h = 512, 384
-rgb_resized = cv2.resize(frame.image, (target_w, target_h), interpolation=cv2.INTER_AREA)
-depth_resized = cv2.resize(frame.depth, (target_w, target_h), interpolation=cv2.INTER_NEAREST)
+from couch_perception.gpu_utils import resize_image, resize_depth
+
+# Resize both to common resolution for SLAM
+target_size = (512, 384)
+rgb_resized = resize_image(frame.image, target_size, cv2.INTER_AREA)
+depth_resized = resize_depth(frame.depth, target_size)
 ```
 
 Also scale camera intrinsics:
@@ -175,7 +178,8 @@ Old keyframes have too few features. This happens when early frames were capture
 map (RTAB-Map publishes map→odom)
  └── odom (static: identity)
       └── base_link (static: identity)
-           └── camera (static: identity)
+           ├── camera (static: identity)
+           └── imu (static: identity)
 ```
 
 RTAB-Map corrects drift by adjusting the `map→odom` transform.

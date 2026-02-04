@@ -46,12 +46,6 @@ def resize_image(
     return cv2.resize(image, target_size, interpolation=interpolation)
 
 
-def resize_depth(
-    depth: np.ndarray,
-    target_size: tuple[int, int],
-) -> np.ndarray:
-    """Resize depth image using nearest-neighbor interpolation.
-
-    Nearest-neighbor preserves depth values without interpolation artifacts.
-    """
+def resize_depth(depth: np.ndarray, target_size: tuple[int, int]) -> np.ndarray:
+    """Resize depth image using nearest-neighbor to preserve values."""
     return resize_image(depth, target_size, cv2.INTER_NEAREST)
