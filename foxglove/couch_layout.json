@@ -69,6 +69,45 @@
         }
       }
     },
+    "3D!slam": {
+      "cameraState": {
+        "perspective": false,
+        "distance": 30,
+        "phi": 90,
+        "thetaOffset": 0,
+        "targetOffset": [0, 0, 0],
+        "target": [0, 0, 0],
+        "fovy": 45
+      },
+      "followMode": "follow-pose",
+      "followTf": "map",
+      "scene": {
+        "backgroundColor": "#0d1117",
+        "enableStats": false
+      },
+      "topics": {
+        "/map": {
+          "visible": true,
+          "colorMode": "map",
+          "alpha": 0.9
+        },
+        "/mapPath": {
+          "visible": true,
+          "type": "line",
+          "lineWidth": 0.1,
+          "gradient": ["#ff00ff", "#00ffff"]
+        },
+        "/cloud_map": {
+          "visible": true,
+          "pointSize": 2,
+          "colorMode": "flat",
+          "flatColor": "#44aaff"
+        },
+        "/tf": {
+          "visible": true
+        }
+      }
+    },
     "Image!camera": {
       "imageMode": {
         "imageTopic": "/camera/image/compressed"
@@ -102,7 +141,7 @@
       "followingViewWidth": 30
     },
     "RosOut!logs": {},
-    "Navigation Control!navctrl": {}
+    "Navigation Control [local]!navctrl": {}
   },
   "globalVariables": {},
   "userNodes": {},
@@ -114,7 +153,12 @@
     "direction": "row",
     "first": {
       "direction": "column",
-      "first": "3D!nav3d",
+      "first": {
+        "direction": "row",
+        "first": "3D!nav3d",
+        "second": "3D!slam",
+        "splitPercentage": 60
+      },
       "second": {
         "direction": "row",
         "first": "Image!camera",
@@ -125,7 +169,7 @@
     },
     "second": {
       "direction": "column",
-      "first": "Navigation Control!navctrl",
+      "first": "Navigation Control [local]!navctrl",
       "second": {
         "direction": "column",
         "first": "map!gps",
