@@ -331,14 +331,15 @@ jobs:
             type=sha
             type=raw,value=latest,enable={{is_default_branch}}
 
-      # CI builds amd64 only. arm64 (Jetson) builds natively on-device via
-      # `make full-stack` because the Jetson base image (dustynv/pytorch)
-      # requires CUDA/TensorRT and is too slow to cross-compile via QEMU.
+      # CI builds amd64 only using Dockerfile.rtabmap (the default SLAM backend).
+      # arm64 (Jetson) builds natively on-device via `make full-stack` because
+      # the Jetson base images require CUDA/TensorRT and are too slow to
+      # cross-compile via QEMU. Dockerfile.cuvslam is Jetson-only.
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
           context: perception
-          file: perception/Dockerfile.nav2
+          file: perception/Dockerfile.rtabmap
           push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
