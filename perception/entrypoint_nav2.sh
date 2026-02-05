@@ -11,7 +11,7 @@ elif [ -f /opt/ros/humble/setup.bash ]; then
 fi
 export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 
-# GXF libraries for Isaac ROS cuVSLAM/nvblox (Jetson only)
+# GXF libraries for Isaac ROS (Jetson only, if installed)
 # These are in subdirectories under the isaac_ros_gxf share folder
 GXF_BASE="/opt/ros/humble/share/isaac_ros_gxf/gxf/lib"
 if [ -d "$GXF_BASE" ]; then

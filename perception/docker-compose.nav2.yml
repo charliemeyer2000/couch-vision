@@ -2,7 +2,7 @@ services:
   nav2-planner:
     build:
       context: .
-      dockerfile: "${SLAM_DOCKERFILE:-Dockerfile.nav2}"
+      dockerfile: Dockerfile.nav2
       args:
         DOCKER_ARCH: "${DOCKER_ARCH:-amd64}"
     runtime: "${DOCKER_RUNTIME:-runc}"

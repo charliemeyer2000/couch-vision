@@ -3,7 +3,6 @@
 SLAM backends (via SLAM_BACKEND env var):
   - none: No SLAM, static TF only
   - rtabmap: RTAB-Map visual SLAM (default)
-  - cuvslam: Isaac ROS cuVSLAM + nvblox (Jetson only)
 
 Uses OpaqueFunction to defer node creation, avoiding parse-time package errors
 when a backend's packages aren't installed.
@@ -23,8 +22,6 @@ def _create_nodes(context: LaunchContext):
     )
     nav2_params = os.path.join(config_dir, "nav2_planner_params.yaml")
     rtabmap_params = os.path.join(config_dir, "rtabmap_params.yaml")
-    cuvslam_params = os.path.join(config_dir, "cuvslam_params.yaml")
-    nvblox_params = os.path.join(config_dir, "nvblox_params.yaml")
 
     slam_backend = os.environ.get("SLAM_BACKEND", "rtabmap")
     nodes = []
@@ -71,38 +68,6 @@ def _create_nodes(context: LaunchContext):
             )
         )
 
-    elif slam_backend == "cuvslam":
-        # cuVSLAM uses 0-indexed topics for monocular (image_0, camera_info_0)
-        nodes.append(
-            Node(
-                package="isaac_ros_visual_slam",
-                executable="isaac_ros_visual_slam",
-                name="visual_slam",
-                output="screen",
-                parameters=[cuvslam_params],
-                remappings=[
-                    ("visual_slam/image_0", "/camera/image_gray"),
-                    ("visual_slam/camera_info_0", "/camera/camera_info"),
-                    ("visual_slam/imu", "/imu"),
-                ],
-            )
-        )
-        nodes.append(
-            Node(
-                package="nvblox_ros",
-                executable="nvblox_node",
-                name="nvblox_node",
-                output="screen",
-                parameters=[nvblox_params],
-                remappings=[
-                    ("depth/image", "/camera/depth/image"),
-                    ("depth/camera_info", "/camera/camera_info"),
-                    ("pose", "/visual_slam/tracking/vo_pose"),
-                    ("/nvblox_node/static_map_slice", "/map"),
-                ],
-            )
-        )
-
     # --- Static TF publishers ---
     # map -> odom: Only when no SLAM (SLAM publishes this dynamically)
     if slam_backend == "none":
@@ -126,7 +91,7 @@ def _create_nodes(context: LaunchContext):
     )
 
     # base_link -> camera/imu: Only when SLAM enabled
-    if slam_backend in ("rtabmap", "cuvslam"):
+    if slam_backend == "rtabmap":
         nodes.append(
             Node(
                 package="tf2_ros",
@@ -168,7 +133,7 @@ def generate_launch_description():
     slam_backend_arg = DeclareLaunchArgument(
         "slam_backend",
         default_value=os.environ.get("SLAM_BACKEND", "rtabmap"),
-        description="SLAM backend: none, rtabmap, or cuvslam",
+        description="SLAM backend: none or rtabmap",
     )
 
     return LaunchDescription(
