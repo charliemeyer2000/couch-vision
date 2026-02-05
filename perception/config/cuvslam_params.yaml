@@ -16,8 +16,10 @@ visual_slam:
     odom_frame: "odom"
     base_frame: "base_link"
 
-    # Disable IMU fusion (using external odometry from ARKit)
+    # Disable IMU fusion - bag data doesn't have high-frequency IMU (200Hz required)
+    # Pure visual odometry should work for monocular with enough features
     enable_imu_fusion: false
+    # imu_frame: "imu"
 
     # Disable ground constraint (not a wheeled robot on flat ground)
     enable_ground_constraint_in_odometry: false
