@@ -83,7 +83,7 @@ def generate_launch_description():
     cuvslam_node = Node(
         condition=IfCondition(slam_cuvslam),
         package="isaac_ros_visual_slam",
-        executable="visual_slam_node",
+        executable="isaac_ros_visual_slam",
         name="visual_slam",
         output="screen",
         parameters=[cuvslam_params],
