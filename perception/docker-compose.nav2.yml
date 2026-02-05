@@ -11,6 +11,8 @@ services:
     volumes:
       - ./weights:/perception/weights
       - ./config:/perception/config:ro
+      - ./launch:/perception/launch:ro
+      - ./src:/perception/src:ro
       - ../bags:/bags:ro
       - slam-data:/root/.ros
     environment:
