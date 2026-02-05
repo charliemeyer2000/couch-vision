@@ -3,7 +3,7 @@ planner_server:
     expected_planner_frequency: 5.0
     planner_plugins: ["GridBased"]
     GridBased:
-      plugin: "nav2_navfn_planner/NavfnPlanner"
+      plugin: "nav2_navfn_planner::NavfnPlanner"
       tolerance: 0.5
       use_astar: true
       allow_unknown: true
@@ -25,12 +25,12 @@ global_costmap:
       always_send_full_costmap: true
       plugins: ["static_layer", "inflation_layer"]
       static_layer:
-        plugin: "nav2_costmap_2d/StaticLayer"
+        plugin: "nav2_costmap_2d::StaticLayer"
         map_topic: /costmap/occupancy_grid
         map_subscribe_transient_local: false
         subscribe_to_updates: false
       inflation_layer:
-        plugin: "nav2_costmap_2d/InflationLayer"
+        plugin: "nav2_costmap_2d::InflationLayer"
         inflation_radius: 1.0
         cost_scaling_factor: 5.0
 
