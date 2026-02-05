@@ -1,24 +1,18 @@
 #!/bin/bash
 set -e
 
-# Source ROS2 (path varies: ros:jazzy, dustynv, or Isaac ROS Humble)
+# Source ROS2 (path varies: ros:jazzy or dustynv)
 if [ -f /opt/ros/jazzy/setup.bash ]; then
     source /opt/ros/jazzy/setup.bash
 elif [ -f /opt/ros/jazzy/install/setup.bash ]; then
     source /opt/ros/jazzy/install/setup.bash
-elif [ -f /opt/ros/humble/setup.bash ]; then
-    source /opt/ros/humble/setup.bash
 fi
 export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 
-# GXF libraries for Isaac ROS (Jetson only, if installed)
-# These are in subdirectories under the isaac_ros_gxf share folder
-GXF_BASE="/opt/ros/humble/share/isaac_ros_gxf/gxf/lib"
-if [ -d "$GXF_BASE" ]; then
-    for subdir in core std serialization cuda multimedia npp network logger behavior_tree; do
-        [ -d "$GXF_BASE/$subdir" ] && export LD_LIBRARY_PATH="$GXF_BASE/$subdir:$LD_LIBRARY_PATH"
-    done
-    export LD_LIBRARY_PATH="$GXF_BASE:$LD_LIBRARY_PATH"
+# Error if ROS2 not found
+if ! command -v ros2 &>/dev/null; then
+    echo "ERROR: ROS2 not found. Check Dockerfile base image."
+    exit 1
 fi
 
 # Launch Nav2 planner stack in background

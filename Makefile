@@ -15,8 +15,7 @@ ROS2_SETUP := export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp; \
               source ~/ros2_jazzy/install/setup.bash 2>/dev/null || \
               source ~/ros2_ws/install/setup.bash 2>/dev/null || \
               source /opt/ros/jazzy/setup.bash 2>/dev/null || \
-              source /opt/ros/humble/setup.bash 2>/dev/null || \
-              (echo "Error: ROS2 not found. See README.md for install instructions." && exit 1)
+              (echo "Error: ROS2 Jazzy not found. See README.md for install instructions." && exit 1)
 
 # Platform detection
 UNAME_M := $(shell uname -m)
@@ -98,7 +97,7 @@ else
 full-stack:
 	@[ -f .env ] && set -a && . ./.env && set +a; \
 	ARCH=$$([ "$$(uname -m)" = "aarch64" ] && echo arm64 || echo amd64); \
-	RUNTIME=$$(command -v nvidia-smi >/dev/null 2>&1 && echo nvidia || echo runc); \
+	RUNTIME=$$([ -e /dev/nvidia0 ] && echo nvidia || echo runc); \
 	cd perception && \
 	$(if $(BAG),BAG_FILE=$(patsubst bags/%,%,$(BAG)) PLAYBACK_RATE=$(or $(RATE),1.0),LIVE_MODE=1 TOPIC_PREFIX=$(or $(PREFIX),/iphone) NETWORK_MODE=host) \
 	DEST_LAT=$(or $(DEST_LAT),38.036830) DEST_LON=$(or $(DEST_LON),-78.503577) LOOKAHEAD=$(or $(LOOKAHEAD),15.0) \

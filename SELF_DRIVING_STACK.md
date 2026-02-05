@@ -41,7 +41,7 @@ Building a self-driving couch using iPhones as the primary sensor platform, with
 - ROS2 Jazzy
 - Nav2 for planning and control (including GPS waypoint navigation)
 - Perception: YOLOv8 on Jetson (DeepStream + TensorRT) for object detection
-- SLAM: RTAB-Map (primary) or Isaac ROS Visual SLAM (stretch — tight on Orin Nano memory)
+- SLAM: RTAB-Map visual SLAM
 - iPhone sensor streaming via CouchVision iOS app (this repo)
 - Transport: Zenoh (rmw_zenoh_cpp) over USB-C wired or WiFi
 - Visualization: Foxglove (remote from Mac, bridge on Jetson)
@@ -140,12 +140,12 @@ The iOS app publishes these topics. The topic prefix is configurable in-app (def
 
 ### Critical Gap: Compressed vs Raw Images
 
-The app publishes **JPEG CompressedImage**, but SLAM nodes (RTAB-Map, Isaac ROS) expect raw `sensor_msgs/Image`. Options:
+The app publishes **JPEG CompressedImage**, but RTAB-Map expects raw `sensor_msgs/Image`. Options:
 1. **Jetson-side:** Use `image_transport` `republish` node to decompress JPEG → raw
 2. **iOS-side:** Add a raw image publishing mode (higher bandwidth but no decompression needed)
 3. **RTAB-Map:** Can accept compressed images directly with `image_transport` plugin
 
-Option 3 is simplest for RTAB-Map. For Isaac ROS, option 1 is needed.
+Option 3 is simplest for RTAB-Map.
 
 ### Coordinate System
 
@@ -233,8 +233,7 @@ Option 3 is simplest for RTAB-Map. For Isaac ROS, option 1 is needed.
 │  ┌────────────────────────────────────────────────────────────────────────┐ │
 │  │                         SLAM LAYER                                     │ │
 │  │                                                                        │ │
-│  │  Primary: RTAB-Map (works with compressed images via image_transport)  │ │
-│  │  Stretch: Isaac ROS Visual SLAM (needs raw images + more GPU memory)   │ │
+│  │  RTAB-Map (works with compressed images via image_transport)           │ │
 │  │                                                                        │ │
 │  │  Inputs:                              Outputs:                         │ │
 │  │  - /iphone/camera/.../image/compressed  - /map (OccupancyGrid)        │ │
@@ -589,8 +588,7 @@ Live bounding boxes on camera feed in Foxglove. `/detections` topic publishing `
 **Prerequisites:** Phase 1 (camera + depth streaming), Phase 2 (EKF odometry)
 
 #### Approach Decision
-- [x] **Primary: RTAB-Map** — mature, works with RGB-D, supports compressed images via image_transport, well-documented
-- [ ] **Stretch: Isaac ROS Visual SLAM** — GPU-accelerated but tight on Orin Nano (8GB shared memory), requires raw images
+- [x] **RTAB-Map** — mature, works with RGB-D, supports compressed images via image_transport, well-documented
 
 #### Tasks — RTAB-Map
 - [x] Install: `ros-jazzy-rtabmap-ros` added to Dockerfile.nav2

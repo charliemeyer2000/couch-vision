@@ -16,6 +16,7 @@ services:
       - ../bags:/bags:ro
       - slam-data:/root/.ros
     environment:
+      - NVIDIA_VISIBLE_DEVICES=all
       - PYTHONUNBUFFERED=1
       - GOOGLE_MAPS_API_KEY=${GOOGLE_MAPS_API_KEY:-}
       - LIVE_MODE=${LIVE_MODE:-}

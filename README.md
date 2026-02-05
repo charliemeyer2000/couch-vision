@@ -4,7 +4,7 @@ iOS app that streams iPhone sensor data to ROS2 over TCP.
 
 **Sensors:** Camera, LiDAR depth, IMU
 **iOS Target:** iPhone 12 Pro+ (iOS 16+)
-**ROS2:** Jazzy or Humble
+**ROS2:** Jazzy
 
 ## Platform Requirements
 
