@@ -1,6 +1,6 @@
 ---
 name: perception
-description: CouchVision perception stack — YOLOv8 + YOLOP + TensorRT. Use when working on object detection, lane segmentation, model export, or running the perception node on Mac or Jetson.
+description: CouchVision perception stack — YOLOv8 + YOLOP + TensorRT + RTAB-Map SLAM. Use when working on object detection, lane segmentation, model export, SLAM, or running the perception stack on Mac or Jetson.
 ---
 
 # CouchVision Perception Stack
@@ -23,6 +23,7 @@ The perception stack lives in `perception/` and has two modes:
 
 - `src/couch_perception/yolov8_detector.py` — YOLOv8 wrapper. Auto-detects device (cuda > mps > cpu) and prefers `.engine` over `.pt` if available. Auto-exports TRT engine on first CUDA run (~10 min on Orin).
 - `src/couch_perception/yolop_detector.py` — YOLOP wrapper. Clones hustvl/YOLOP repo on first run. Auto-exports TRT FP16 engine on first CUDA run (PyTorch → ONNX → TRT, ~8 min on Orin).
+- `src/couch_perception/gpu_utils.py` — GPU-accelerated image resize with CPU fallback. Uses cv2.cuda on Jetson, cv2.resize on Mac.
 - `src/couch_perception/ros_node.py` — ROS2 node. Publishes to `/perception/detections`, `/perception/overlay/compressed`, `/perception/lane_mask`, `/perception/drivable_mask`.
 - `src/couch_perception/runner.py` — Offline CLI entry point.
 - `src/couch_perception/bag_reader.py` — MCAP bag reader. Streaming two-pass: scalar data in memory, image+depth streamed lazily. Critical for Jetson (avoids OOM on large bags).
@@ -70,8 +71,11 @@ The Makefile auto-detects `PERC_PYTHON` (3.10 on Jetson, 3.12 on Mac) for venv c
 ## Common Operations
 
 ```bash
-# Run offline perception on a bag
-make perception BAG=bags/2026-01-29_12-10-44/walk_around_university_all_data.mcap
+# Run full perception + Nav2 + SLAM stack with bag replay
+make full-stack BAG=bags/walk_around_university_all_data.mcap
+
+# Run with SLAM disabled
+make full-stack BAG=bags/walk.mcap SLAM=0
 
 # Run live ROS2 perception node (auto-detects device)
 make perception-node
@@ -84,9 +88,6 @@ cd perception && uv run python scripts/export_tensorrt.py
 
 # Benchmark inference
 cd perception && uv run python scripts/benchmark.py --pytorch yolov8n.pt --engine yolov8n.engine
-
-# Run Docker (Jetson deployment)
-make perception-docker
 ```
 
 ## Device Auto-Detection

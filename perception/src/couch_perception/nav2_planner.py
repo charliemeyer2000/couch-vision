@@ -548,27 +548,26 @@ class Nav2Planner:
         msg.data = json.dumps(status)
         self._status_pub.publish(msg)
 
-    def _make_camera_info(self, intrinsics: CameraIntrinsics, timestamp: float) -> CameraInfo:
-        """Convert CameraIntrinsics to a ROS CameraInfo message."""
-        msg = CameraInfo()
-        msg.header.stamp.sec = int(timestamp)
-        msg.header.stamp.nanosec = int((timestamp - int(timestamp)) * 1e9)
-        msg.header.frame_id = "camera"
-        msg.width = intrinsics.width
-        msg.height = intrinsics.height
-        msg.distortion_model = intrinsics.distortion_model
-        msg.d = intrinsics.D.flatten().tolist()
-        msg.k = intrinsics.K.flatten().tolist()
-        msg.r = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
-        fx, fy = intrinsics.K[0, 0], intrinsics.K[1, 1]
-        cx, cy = intrinsics.K[0, 2], intrinsics.K[1, 2]
-        msg.p = [fx, 0.0, cx, 0.0, 0.0, fy, cy, 0.0, 0.0, 0.0, 1.0, 0.0]
-        return msg
-
-    def _make_camera_info_scaled(
-        self, intrinsics: CameraIntrinsics, timestamp: float, target_w: int, target_h: int
+    def _make_camera_info(
+        self,
+        intrinsics: CameraIntrinsics,
+        timestamp: float,
+        target_size: tuple[int, int] | None = None,
     ) -> CameraInfo:
-        """Convert CameraIntrinsics to a ROS CameraInfo message, scaled to target resolution."""
+        """Convert CameraIntrinsics to ROS CameraInfo, optionally scaled to target resolution."""
+        if target_size:
+            target_w, target_h = target_size
+            scale_x = target_w / intrinsics.width
+            scale_y = target_h / intrinsics.height
+        else:
+            target_w, target_h = intrinsics.width, intrinsics.height
+            scale_x = scale_y = 1.0
+
+        fx = intrinsics.K[0, 0] * scale_x
+        fy = intrinsics.K[1, 1] * scale_y
+        cx = intrinsics.K[0, 2] * scale_x
+        cy = intrinsics.K[1, 2] * scale_y
+
         msg = CameraInfo()
         msg.header.stamp.sec = int(timestamp)
         msg.header.stamp.nanosec = int((timestamp - int(timestamp)) * 1e9)
@@ -577,34 +576,24 @@ class Nav2Planner:
         msg.height = target_h
         msg.distortion_model = intrinsics.distortion_model
         msg.d = intrinsics.D.flatten().tolist()
-        # Scale intrinsics to target resolution
-        scale_x = target_w / intrinsics.width
-        scale_y = target_h / intrinsics.height
-        fx = intrinsics.K[0, 0] * scale_x
-        fy = intrinsics.K[1, 1] * scale_y
-        cx = intrinsics.K[0, 2] * scale_x
-        cy = intrinsics.K[1, 2] * scale_y
         msg.k = [fx, 0.0, cx, 0.0, fy, cy, 0.0, 0.0, 1.0]
         msg.r = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
         msg.p = [fx, 0.0, cx, 0.0, 0.0, fy, cy, 0.0, 0.0, 0.0, 1.0, 0.0]
         return msg
 
     def _publish_odom_nearest(self, timestamp: float, odom_samples: list[OdomSample]) -> None:
-        """Publish the odom sample nearest to the given timestamp (O(log n) binary search)."""
-        if not odom_samples or not hasattr(self, "_odom_pub"):
+        """Publish the odom sample nearest to the given timestamp."""
+        if not odom_samples:
             return
-        # Binary search for insertion point
         idx = bisect.bisect_left(odom_samples, timestamp, key=lambda o: o.timestamp)
-        # Compare neighbors to find closest
         if idx == 0:
-            best_idx = 0
+            sample = odom_samples[0]
         elif idx == len(odom_samples):
-            best_idx = len(odom_samples) - 1
+            sample = odom_samples[-1]
         elif timestamp - odom_samples[idx - 1].timestamp <= odom_samples[idx].timestamp - timestamp:
-            best_idx = idx - 1
+            sample = odom_samples[idx - 1]
         else:
-            best_idx = idx
-        sample = odom_samples[best_idx]
+            sample = odom_samples[idx]
         msg = Odometry()
         msg.header.stamp.sec = int(sample.timestamp)
         msg.header.stamp.nanosec = int((sample.timestamp - int(sample.timestamp)) * 1e9)
@@ -760,11 +749,10 @@ class Nav2Planner:
         goal_y = np.clip(goal_y, -half, half)
 
         if self._republish_sensors and self._frame_num % 2 == 0:
-            # Resize RGB and depth to common resolution for RTAB-Map SLAM
-            # RGB is 1920x1440, depth is 256x192 - they must match for SLAM
-            target_w, target_h = 512, 384
-            rgb_resized = resize_image(frame.image, (target_w, target_h), cv2.INTER_AREA)
-            depth_resized = resize_depth(frame.depth, (target_w, target_h))
+            # Resize RGB and depth to common resolution for SLAM
+            target_size = (512, 384)
+            rgb_resized = resize_image(frame.image, target_size, cv2.INTER_AREA)
+            depth_resized = resize_depth(frame.depth, target_size)
 
             cam_msg = CompressedImage()
             cam_msg.header = _header(frame.timestamp, "camera")
@@ -786,15 +774,15 @@ class Nav2Planner:
                 self._camera_gray_pub.publish(gray_msg)
 
             self._camera_info_pub.publish(
-                self._make_camera_info_scaled(frame.intrinsics, frame.timestamp, target_w, target_h)
+                self._make_camera_info(frame.intrinsics, frame.timestamp, target_size)
             )
 
             depth_msg = Image()
             depth_msg.header = _header(frame.timestamp, "camera")
-            depth_msg.height, depth_msg.width = target_h, target_w
+            depth_msg.height, depth_msg.width = target_size[1], target_size[0]
             depth_msg.encoding = "32FC1"
             depth_msg.is_bigendian = False
-            depth_msg.step = target_w * 4
+            depth_msg.step = target_size[0] * 4
             depth_msg.data = depth_resized.tobytes()
             self._depth_pub.publish(depth_msg)
 

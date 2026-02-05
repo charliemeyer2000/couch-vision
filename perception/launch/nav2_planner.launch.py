@@ -41,11 +41,6 @@ def generate_launch_description():
     slam_cuvslam = PythonExpression(["'", slam_backend, "' == 'cuvslam'"])
     slam_enabled = PythonExpression(["'", slam_backend, "' != 'none'"])
 
-    topic_prefix_arg = DeclareLaunchArgument(
-        "topic_prefix",
-        default_value=EnvironmentVariable("TOPIC_PREFIX", default_value="/iphone"),
-    )
-
     # --- Nav2 Planner (always runs) ---
     planner = Node(
         package="nav2_planner",
@@ -169,7 +164,6 @@ def generate_launch_description():
     return LaunchDescription(
         [
             slam_backend_arg,
-            topic_prefix_arg,
             planner,
             # RTAB-Map
             republish_rgb,
