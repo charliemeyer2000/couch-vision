@@ -1,8 +1,10 @@
 # Isaac ROS cuVSLAM parameters for CouchVision.
-# GPU-accelerated visual SLAM using monocular camera input.
 #
-# cuVSLAM expects grayscale mono8 images. The nav2_planner.py publishes
-# grayscale to /camera/image_gray when SLAM_BACKEND=cuvslam.
+# NOTE: cuVSLAM REQUIRES STEREO CAMERAS - it cannot work with monocular input.
+# The iPhone only provides a single RGB camera, so cuVSLAM is NOT COMPATIBLE.
+# Use SLAM_BACKEND=rtabmap for monocular visual SLAM instead.
+#
+# This config is kept for future use if stereo cameras become available.
 
 # Node name in launch file is "visual_slam" so namespace must match
 visual_slam:
