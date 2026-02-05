@@ -72,7 +72,7 @@ def _create_nodes(context: LaunchContext):
         )
 
     elif slam_backend == "cuvslam":
-        # cuVSLAM expects 1-indexed topics with num_cameras: 1
+        # cuVSLAM uses 0-indexed topics for monocular (image_0, camera_info_0)
         nodes.append(
             Node(
                 package="isaac_ros_visual_slam",
@@ -81,8 +81,8 @@ def _create_nodes(context: LaunchContext):
                 output="screen",
                 parameters=[cuvslam_params],
                 remappings=[
-                    ("visual_slam/image_1", "/camera/image_gray"),
-                    ("visual_slam/camera_info_1", "/camera/camera_info"),
+                    ("visual_slam/image_0", "/camera/image_gray"),
+                    ("visual_slam/camera_info_0", "/camera/camera_info"),
                     ("visual_slam/imu", "/imu"),
                 ],
             )
