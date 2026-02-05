@@ -1,44 +1,29 @@
 # Dockerfile for cuVSLAM + nvblox on Jetson (arm64 only).
 # Uses NVIDIA Isaac ROS base image with GPU-accelerated SLAM.
 #
-# This image is Jetson-only. For amd64/Mac, use Dockerfile.rtabmap.
+# This image is Jetson-only (ROS2 Humble + CUDA). For amd64/Mac, use Dockerfile.rtabmap.
 #
-# SETUP REQUIRED:
-# Isaac ROS doesn't provide simple pre-built images. You must:
-# 1. Install Isaac ROS CLI: https://nvidia-isaac-ros.github.io/getting_started/index.html
-# 2. Run: isaac-ros init docker
-# 3. Build the Isaac ROS image which generates a hash-tagged image
-# 4. Update the FROM line below with your local image tag
+# PREREQUISITES:
+# Build the Isaac ROS Humble image on your Jetson first:
+#   cd ~/workspaces/isaac_ros-dev/src/isaac_ros_common/scripts
+#   ./build_image_layers.sh -i ros2_humble -b aarch64-image
 #
-# The base image tag format is: nvcr.io/isaac/ros:noble-ros2_jazzy_{hash}-arm64
-# Run `docker images | grep isaac` after setup to find your image tag.
+# This creates: ros2_humble-image (base for this Dockerfile)
 #
-# For simpler SLAM, use SLAM_BACKEND=rtabmap instead.
+# For simpler SLAM that works on any platform, use SLAM_BACKEND=rtabmap instead.
 
-# TODO: Replace with your local Isaac ROS image tag after running isaac-ros init
-FROM nvcr.io/isaac/ros:noble-ros2_jazzy-arm64 AS base
+# Built from Isaac ROS build_image_layers.sh on Jetson
+FROM ros2_humble-image AS base
 
-# Nav2 and ROS2 packages
+# Isaac ROS Visual SLAM (cuVSLAM) - GPU-accelerated stereo/mono visual SLAM
+# nvblox - Dense 3D reconstruction for 2D occupancy grid output
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ros-jazzy-navigation2 \
-    ros-jazzy-nav2-bringup \
-    ros-jazzy-nav2-simple-commander \
-    ros-jazzy-nav2-planner \
-    ros-jazzy-nav2-costmap-2d \
-    ros-jazzy-nav2-lifecycle-manager \
-    ros-jazzy-nav2-navfn-planner \
-    ros-jazzy-tf2-ros \
-    ros-jazzy-foxglove-bridge \
-    ros-jazzy-vision-msgs \
-    ros-jazzy-rmw-cyclonedds-cpp \
-    ros-jazzy-image-transport-plugins \
-    python3-numpy git \
-    && rm -rf /var/lib/apt/lists/*
-
-# Isaac ROS Visual SLAM and nvblox (from NVIDIA apt repo in base image)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ros-jazzy-isaac-ros-visual-slam \
-    ros-jazzy-isaac-ros-nvblox \
+    ros-humble-isaac-ros-visual-slam \
+    ros-humble-isaac-ros-nvblox \
+    ros-humble-foxglove-bridge \
+    ros-humble-rmw-cyclonedds-cpp \
+    ros-humble-image-transport-plugins \
+    ros-humble-tf2-ros \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
@@ -47,7 +32,7 @@ WORKDIR /perception
 
 COPY pyproject.toml ./
 
-# Isaac ROS base has Python 3.10 with CUDA torch pre-installed.
+# Isaac ROS Humble image has Python 3.10 with CUDA support.
 # Install our deps into a venv that inherits system packages.
 RUN PY_VER=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')") && \
     uv venv --python "python${PY_VER}" --system-site-packages && \
