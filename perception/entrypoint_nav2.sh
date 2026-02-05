@@ -1,13 +1,25 @@
 #!/bin/bash
 set -e
 
-# Source ROS2 (install path differs between ros:jazzy and dustynv images)
+# Source ROS2 (path varies: ros:jazzy, dustynv, or Isaac ROS Humble)
 if [ -f /opt/ros/jazzy/setup.bash ]; then
     source /opt/ros/jazzy/setup.bash
 elif [ -f /opt/ros/jazzy/install/setup.bash ]; then
     source /opt/ros/jazzy/install/setup.bash
+elif [ -f /opt/ros/humble/setup.bash ]; then
+    source /opt/ros/humble/setup.bash
 fi
 export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+
+# GXF libraries for Isaac ROS cuVSLAM/nvblox (Jetson only)
+# These are in subdirectories under the isaac_ros_gxf share folder
+GXF_BASE="/opt/ros/humble/share/isaac_ros_gxf/gxf/lib"
+if [ -d "$GXF_BASE" ]; then
+    for subdir in core std serialization cuda multimedia npp network logger behavior_tree; do
+        [ -d "$GXF_BASE/$subdir" ] && export LD_LIBRARY_PATH="$GXF_BASE/$subdir:$LD_LIBRARY_PATH"
+    done
+    export LD_LIBRARY_PATH="$GXF_BASE:$LD_LIBRARY_PATH"
+fi
 
 # Launch Nav2 planner stack in background
 echo "Starting Nav2 planner server..."

@@ -46,6 +46,16 @@ RUN chmod +x /entrypoint_nav2.sh
 
 ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 
+# GXF library paths for Isaac ROS cuVSLAM/nvblox
+# These libraries are installed by ros-humble-isaac-ros-gxf in subdirectories
+ENV LD_LIBRARY_PATH="/opt/ros/humble/share/isaac_ros_gxf/gxf/lib/core:\
+/opt/ros/humble/share/isaac_ros_gxf/gxf/lib/std:\
+/opt/ros/humble/share/isaac_ros_gxf/gxf/lib/serialization:\
+/opt/ros/humble/share/isaac_ros_gxf/gxf/lib/cuda:\
+/opt/ros/humble/share/isaac_ros_gxf/gxf/lib/multimedia:\
+/opt/ros/humble/share/isaac_ros_gxf/gxf/lib:\
+${LD_LIBRARY_PATH}"
+
 EXPOSE 8765
 
 ENTRYPOINT ["/entrypoint_nav2.sh"]
