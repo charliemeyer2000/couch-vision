@@ -70,6 +70,7 @@ name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"
 explicit = true
 
+# Jetson Orin Nano (JetPack 6, CUDA 12.6). Other Jetson models need different indices.
 [[tool.uv.index]]
 name = "jetson-cuda"
 url = "https://pypi.jetson-ai-lab.io/jp6/cu126"

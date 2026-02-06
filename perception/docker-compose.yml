@@ -1,8 +1,0 @@
-services:
-  perception:
-    build: .
-    network_mode: host
-    volumes:
-      - ./weights:/perception/weights
-    environment:
-      - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp

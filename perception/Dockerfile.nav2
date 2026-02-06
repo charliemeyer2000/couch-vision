@@ -40,6 +40,9 @@ RUN if [ "$DOCKER_ARCH" = "arm64" ]; then \
         ros-jazzy-foxglove-bridge \
         ros-jazzy-vision-msgs \
         ros-jazzy-rmw-cyclonedds-cpp \
+        ros-jazzy-rtabmap-ros \
+        ros-jazzy-rtabmap \
+        ros-jazzy-image-transport-plugins \
         python3-numpy git \
     && rm -rf /var/lib/apt/lists/*
 

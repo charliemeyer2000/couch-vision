@@ -17,6 +17,8 @@ import numpy as np
 import torch
 import torchvision.transforms as transforms
 
+from couch_perception.gpu_utils import resize_image
+
 _WEIGHTS_DIR = Path(__file__).resolve().parent.parent.parent / "weights"
 _YOLOP_REPO_DIR = _WEIGHTS_DIR / "yolop_repo"
 _WEIGHTS_PATH = _YOLOP_REPO_DIR / "weights" / "End-to-end.pth"
@@ -65,7 +67,7 @@ def _preprocess(frame_bgr: np.ndarray) -> tuple[torch.Tensor, int, int, float, f
     pad_h = (_IMG_SIZE - new_h) / 2
     pad_w = (_IMG_SIZE - new_w) / 2
 
-    resized = cv2.resize(frame_bgr, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+    resized = resize_image(frame_bgr, (new_w, new_h), cv2.INTER_LINEAR)
     top, bottom = int(round(pad_h - 0.1)), int(round(pad_h + 0.1))
     left, right = int(round(pad_w - 0.1)), int(round(pad_w + 0.1))
     padded = cv2.copyMakeBorder(resized, top, bottom, left, right, cv2.BORDER_CONSTANT, value=(114, 114, 114))

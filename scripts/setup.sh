@@ -150,17 +150,11 @@ elif [[ "$PLATFORM" == "linux" ]]; then
     elif [[ -f "/opt/ros/jazzy/setup.bash" ]]; then
         echo "  ROS2 Jazzy found at /opt/ros/jazzy"
         echo "  Run: source /opt/ros/jazzy/setup.bash"
-    elif [[ -f "/opt/ros/humble/setup.bash" ]]; then
-        echo "  ROS2 Humble found at /opt/ros/humble"
-        echo "  Run: source /opt/ros/humble/setup.bash"
     else
-        echo "  ROS2 not found."
+        echo "  ROS2 Jazzy not found."
         echo ""
         echo "  Install ROS2 Jazzy (Ubuntu 24.04):"
         echo "    https://docs.ros.org/en/jazzy/Installation/Ubuntu-Install-Debs.html"
-        echo ""
-        echo "  Install ROS2 Humble (Ubuntu 22.04):"
-        echo "    https://docs.ros.org/en/humble/Installation/Ubuntu-Install-Debs.html"
     fi
 
 # ============================================
@@ -188,7 +182,7 @@ if [[ "$PLATFORM" == "macos" ]]; then
     echo "  3. make topics       # List ROS2 topics"
 elif [[ "$PLATFORM" == "linux" ]]; then
     echo "Quick start:"
-    echo "  1. source /opt/ros/jazzy/setup.bash  # or humble"
+    echo "  1. source /opt/ros/jazzy/setup.bash"
     echo "  2. make bridge                       # Start ROS2 bridge"
     echo "  3. ros2 topic list                   # Verify topics"
 fi

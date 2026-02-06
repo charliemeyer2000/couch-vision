@@ -1,13 +1,19 @@
 #!/bin/bash
 set -e
 
-# Source ROS2 (install path differs between ros:jazzy and dustynv images)
+# Source ROS2 (path varies: ros:jazzy or dustynv)
 if [ -f /opt/ros/jazzy/setup.bash ]; then
     source /opt/ros/jazzy/setup.bash
 elif [ -f /opt/ros/jazzy/install/setup.bash ]; then
     source /opt/ros/jazzy/install/setup.bash
 fi
 export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+
+# Error if ROS2 not found
+if ! command -v ros2 &>/dev/null; then
+    echo "ERROR: ROS2 not found. Check Dockerfile base image."
+    exit 1
+fi
 
 # Launch Nav2 planner stack in background
 echo "Starting Nav2 planner server..."

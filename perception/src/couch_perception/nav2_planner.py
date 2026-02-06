@@ -11,6 +11,7 @@ Visualization via foxglove_bridge (ws://localhost:8765).
 """
 
 import argparse
+import bisect
 import copy
 import json
 import math
@@ -30,20 +31,21 @@ from scipy.interpolate import splprep, splev
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy
-from nav_msgs.msg import OccupancyGrid, Path
+from nav_msgs.msg import OccupancyGrid, Odometry, Path
 from geometry_msgs.msg import PointStamped, PoseStamped
-from sensor_msgs.msg import CompressedImage, Image, Imu, PointCloud2, PointField, NavSatFix
+from sensor_msgs.msg import CameraInfo, CompressedImage, Image, Imu, PointCloud2, PointField, NavSatFix
 from visualization_msgs.msg import Marker
 from std_msgs.msg import Header, ColorRGBA, String
 from builtin_interfaces.msg import Time as RosTime, Duration as RosDuration
 
 from nav2_simple_commander.robot_navigator import BasicNavigator
 
-from couch_perception.bag_reader import GpsFix, ImuSample, OdomSample
+from couch_perception.bag_reader import CameraIntrinsics, GpsFix, ImuSample, OdomSample
 from couch_perception.config import PipelineConfig
 from couch_perception.ekf import EKF
 from couch_perception.frame_source import BagSource, LiveSource, SensorStreams
 from couch_perception.geo import geodetic_to_enu, ROTUNDA_LAT, ROTUNDA_LON
+from couch_perception.gpu_utils import resize_image, resize_depth
 from couch_perception.perception_pipeline import PerceptionPipeline
 from couch_perception.costmap import (
     build_costmap,
@@ -471,7 +473,9 @@ class Nav2Planner:
 
         if republish_sensors:
             self._camera_pub = node.create_publisher(CompressedImage, "/camera/image/compressed", qos)
+            self._camera_info_pub = node.create_publisher(CameraInfo, "/camera/camera_info", qos)
             self._depth_pub = node.create_publisher(Image, "/camera/depth/image", qos)
+            self._odom_pub = node.create_publisher(Odometry, "/odom", qos)
             self._imu_pub = node.create_publisher(Imu, "/imu", qos)
             self._gps_pub = node.create_publisher(NavSatFix, "/gps/fix", qos)
 
@@ -539,6 +543,66 @@ class Nav2Planner:
         msg = String()
         msg.data = json.dumps(status)
         self._status_pub.publish(msg)
+
+    def _make_camera_info(
+        self,
+        intrinsics: CameraIntrinsics,
+        timestamp: float,
+        target_size: tuple[int, int] | None = None,
+    ) -> CameraInfo:
+        """Convert CameraIntrinsics to ROS CameraInfo, optionally scaled to target resolution."""
+        if target_size:
+            target_w, target_h = target_size
+            scale_x = target_w / intrinsics.width
+            scale_y = target_h / intrinsics.height
+        else:
+            target_w, target_h = intrinsics.width, intrinsics.height
+            scale_x = scale_y = 1.0
+
+        fx = intrinsics.K[0, 0] * scale_x
+        fy = intrinsics.K[1, 1] * scale_y
+        cx = intrinsics.K[0, 2] * scale_x
+        cy = intrinsics.K[1, 2] * scale_y
+
+        msg = CameraInfo()
+        msg.header.stamp.sec = int(timestamp)
+        msg.header.stamp.nanosec = int((timestamp - int(timestamp)) * 1e9)
+        msg.header.frame_id = "camera"
+        msg.width = target_w
+        msg.height = target_h
+        msg.distortion_model = intrinsics.distortion_model
+        msg.d = intrinsics.D.flatten().tolist()
+        msg.k = [fx, 0.0, cx, 0.0, fy, cy, 0.0, 0.0, 1.0]
+        msg.r = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+        msg.p = [fx, 0.0, cx, 0.0, 0.0, fy, cy, 0.0, 0.0, 0.0, 1.0, 0.0]
+        return msg
+
+    def _publish_odom_nearest(self, timestamp: float, odom_samples: list[OdomSample]) -> None:
+        """Publish the odom sample nearest to the given timestamp."""
+        if not odom_samples:
+            return
+        idx = bisect.bisect_left(odom_samples, timestamp, key=lambda o: o.timestamp)
+        if idx == 0:
+            sample = odom_samples[0]
+        elif idx == len(odom_samples):
+            sample = odom_samples[-1]
+        elif timestamp - odom_samples[idx - 1].timestamp <= odom_samples[idx].timestamp - timestamp:
+            sample = odom_samples[idx - 1]
+        else:
+            sample = odom_samples[idx]
+        msg = Odometry()
+        msg.header.stamp.sec = int(sample.timestamp)
+        msg.header.stamp.nanosec = int((sample.timestamp - int(sample.timestamp)) * 1e9)
+        msg.header.frame_id = "odom"
+        msg.child_frame_id = "base_link"
+        msg.pose.pose.position.x = float(sample.position[0])
+        msg.pose.pose.position.y = float(sample.position[1])
+        msg.pose.pose.position.z = float(sample.position[2])
+        msg.pose.pose.orientation.x = float(sample.orientation[0])
+        msg.pose.pose.orientation.y = float(sample.orientation[1])
+        msg.pose.pose.orientation.z = float(sample.orientation[2])
+        msg.pose.pose.orientation.w = float(sample.orientation[3])
+        self._odom_pub.publish(msg)
 
     def run(self, streams: SensorStreams) -> None:
         """Process frames from any source. Blocks until source is exhausted or interrupted."""
@@ -681,21 +745,32 @@ class Nav2Planner:
         goal_y = np.clip(goal_y, -half, half)
 
         if self._republish_sensors and self._frame_num % 2 == 0:
+            # Resize RGB and depth to common resolution for SLAM
+            target_size = (512, 384)
+            rgb_resized = resize_image(frame.image, target_size, cv2.INTER_AREA)
+            depth_resized = resize_depth(frame.depth, target_size)
+
             cam_msg = CompressedImage()
             cam_msg.header = _header(frame.timestamp, "camera")
             cam_msg.format = "jpeg"
-            _, cam_buf = cv2.imencode(".jpg", frame.image, [cv2.IMWRITE_JPEG_QUALITY, 80])
+            _, cam_buf = cv2.imencode(".jpg", rgb_resized, [cv2.IMWRITE_JPEG_QUALITY, 80])
             cam_msg.data = cam_buf.tobytes()
             self._camera_pub.publish(cam_msg)
 
+            self._camera_info_pub.publish(
+                self._make_camera_info(frame.intrinsics, frame.timestamp, target_size)
+            )
+
             depth_msg = Image()
             depth_msg.header = _header(frame.timestamp, "camera")
-            depth_msg.height, depth_msg.width = frame.depth.shape[:2]
+            depth_msg.height, depth_msg.width = target_size[1], target_size[0]
             depth_msg.encoding = "32FC1"
             depth_msg.is_bigendian = False
-            depth_msg.step = depth_msg.width * 4
-            depth_msg.data = frame.depth.tobytes()
+            depth_msg.step = target_size[0] * 4
+            depth_msg.data = depth_resized.tobytes()
             self._depth_pub.publish(depth_msg)
+
+            self._publish_odom_nearest(frame.timestamp, odom_samples)
 
             if frame.orientation is not None:
                 imu_msg = Imu()

@@ -11,14 +11,20 @@ services:
     volumes:
       - ./weights:/perception/weights
       - ./config:/perception/config:ro
+      - ./launch:/perception/launch:ro
+      - ./src:/perception/src:ro
       - ../bags:/bags:ro
+      - slam-data:/root/.ros
     environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - PYTHONUNBUFFERED=1
       - GOOGLE_MAPS_API_KEY=${GOOGLE_MAPS_API_KEY:-}
       - LIVE_MODE=${LIVE_MODE:-}
       - TOPIC_PREFIX=${TOPIC_PREFIX:-/iphone}
       - DEST_LAT=${DEST_LAT:-38.036830}
       - DEST_LON=${DEST_LON:--78.503577}
       - LOOKAHEAD=${LOOKAHEAD:-15.0}
+      - SLAM_BACKEND=${SLAM_BACKEND:-rtabmap}
     network_mode: "${NETWORK_MODE:-bridge}"
     command: [
       "--bag", "/bags/${BAG_FILE:-walk_around_university_all_data.mcap}",
@@ -27,3 +33,6 @@ services:
       "--dest-lon", "${DEST_LON:--78.503577}",
       "--lookahead", "${LOOKAHEAD:-15.0}"
     ]
+
+volumes:
+  slam-data:
