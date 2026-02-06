@@ -46,7 +46,7 @@ RUN if [ "$DOCKER_ARCH" = "arm64" ]; then \
         python3-numpy git \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
+COPY --from=docker.io/astral/uv:latest /uv /uvx /usr/local/bin/
 
 WORKDIR /perception
 
