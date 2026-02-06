@@ -54,7 +54,13 @@ from couch_perception.costmap import (
     GRID_RESOLUTION,
     GRID_SIZE_M,
 )
-from couch_perception.costmap_visualizer import costmap_to_upscaled_image
+from couch_perception.costmap_visualizer import (
+    costmap_to_upscaled_image,
+    COST_FREE,
+    COST_LANE,
+    COST_LETHAL,
+    COST_UNSEEN,
+)
 
 
 # ── Google Maps route planning ────────────────────────────────────────────
@@ -809,6 +815,11 @@ class Nav2Planner:
         )
         self._costmap_pub.publish(_costmap_to_occupancy_grid(grid, frame.timestamp))
 
+        # Debug: Costmap statistics
+        free_cells = int(np.sum(grid == COST_FREE))
+        lethal_cells = int(np.sum(grid == COST_LETHAL))
+        center_cost = int(grid[GRID_CELLS // 2, GRID_CELLS // 2])
+
         # Markers
         self._goal_marker_pub.publish(_make_goal_marker(goal_x, goal_y, frame.timestamp))
         self._ego_marker_pub.publish(_make_ego_marker(frame.timestamp))
@@ -851,8 +862,8 @@ class Nav2Planner:
             print(
                 f"\rFrame {self._frame_num}: path={n_poses} poses, "
                 f"{len(result.detections)} det, {1/dt:.1f} FPS, "
-                f"EKF=({ego_enu[0]:.1f},{ego_enu[1]:.1f}) yaw={math.degrees(self._ekf.yaw):.0f}° "
-                f"goal=({goal_x:.1f},{goal_y:.1f})",
+                f"EKF=({ego_enu[0]:.1f},{ego_enu[1]:.1f}) "
+                f"costmap: free={free_cells} lethal={lethal_cells} center={center_cost}",
                 end="", flush=True,
             )
 
