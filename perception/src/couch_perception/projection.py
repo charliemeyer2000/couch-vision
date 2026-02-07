@@ -39,25 +39,88 @@ _DEFAULT_CAMERA_TO_BASE_ROTATION = np.array(
 )
 
 
+def default_camera_to_base_rotation() -> np.ndarray:
+    """Return the handheld-friendly camera->base axis remap matrix."""
+    return _DEFAULT_CAMERA_TO_BASE_ROTATION.copy()
+
+
+def _rotation_align_vectors(source: np.ndarray, target: np.ndarray) -> np.ndarray:
+    """Return rotation matrix that maps source unit vector onto target unit vector."""
+    src = source / (np.linalg.norm(source) + 1e-12)
+    dst = target / (np.linalg.norm(target) + 1e-12)
+    cross = np.cross(src, dst)
+    s = float(np.linalg.norm(cross))
+    c = float(np.clip(np.dot(src, dst), -1.0, 1.0))
+
+    if s < 1e-9:
+        if c > 0.0:
+            return np.eye(3, dtype=np.float64)
+        # 180deg case: choose any axis orthogonal to source.
+        axis = np.array([1.0, 0.0, 0.0], dtype=np.float64)
+        if abs(src[0]) > 0.9:
+            axis = np.array([0.0, 1.0, 0.0], dtype=np.float64)
+        axis = axis - src * float(np.dot(axis, src))
+        axis = axis / (np.linalg.norm(axis) + 1e-12)
+        # Rodrigues for pi radians: R = -I + 2aa^T
+        return -np.eye(3, dtype=np.float64) + 2.0 * np.outer(axis, axis)
+
+    axis = cross / s
+    k = np.array(
+        [
+            [0.0, -axis[2], axis[1]],
+            [axis[2], 0.0, -axis[0]],
+            [-axis[1], axis[0], 0.0],
+        ],
+        dtype=np.float64,
+    )
+    return np.eye(3, dtype=np.float64) + k * s + (k @ k) * (1.0 - c)
+
+
+def orientation_compensation_rotation(
+    orientation: np.ndarray | None,
+    orientation_mode: str = "full",
+) -> np.ndarray:
+    """Return the pre-remap orientation compensation matrix.
+
+    Modes:
+      - full: use full inverse IMU orientation (legacy behavior).
+      - gravity: remove roll/pitch only so +Z stays gravity-up.
+      - none: no IMU compensation.
+    """
+    mode = orientation_mode.lower()
+    if mode not in {"full", "gravity", "none"}:
+        raise ValueError(f"Unsupported orientation_mode: {orientation_mode}")
+    if orientation is None or orientation.shape[0] != 4 or mode == "none":
+        return np.eye(3, dtype=np.float64)
+
+    rot_world_from_imu = quat_to_rotation_matrix(orientation)
+    if mode == "full":
+        return rot_world_from_imu.T
+
+    up_world = np.array([0.0, 0.0, 1.0], dtype=np.float64)
+    up_in_imu = rot_world_from_imu.T @ up_world
+    return _rotation_align_vectors(up_in_imu, up_world)
+
+
 def apply_imu_rotation(
     points: np.ndarray,
     orientation: np.ndarray | None,
     camera_to_base_rotation: np.ndarray | None = None,
+    orientation_mode: str = "full",
 ) -> np.ndarray:
     """Rotate projected points with IMU and map them into a forward-facing base frame.
 
-    The IMU quaternion is used for gravity alignment (inverse rotation), then points
-    are remapped from camera axes into base axes. The axis remap defaults to the
-    historical camera-optical mapping but can be overridden with a URDF-derived
-    camera link rotation matrix.
+    IMU compensation is controlled by orientation_mode:
+      - full: full inverse quaternion rotation (legacy rigid behavior)
+      - gravity: roll/pitch leveling only (less rigid, handheld-friendly)
+      - none: no IMU compensation
+    Then points are remapped from camera axes into base axes.
     """
     if len(points) == 0:
         return points
 
-    pts_rot = points
-    if orientation is not None:
-        R = quat_to_rotation_matrix(orientation)
-        pts_rot = (R.T @ points.T).T
+    orientation_rot = orientation_compensation_rotation(orientation, orientation_mode)
+    pts_rot = (orientation_rot @ points.T).T
 
     camera_to_base = (
         _DEFAULT_CAMERA_TO_BASE_ROTATION

@@ -24,6 +24,9 @@ services:
       - DEST_LAT=${DEST_LAT:-38.036830}
       - DEST_LON=${DEST_LON:--78.503577}
       - LOOKAHEAD=${LOOKAHEAD:-15.0}
+      - CAMERA_MOUNT_MODE=${CAMERA_MOUNT_MODE:-handheld}
+      - ORIENTATION_MODE=${ORIENTATION_MODE:-gravity}
+      - LOCAL_FRAME_YAW_OFFSET_RAD=${LOCAL_FRAME_YAW_OFFSET_RAD:--1.5707963267948966}
       - SLAM_BACKEND=${SLAM_BACKEND:-rtabmap}
     network_mode: "${NETWORK_MODE:-bridge}"
     command: [
@@ -31,7 +34,10 @@ services:
       "--playback-rate", "${PLAYBACK_RATE:-1.0}",
       "--dest-lat", "${DEST_LAT:-38.036830}",
       "--dest-lon", "${DEST_LON:--78.503577}",
-      "--lookahead", "${LOOKAHEAD:-15.0}"
+      "--lookahead", "${LOOKAHEAD:-15.0}",
+      "--camera-mount-mode", "${CAMERA_MOUNT_MODE:-handheld}",
+      "--orientation-mode", "${ORIENTATION_MODE:-gravity}",
+      "--local-frame-yaw-offset-rad", "${LOCAL_FRAME_YAW_OFFSET_RAD:--1.5707963267948966}"
     ]
 
 volumes:

@@ -49,6 +49,9 @@ from couch_perception.frame_source import BagSource, LiveSource, SensorStreams
 from couch_perception.geo import geodetic_to_enu, ROTUNDA_LAT, ROTUNDA_LON
 from couch_perception.gpu_utils import resize_image, resize_depth
 from couch_perception.perception_pipeline import PerceptionPipeline
+from couch_perception.projection import (
+    default_camera_to_base_rotation,
+)
 from couch_perception.costmap import (
     build_costmap,
     GRID_CELLS,
@@ -196,8 +199,8 @@ def _wrap_angle(angle_rad: float) -> float:
 
 _GPS_HEADING_MIN_DIST_M = 0.8
 _MAX_IMU_GPS_TIME_SKEW_S = 1.0
-_LOCAL_FRAME_YAW_OFFSET_DEG = 0.0
-_LOCAL_FRAME_YAW_OFFSET_RAD = math.radians(_LOCAL_FRAME_YAW_OFFSET_DEG)
+_DEFAULT_LOCAL_FRAME_YAW_OFFSET_RAD = -1.5707963267948966
+_DEFAULT_LOCAL_FRAME_YAW_OFFSET_DEG = math.degrees(_DEFAULT_LOCAL_FRAME_YAW_OFFSET_RAD)
 
 
 def _heading_from_phone_orientation(
@@ -266,23 +269,6 @@ def _rotate_xy_path(path_xy: np.ndarray, yaw_rad: float) -> np.ndarray:
     return out
 
 
-def _points_base_to_camera(
-    points: np.ndarray | None,
-    base_to_camera_rotation: np.ndarray,
-    orientation_quat: np.ndarray | None,
-) -> np.ndarray | None:
-    """Convert planner-local/base-frame points back into camera frame coordinates."""
-    if points is None or len(points) == 0:
-        return points
-
-    pts = (base_to_camera_rotation @ points.T).T
-    if orientation_quat is not None and orientation_quat.shape[0] == 4:
-        # Inverse of projection.apply_imu_rotation's gravity-alignment step.
-        rot_world_from_imu = Rotation.from_quat(orientation_quat).as_matrix()
-        pts = (rot_world_from_imu @ pts.T).T
-    return pts.astype(np.float32, copy=False)
-
-
 # ── ROS2 message helpers ──────────────────────────────────────────────────
 
 def _stamp_from_epoch(t: float) -> RosTime:
@@ -298,9 +284,11 @@ def _header(timestamp: float, frame_id: str = "map") -> Header:
     return h
 
 
-def _costmap_to_occupancy_grid(grid: np.ndarray, timestamp: float) -> OccupancyGrid:
+def _costmap_to_occupancy_grid(
+    grid: np.ndarray, timestamp: float, frame_id: str
+) -> OccupancyGrid:
     msg = OccupancyGrid()
-    msg.header = _header(timestamp)
+    msg.header = _header(timestamp, frame_id)
     msg.info.resolution = GRID_RESOLUTION
     msg.info.width = GRID_CELLS
     msg.info.height = GRID_CELLS
@@ -364,9 +352,9 @@ def _make_pointcloud2(
     return msg
 
 
-def _make_goal_marker(x: float, y: float, timestamp: float) -> Marker:
+def _make_goal_marker(x: float, y: float, timestamp: float, frame_id: str) -> Marker:
     m = Marker()
-    m.header = _header(timestamp)
+    m.header = _header(timestamp, frame_id)
     m.ns = "nav"
     m.id = 0
     m.type = Marker.CUBE
@@ -383,9 +371,9 @@ def _make_goal_marker(x: float, y: float, timestamp: float) -> Marker:
     return m
 
 
-def _make_ego_marker(timestamp: float) -> Marker:
+def _make_ego_marker(timestamp: float, frame_id: str) -> Marker:
     m = Marker()
-    m.header = _header(timestamp)
+    m.header = _header(timestamp, frame_id)
     m.ns = "nav"
     m.id = 1
     m.type = Marker.SPHERE
@@ -402,9 +390,11 @@ def _make_ego_marker(timestamp: float) -> Marker:
     return m
 
 
-def _make_route_path(route_ego: np.ndarray, timestamp: float, max_points: int = 200) -> Path:
+def _make_route_path(
+    route_ego: np.ndarray, timestamp: float, frame_id: str, max_points: int = 200
+) -> Path:
     msg = Path()
-    msg.header = _header(timestamp)
+    msg.header = _header(timestamp, frame_id)
     step = max(1, len(route_ego) // max_points)
     for i in range(0, len(route_ego), step):
         ps = PoseStamped()
@@ -468,31 +458,47 @@ class Nav2Planner:
         dest_lon: float = -78.503577,
         lookahead_m: float = 8.0,
         republish_sensors: bool = True,
+        camera_mount_mode: str = "handheld",
+        orientation_mode: str = "gravity",
+        local_frame_yaw_offset_rad: float = _DEFAULT_LOCAL_FRAME_YAW_OFFSET_RAD,
     ) -> None:
         self._node = node
         self._dest_lat = dest_lat
         self._dest_lon = dest_lon
         self._lookahead_m = lookahead_m
         self._republish_sensors = republish_sensors
+        self._camera_mount_mode = camera_mount_mode
+        self._orientation_mode = orientation_mode
+        self._local_frame_yaw_offset_rad = float(local_frame_yaw_offset_rad)
+        self._local_frame_yaw_offset_deg = math.degrees(self._local_frame_yaw_offset_rad)
 
         mount = load_mount_frame_model()
-        camera_mount = load_mount_frame_model(imu_link="camera")
         self._base_forward_axis_imu = mount.base_forward_axis_in_imu
-        self._camera_to_base_rotation = camera_mount.rotation_base_from_imu
-        self._base_to_camera_rotation = self._camera_to_base_rotation.T
+        if camera_mount_mode == "urdf":
+            camera_mount = load_mount_frame_model(imu_link="camera")
+            self._camera_to_base_rotation = camera_mount.rotation_base_from_imu
+        elif camera_mount_mode == "handheld":
+            self._camera_to_base_rotation = default_camera_to_base_rotation()
+        elif camera_mount_mode == "identity":
+            self._camera_to_base_rotation = np.eye(3, dtype=np.float64)
+        else:
+            raise ValueError(f"Unsupported camera_mount_mode: {camera_mount_mode}")
         print(
             "Mount frame loaded:",
             f"urdf={mount.urdf_path}",
             f"base_forward_in_imu={self._base_forward_axis_imu}",
             f"camera_to_base=\n{self._camera_to_base_rotation}",
+            f"camera_mount_mode={self._camera_mount_mode}",
+            f"orientation_mode={self._orientation_mode}",
             f"imu_height={mount.translation_base_from_imu_m[2]:.2f}m",
-            f"local_frame_yaw_offset={_LOCAL_FRAME_YAW_OFFSET_DEG:.1f}deg",
+            f"local_frame_yaw_offset={self._local_frame_yaw_offset_deg:.1f}deg",
         )
 
         # Perception
         self._pipeline = PerceptionPipeline(
             config=config,
             camera_to_base_rotation=self._camera_to_base_rotation,
+            orientation_mode=self._orientation_mode,
         )
         print(f"YOLOv8 loaded (device={self._pipeline.device})")
 
@@ -857,7 +863,7 @@ class Nav2Planner:
             goal_x, goal_y = self._lookahead_m, 0.0
 
         half = GRID_SIZE_M / 2.0 - 1.0
-        goal_x, goal_y = _rotate_xy(goal_x, goal_y, _LOCAL_FRAME_YAW_OFFSET_RAD)
+        goal_x, goal_y = _rotate_xy(goal_x, goal_y, self._local_frame_yaw_offset_rad)
         goal_x = np.clip(goal_x, -half, half)
         goal_y = np.clip(goal_y, -half, half)
 
@@ -910,56 +916,57 @@ class Nav2Planner:
                 route_ego[:, 1] = -route_delta_e * cos_h + route_delta_n * sin_h
             else:
                 route_ego = self._route_enu - self._route_enu[0]
-            route_ego = _rotate_xy_path(route_ego, _LOCAL_FRAME_YAW_OFFSET_RAD)
-            self._gmaps_path_pub.publish(_make_route_path(route_ego, frame.timestamp))
+            route_ego = _rotate_xy_path(route_ego, self._local_frame_yaw_offset_rad)
+            local_frame_id = (
+                "camera"
+                if self._republish_sensors
+                else (frame.intrinsics.frame_id or "camera")
+            )
+            self._gmaps_path_pub.publish(
+                _make_route_path(route_ego, frame.timestamp, local_frame_id)
+            )
 
         # Perception
         result = self._pipeline.process_frame(frame)
-        drivable_pts = _rotate_xy_points(result.drivable_pts, _LOCAL_FRAME_YAW_OFFSET_RAD)
-        lane_pts = _rotate_xy_points(result.lane_pts, _LOCAL_FRAME_YAW_OFFSET_RAD)
-        det_pts = _rotate_xy_points(result.det_pts, _LOCAL_FRAME_YAW_OFFSET_RAD)
-        cloud_frame_id = (
+        drivable_pts = _rotate_xy_points(result.drivable_pts, self._local_frame_yaw_offset_rad)
+        lane_pts = _rotate_xy_points(result.lane_pts, self._local_frame_yaw_offset_rad)
+        det_pts = _rotate_xy_points(result.det_pts, self._local_frame_yaw_offset_rad)
+        local_frame_id = (
             "camera"
             if self._republish_sensors
             else (frame.intrinsics.frame_id or "camera")
         )
 
-        drivable_cloud_pts = _points_base_to_camera(
-            drivable_pts, self._base_to_camera_rotation, frame.orientation
-        )
-        lane_cloud_pts = _points_base_to_camera(
-            lane_pts, self._base_to_camera_rotation, frame.orientation
-        )
-        det_cloud_pts = _points_base_to_camera(
-            det_pts, self._base_to_camera_rotation, frame.orientation
-        )
-
-        if drivable_cloud_pts is not None:
+        if drivable_pts is not None:
             self._pc_drivable_pub.publish(
                 _make_pointcloud2(
-                    drivable_cloud_pts, 0.0, 1.0, 0.0, frame.timestamp, cloud_frame_id
+                    drivable_pts, 0.0, 1.0, 0.0, frame.timestamp, local_frame_id
                 )
             )
-        if lane_cloud_pts is not None:
+        if lane_pts is not None:
             self._pc_lanes_pub.publish(
                 _make_pointcloud2(
-                    lane_cloud_pts, 1.0, 0.0, 0.0, frame.timestamp, cloud_frame_id
+                    lane_pts, 1.0, 0.0, 0.0, frame.timestamp, local_frame_id
                 )
             )
-        if det_cloud_pts is not None:
+        if det_pts is not None:
             self._pc_det_pub.publish(
                 _make_pointcloud2(
-                    det_cloud_pts, 1.0, 1.0, 0.0, frame.timestamp, cloud_frame_id
+                    det_pts, 1.0, 1.0, 0.0, frame.timestamp, local_frame_id
                 )
             )
 
         # Costmap
         grid = build_costmap(drivable_pts, lane_pts, det_pts)
-        self._costmap_pub.publish(_costmap_to_occupancy_grid(grid, frame.timestamp))
+        self._costmap_pub.publish(
+            _costmap_to_occupancy_grid(grid, frame.timestamp, local_frame_id)
+        )
 
         # Markers
-        self._goal_marker_pub.publish(_make_goal_marker(goal_x, goal_y, frame.timestamp))
-        self._ego_marker_pub.publish(_make_ego_marker(frame.timestamp))
+        self._goal_marker_pub.publish(
+            _make_goal_marker(goal_x, goal_y, frame.timestamp, local_frame_id)
+        )
+        self._ego_marker_pub.publish(_make_ego_marker(frame.timestamp, local_frame_id))
 
         # Collect previous planning result (non-blocking)
         if self._plan_future is not None and self._plan_future.done():
@@ -1036,6 +1043,24 @@ def main() -> None:
     parser.add_argument("--playback-rate", type=float, default=1.0)
     parser.add_argument("--lookahead", type=float, default=8.0,
                         help="Lookahead distance on Google Maps route (meters)")
+    parser.add_argument(
+        "--camera-mount-mode",
+        choices=["handheld", "urdf", "identity"],
+        default="handheld",
+        help="Camera->base transform mode: handheld, urdf (strict), or identity (no frame delta)",
+    )
+    parser.add_argument(
+        "--orientation-mode",
+        choices=["gravity", "full", "none"],
+        default="gravity",
+        help="IMU compensation for projection: gravity (roll/pitch), full, or none",
+    )
+    parser.add_argument(
+        "--local-frame-yaw-offset-rad",
+        type=float,
+        default=_DEFAULT_LOCAL_FRAME_YAW_OFFSET_RAD,
+        help="Additional yaw rotation applied to local BEV frame (radians)",
+    )
     args = parser.parse_args()
 
     config = PipelineConfig.from_yaml(args.config) if args.config else PipelineConfig(
@@ -1062,6 +1087,9 @@ def main() -> None:
         dest_lon=args.dest_lon,
         lookahead_m=args.lookahead,
         republish_sensors=not live_mode,
+        camera_mount_mode=args.camera_mount_mode,
+        orientation_mode=args.orientation_mode,
+        local_frame_yaw_offset_rad=args.local_frame_yaw_offset_rad,
     )
 
     if live_mode:

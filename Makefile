@@ -85,6 +85,9 @@ full-stack:
 	@echo "  DEST_LAT=<float>        Destination latitude (default: 38.036830)"
 	@echo "  DEST_LON=<float>        Destination longitude (default: -78.503577)"
 	@echo "  LOOKAHEAD=<float>       Path following lookahead in meters (default: 15.0)"
+	@echo "  CAMERA_MOUNT_MODE=<m>   handheld|urdf|identity (default: handheld)"
+	@echo "  ORIENTATION_MODE=<m>    gravity|full|none (default: gravity)"
+	@echo "  LOCAL_FRAME_YAW_OFFSET_RAD=<r>  BEV yaw offset in radians (default: -1.5707963267948966)"
 	@echo ""
 	@echo "ENVIRONMENT"
 	@echo "  GOOGLE_MAPS_API_KEY     Required for routing. Set in .env or export."
@@ -101,11 +104,13 @@ full-stack:
 	cd perception && \
 	$(if $(BAG),BAG_FILE=$(patsubst bags/%,%,$(BAG)) PLAYBACK_RATE=$(or $(RATE),1.0),LIVE_MODE=1 TOPIC_PREFIX=$(or $(PREFIX),/iphone) NETWORK_MODE=host) \
 	DEST_LAT=$(or $(DEST_LAT),38.036830) DEST_LON=$(or $(DEST_LON),-78.503577) LOOKAHEAD=$(or $(LOOKAHEAD),15.0) \
+	CAMERA_MOUNT_MODE=$(or $(CAMERA_MOUNT_MODE),handheld) ORIENTATION_MODE=$(or $(ORIENTATION_MODE),gravity) LOCAL_FRAME_YAW_OFFSET_RAD=$(or $(LOCAL_FRAME_YAW_OFFSET_RAD),-1.5707963267948966) \
 	SLAM_BACKEND=$(SLAM_BACKEND) \
 	DOCKER_RUNTIME=$$RUNTIME DOCKER_ARCH=$$ARCH \
 	docker compose -f docker-compose.nav2.yml build --build-arg DOCKER_ARCH=$$ARCH && \
 	$(if $(BAG),BAG_FILE=$(patsubst bags/%,%,$(BAG)) PLAYBACK_RATE=$(or $(RATE),1.0),LIVE_MODE=1 TOPIC_PREFIX=$(or $(PREFIX),/iphone) NETWORK_MODE=host) \
 	DEST_LAT=$(or $(DEST_LAT),38.036830) DEST_LON=$(or $(DEST_LON),-78.503577) LOOKAHEAD=$(or $(LOOKAHEAD),15.0) \
+	CAMERA_MOUNT_MODE=$(or $(CAMERA_MOUNT_MODE),handheld) ORIENTATION_MODE=$(or $(ORIENTATION_MODE),gravity) LOCAL_FRAME_YAW_OFFSET_RAD=$(or $(LOCAL_FRAME_YAW_OFFSET_RAD),-1.5707963267948966) \
 	SLAM_BACKEND=$(SLAM_BACKEND) \
 	DOCKER_RUNTIME=$$RUNTIME DOCKER_ARCH=$$ARCH \
 	docker compose -f docker-compose.nav2.yml up

@@ -80,6 +80,7 @@ class PerceptionPipeline:
         subsample_lane: int = 2,
         subsample_bbox: int = 8,
         camera_to_base_rotation: np.ndarray | None = None,
+        orientation_mode: str = "full",
     ) -> None:
         if config is None:
             # Legacy path: build config from kwargs
@@ -103,6 +104,7 @@ class PerceptionPipeline:
             if camera_to_base_rotation is None
             else np.asarray(camera_to_base_rotation, dtype=np.float64)
         )
+        self._orientation_mode = orientation_mode
 
         # Detection
         if config.detection_model != "none":
@@ -205,7 +207,10 @@ class PerceptionPipeline:
             if len(pixels) > 0:
                 pts_3d = dcm.project_pixels_to_3d(pixels, depths)
                 drivable_pts = apply_imu_rotation(
-                    pts_3d, frame.orientation, self._camera_to_base_rotation
+                    pts_3d,
+                    frame.orientation,
+                    self._camera_to_base_rotation,
+                    orientation_mode=self._orientation_mode,
                 )
 
         # Project lane lines
@@ -219,7 +224,10 @@ class PerceptionPipeline:
             if len(pixels) > 0:
                 pts_3d = dcm.project_pixels_to_3d(pixels, depths)
                 lane_pts = apply_imu_rotation(
-                    pts_3d, frame.orientation, self._camera_to_base_rotation
+                    pts_3d,
+                    frame.orientation,
+                    self._camera_to_base_rotation,
+                    orientation_mode=self._orientation_mode,
                 )
 
         # Project detections (per-detection groups)
@@ -238,7 +246,10 @@ class PerceptionPipeline:
                     continue
                 pts_3d = dcm.project_pixels_to_3d(pixels, depths_g)
                 world_pts = apply_imu_rotation(
-                    pts_3d, frame.orientation, self._camera_to_base_rotation
+                    pts_3d,
+                    frame.orientation,
+                    self._camera_to_base_rotation,
+                    orientation_mode=self._orientation_mode,
                 )
                 det_groups.append(world_pts)
                 all_world_pts.append(world_pts)
