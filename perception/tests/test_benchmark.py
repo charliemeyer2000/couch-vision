@@ -171,7 +171,7 @@ class TestPipeline:
     def test_full_costmap_pipeline(self, benchmark, pipeline, dummy_synced_frame):
         def run():
             r = pipeline.process_frame(dummy_synced_frame)
-            return build_costmap(r.drivable_pts, r.lane_pts, r.det_pts, det_groups=r.det_groups)
+            return build_costmap(r.drivable_pts, r.lane_pts, r.det_pts)
 
         for _ in range(3):
             run()

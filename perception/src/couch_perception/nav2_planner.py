@@ -1,11 +1,12 @@
-"""Nav2 path planning with EKF localization and Google Maps routing.
+"""Nav2 path planning with GPS localization and phone-orientation heading.
 
 Supports two modes:
   - Bag replay: `--bag path.mcap` reads from a recorded MCAP file
   - Live: omit `--bag` to subscribe to live ROS2 topics from the iOS bridge
 
-Runs YOLOv8+YOLOP perception, fuses IMU+GPS via EKF, queries Google Maps
-for a route, builds costmaps, and plans local paths via Nav2.
+Runs YOLOv8+YOLOP perception, uses GPS for position and phone orientation
+for heading, queries Google Maps for a route, builds costmaps, and plans
+local paths via Nav2.
 
 Visualization via foxglove_bridge (ws://localhost:8765).
 """
@@ -27,6 +28,7 @@ import googlemaps
 import polyline as polyline_lib
 from pyproj import Transformer
 from scipy.interpolate import splprep, splev
+from scipy.spatial.transform import Rotation
 
 import rclpy
 from rclpy.node import Node
@@ -42,7 +44,7 @@ from nav2_simple_commander.robot_navigator import BasicNavigator
 
 from couch_perception.bag_reader import CameraIntrinsics, GpsFix, ImuSample, OdomSample
 from couch_perception.config import PipelineConfig
-from couch_perception.ekf import EKF
+from couch_perception.frame_model import load_mount_frame_model
 from couch_perception.frame_source import BagSource, LiveSource, SensorStreams
 from couch_perception.geo import geodetic_to_enu, ROTUNDA_LAT, ROTUNDA_LON
 from couch_perception.gpu_utils import resize_image, resize_depth
@@ -187,6 +189,100 @@ def _find_lookahead_goal(
     return float(route_enu[-1, 0]), float(route_enu[-1, 1])
 
 
+def _wrap_angle(angle_rad: float) -> float:
+    """Wrap angle to [-pi, pi]."""
+    return (angle_rad + math.pi) % (2.0 * math.pi) - math.pi
+
+
+_GPS_HEADING_MIN_DIST_M = 0.8
+_MAX_IMU_GPS_TIME_SKEW_S = 1.0
+_LOCAL_FRAME_YAW_OFFSET_DEG = 0.0
+_LOCAL_FRAME_YAW_OFFSET_RAD = math.radians(_LOCAL_FRAME_YAW_OFFSET_DEG)
+
+
+def _heading_from_phone_orientation(
+    orientation_quat: np.ndarray, base_forward_axis_in_imu: np.ndarray
+) -> float | None:
+    """Estimate heading from phone quaternion using the URDF mount frame.
+
+    Returns heading in ENU convention: yaw = atan2(east, north).
+    """
+    if orientation_quat.shape[0] != 4:
+        return None
+    # iOS quaternion in this pipeline is imu->world (validated against bag data).
+    rot_world_from_imu = Rotation.from_quat(orientation_quat)
+    forward_world = rot_world_from_imu.apply(base_forward_axis_in_imu)
+    east = float(forward_world[0])
+    north = float(forward_world[1])
+    norm = math.hypot(east, north)
+    if norm < 1e-6:
+        return None
+    return math.atan2(east / norm, north / norm)
+
+
+def _enu_to_body_xy(
+    delta_east: float, delta_north: float, heading_enu_rad: float
+) -> tuple[float, float]:
+    """Rotate ENU delta into body frame (x=forward, y=left)."""
+    sin_h = math.sin(heading_enu_rad)
+    cos_h = math.cos(heading_enu_rad)
+    x_forward = delta_east * sin_h + delta_north * cos_h
+    y_left = -delta_east * cos_h + delta_north * sin_h
+    return x_forward, y_left
+
+
+def _rotate_xy(x: float, y: float, yaw_rad: float) -> tuple[float, float]:
+    """Rotate a local-frame XY vector around +Z by yaw_rad."""
+    c = math.cos(yaw_rad)
+    s = math.sin(yaw_rad)
+    return x * c - y * s, x * s + y * c
+
+
+def _rotate_xy_points(points: np.ndarray | None, yaw_rad: float) -> np.ndarray | None:
+    """Rotate Nx3 points around +Z, preserving Z."""
+    if points is None or len(points) == 0:
+        return points
+    out = points.copy()
+    c = math.cos(yaw_rad)
+    s = math.sin(yaw_rad)
+    x = points[:, 0]
+    y = points[:, 1]
+    out[:, 0] = x * c - y * s
+    out[:, 1] = x * s + y * c
+    return out
+
+
+def _rotate_xy_path(path_xy: np.ndarray, yaw_rad: float) -> np.ndarray:
+    """Rotate an Nx2 XY path around +Z."""
+    if len(path_xy) == 0:
+        return path_xy
+    c = math.cos(yaw_rad)
+    s = math.sin(yaw_rad)
+    out = path_xy.copy()
+    x = path_xy[:, 0]
+    y = path_xy[:, 1]
+    out[:, 0] = x * c - y * s
+    out[:, 1] = x * s + y * c
+    return out
+
+
+def _points_base_to_camera(
+    points: np.ndarray | None,
+    base_to_camera_rotation: np.ndarray,
+    orientation_quat: np.ndarray | None,
+) -> np.ndarray | None:
+    """Convert planner-local/base-frame points back into camera frame coordinates."""
+    if points is None or len(points) == 0:
+        return points
+
+    pts = (base_to_camera_rotation @ points.T).T
+    if orientation_quat is not None and orientation_quat.shape[0] == 4:
+        # Inverse of projection.apply_imu_rotation's gravity-alignment step.
+        rot_world_from_imu = Rotation.from_quat(orientation_quat).as_matrix()
+        pts = (rot_world_from_imu @ pts.T).T
+    return pts.astype(np.float32, copy=False)
+
+
 # ── ROS2 message helpers ──────────────────────────────────────────────────
 
 def _stamp_from_epoch(t: float) -> RosTime:
@@ -230,10 +326,15 @@ _PC2_POINT_STEP = 28
 
 
 def _make_pointcloud2(
-    points: np.ndarray, r: float, g: float, b: float, timestamp: float
+    points: np.ndarray,
+    r: float,
+    g: float,
+    b: float,
+    timestamp: float,
+    frame_id: str,
 ) -> PointCloud2:
     msg = PointCloud2()
-    msg.header = _header(timestamp)
+    msg.header = _header(timestamp, frame_id)
     if len(points) == 0:
         msg.height = 1
         msg.width = 0
@@ -353,7 +454,7 @@ def _path_to_costmap_image(
 # ── Nav2Planner ───────────────────────────────────────────────────────────
 
 class Nav2Planner:
-    """Perception + EKF + Google Maps routing + Nav2 path planning.
+    """Perception + GPS + phone heading + Google Maps + Nav2 path planning.
 
     Consumes SensorStreams from any source (BagSource or LiveSource) and
     publishes costmaps, planned paths, and perception results via ROS2.
@@ -374,22 +475,26 @@ class Nav2Planner:
         self._lookahead_m = lookahead_m
         self._republish_sensors = republish_sensors
 
-        # Perception
-        self._pipeline = PerceptionPipeline(config=config)
-        print(f"YOLOv8 loaded (device={self._pipeline.device})")
-
-        # EKF
-        self._ekf = EKF(
-            accel_noise=2.0,
-            gyro_noise=0.05,
-            initial_pos_cov=1.0,
-            heading_noise=0.15,
-            gps_heading_noise=0.3,
-            velocity_damping=0.95,
-            use_imu=True,
-            force_2d=True,
-            max_speed=3.0,
+        mount = load_mount_frame_model()
+        camera_mount = load_mount_frame_model(imu_link="camera")
+        self._base_forward_axis_imu = mount.base_forward_axis_in_imu
+        self._camera_to_base_rotation = camera_mount.rotation_base_from_imu
+        self._base_to_camera_rotation = self._camera_to_base_rotation.T
+        print(
+            "Mount frame loaded:",
+            f"urdf={mount.urdf_path}",
+            f"base_forward_in_imu={self._base_forward_axis_imu}",
+            f"camera_to_base=\n{self._camera_to_base_rotation}",
+            f"imu_height={mount.translation_base_from_imu_m[2]:.2f}m",
+            f"local_frame_yaw_offset={_LOCAL_FRAME_YAW_OFFSET_DEG:.1f}deg",
         )
+
+        # Perception
+        self._pipeline = PerceptionPipeline(
+            config=config,
+            camera_to_base_rotation=self._camera_to_base_rotation,
+        )
+        print(f"YOLOv8 loaded (device={self._pipeline.device})")
 
         # Google Maps route (resolved on first GPS fix)
         self._api_key = os.environ.get("GOOGLE_MAPS_API_KEY")
@@ -492,15 +597,18 @@ class Nav2Planner:
         self._plan_future: Future | None = None
         self._latest_path: Path | None = None
 
-        # EKF tracking indices
+        # Localization tracking indices/state (GPS position + phone heading)
         self._gps_idx = 0
         self._imu_idx = 0
-        self._odom_idx = 0
-        self._init_enu_yaw: float = 0.0
-        self._prev_imu_t: float | None = None
-        self._prev_gps_enu: np.ndarray | None = None
         self._gps_enu_cache: list[np.ndarray] = []
-        self._gps_cov_cache: list[np.ndarray] = []
+        self._latest_gps_enu: np.ndarray | None = None
+        self._prev_gps_enu_for_heading: np.ndarray | None = None
+        self._latest_course_heading: float | None = None
+
+        self._latest_phone_heading_raw: float | None = None
+        self._latest_phone_heading_timestamp: float | None = None
+        self._heading_offset_enu_from_phone: float | None = None
+        self._latest_heading_enu: float | None = None
 
         self._frame_num = 0
 
@@ -538,7 +646,8 @@ class Nav2Planner:
             "current_dest_lat": self._dest_lat,
             "current_dest_lon": self._dest_lon,
             "route_points": len(self._route_enu) if self._route_enu is not None else 0,
-            "ekf_initialized": self._ekf.initialized,
+            "ekf_initialized": self._latest_gps_enu is not None,  # Backward-compatible field.
+            "heading_calibrated": self._heading_offset_enu_from_phone is not None,
         }
         msg = String()
         msg.data = json.dumps(status)
@@ -620,39 +729,6 @@ class Nav2Planner:
             g = gps_fixes[len(self._gps_enu_cache)]
             enu = geodetic_to_enu(g.latitude, g.longitude, g.altitude)
             self._gps_enu_cache.append(np.array(enu))
-            cov = g.position_covariance
-            self._gps_cov_cache.append(np.diag([cov[0], cov[4], cov[8]]))
-
-    def _try_init_ekf(
-        self,
-        gps_fixes: list[GpsFix],
-        imu_samples: list[ImuSample],
-        odom_samples: list[OdomSample],
-    ) -> None:
-        """Initialize EKF on first GPS fix + IMU sample, and align ARKit frame."""
-        if self._ekf.initialized:
-            if not self._ekf.arkit_aligned and odom_samples:
-                self._align_arkit(gps_fixes[0].timestamp, odom_samples)
-            return
-        if not gps_fixes or not imu_samples:
-            return
-        self._ensure_gps_enu(gps_fixes)
-        self._ekf.initialize(self._gps_enu_cache[0], imu_samples[0].orientation)
-        self._init_enu_yaw = self._ekf.yaw
-        print(f"  EKF initialized at ENU: ({self._gps_enu_cache[0][0]:.1f}, {self._gps_enu_cache[0][1]:.1f})")
-        if odom_samples:
-            self._align_arkit(gps_fixes[0].timestamp, odom_samples)
-
-    def _align_arkit(self, gps_timestamp: float, odom_samples: list[OdomSample]) -> None:
-        """Align ARKit frame using the odom sample nearest to the first GPS fix."""
-        from scipy.spatial.transform import Rotation
-        nearest = min(odom_samples, key=lambda o: abs(o.timestamp - gps_timestamp))
-        arkit_yaw = Rotation.from_quat(nearest.orientation).as_euler("xyz")[2]
-        self._ekf.align_arkit_frame(
-            nearest.position, arkit_yaw,
-            self._gps_enu_cache[0], self._init_enu_yaw,
-        )
-        print(f"  ARKit frame aligned (dt={nearest.timestamp - gps_timestamp:.2f}s)")
 
     def _try_resolve_route(self, gps_fixes: list[GpsFix]) -> None:
         """Query Google Maps route on first GPS fix or when destination changes."""
@@ -682,32 +758,63 @@ class Nav2Planner:
 
         n_imu = len(imu_samples)
         n_gps = len(gps_fixes)
-        n_odom = len(odom_samples)
 
-        self._try_init_ekf(gps_fixes, imu_samples, odom_samples)
         self._try_resolve_route(gps_fixes)
         self._ensure_gps_enu(gps_fixes)
 
-        # Advance EKF through IMU samples up to this frame
+        # Advance heading estimate from phone orientation up to this frame.
         while self._imu_idx < n_imu and imu_samples[self._imu_idx].timestamp <= frame.timestamp:
             s = imu_samples[self._imu_idx]
-            dt = (s.timestamp - self._prev_imu_t) if self._prev_imu_t is not None else 0.0
-            self._prev_imu_t = s.timestamp
-            if self._ekf.initialized:
-                self._ekf.predict(s.accel, s.gyro, s.orientation, dt)
-                self._ekf.update_heading(s.orientation)
+            phone_heading = _heading_from_phone_orientation(
+                s.orientation, self._base_forward_axis_imu
+            )
+            if phone_heading is not None:
+                self._latest_phone_heading_raw = phone_heading
+                self._latest_phone_heading_timestamp = s.timestamp
+                if self._heading_offset_enu_from_phone is not None:
+                    self._latest_heading_enu = _wrap_angle(
+                        phone_heading + self._heading_offset_enu_from_phone
+                    )
             self._imu_idx += 1
 
-        # Advance EKF through GPS fixes up to this frame
+        # Advance GPS position and course heading up to this frame.
         while self._gps_idx < n_gps and gps_fixes[self._gps_idx].timestamp <= frame.timestamp:
-            if self._ekf.initialized:
-                self._ekf.update_gps(self._gps_enu_cache[self._gps_idx], self._gps_cov_cache[self._gps_idx])
-                if self._prev_gps_enu is not None:
-                    self._ekf.update_gps_heading(self._prev_gps_enu, self._gps_enu_cache[self._gps_idx])
-                self._prev_gps_enu = self._gps_enu_cache[self._gps_idx].copy()
+            g = gps_fixes[self._gps_idx]
+            enu = self._gps_enu_cache[self._gps_idx]
+            self._latest_gps_enu = enu.copy()
+
+            if self._prev_gps_enu_for_heading is not None:
+                de = float(enu[0] - self._prev_gps_enu_for_heading[0])
+                dn = float(enu[1] - self._prev_gps_enu_for_heading[1])
+                dist = math.hypot(de, dn)
+                if dist >= _GPS_HEADING_MIN_DIST_M:
+                    self._latest_course_heading = math.atan2(de, dn)
+
+                    if (
+                        self._latest_phone_heading_raw is not None
+                        and self._latest_phone_heading_timestamp is not None
+                        and abs(g.timestamp - self._latest_phone_heading_timestamp) <= _MAX_IMU_GPS_TIME_SKEW_S
+                    ):
+                        target_offset = _wrap_angle(
+                            self._latest_course_heading - self._latest_phone_heading_raw
+                        )
+                        if self._heading_offset_enu_from_phone is None:
+                            self._heading_offset_enu_from_phone = target_offset
+                            print(
+                                f"  Heading calibrated: phone→ENU offset="
+                                f"{math.degrees(target_offset):.1f}°"
+                            )
+                        else:
+                            # Slow offset adaptation for magnetometer/local disturbances.
+                            delta = _wrap_angle(target_offset - self._heading_offset_enu_from_phone)
+                            self._heading_offset_enu_from_phone = _wrap_angle(
+                                self._heading_offset_enu_from_phone + 0.1 * delta
+                            )
+                        self._latest_heading_enu = _wrap_angle(
+                            self._latest_phone_heading_raw + self._heading_offset_enu_from_phone
+                        )
 
             if self._republish_sensors:
-                g = gps_fixes[self._gps_idx]
                 gps_msg = NavSatFix()
                 gps_msg.header = _header(g.timestamp, "gps")
                 gps_msg.latitude = g.latitude
@@ -715,32 +822,42 @@ class Nav2Planner:
                 gps_msg.altitude = g.altitude
                 self._gps_pub.publish(gps_msg)
 
+            self._prev_gps_enu_for_heading = enu.copy()
             self._gps_idx += 1
 
-        # Advance EKF through odom samples up to this frame
-        while self._odom_idx < n_odom and odom_samples[self._odom_idx].timestamp <= frame.timestamp:
-            if self._ekf.initialized and self._ekf.arkit_aligned:
-                o = odom_samples[self._odom_idx]
-                enu_pos = self._ekf.arkit_to_enu(o.position)
-                self._ekf.update_odom(enu_pos, o.pose_covariance[:3, :3])
-            self._odom_idx += 1
+        # Localization state used by routing/planning.
+        if self._latest_gps_enu is not None:
+            ego_enu = self._latest_gps_enu.copy()
+        elif self._gps_enu_cache:
+            ego_enu = self._gps_enu_cache[0].copy()
+        else:
+            ego_enu = np.zeros(3, dtype=np.float64)
 
-        # EKF position
-        ego_enu = self._ekf.x[:3].copy()
+        heading_enu = (
+            self._latest_heading_enu
+            if self._latest_heading_enu is not None
+            else self._latest_course_heading
+        )
+        if heading_enu is None:
+            heading_enu = 0.0
 
         # Compute goal from route
-        if self._route_enu is not None:
+        if self._route_enu is not None and self._latest_gps_enu is not None:
             goal_result = _find_lookahead_goal(self._route_enu, ego_enu, self._lookahead_m)
             if goal_result:
                 goal_east, goal_north = goal_result
-                goal_x = goal_east - ego_enu[0]
-                goal_y = goal_north - ego_enu[1]
+                goal_x, goal_y = _enu_to_body_xy(
+                    goal_east - float(ego_enu[0]),
+                    goal_north - float(ego_enu[1]),
+                    heading_enu,
+                )
             else:
                 goal_x, goal_y = self._lookahead_m, 0.0
         else:
             goal_x, goal_y = self._lookahead_m, 0.0
 
         half = GRID_SIZE_M / 2.0 - 1.0
+        goal_x, goal_y = _rotate_xy(goal_x, goal_y, _LOCAL_FRAME_YAW_OFFSET_RAD)
         goal_x = np.clip(goal_x, -half, half)
         goal_y = np.clip(goal_y, -half, half)
 
@@ -783,30 +900,61 @@ class Nav2Planner:
 
         # Publish Google Maps route in ego-relative coords
         if self._route_enu is not None:
-            route_ego = self._route_enu - ego_enu[:2]
+            if self._latest_gps_enu is not None:
+                route_delta_e = self._route_enu[:, 0] - float(ego_enu[0])
+                route_delta_n = self._route_enu[:, 1] - float(ego_enu[1])
+                sin_h = math.sin(heading_enu)
+                cos_h = math.cos(heading_enu)
+                route_ego = np.empty_like(self._route_enu)
+                route_ego[:, 0] = route_delta_e * sin_h + route_delta_n * cos_h
+                route_ego[:, 1] = -route_delta_e * cos_h + route_delta_n * sin_h
+            else:
+                route_ego = self._route_enu - self._route_enu[0]
+            route_ego = _rotate_xy_path(route_ego, _LOCAL_FRAME_YAW_OFFSET_RAD)
             self._gmaps_path_pub.publish(_make_route_path(route_ego, frame.timestamp))
 
         # Perception
         result = self._pipeline.process_frame(frame)
+        drivable_pts = _rotate_xy_points(result.drivable_pts, _LOCAL_FRAME_YAW_OFFSET_RAD)
+        lane_pts = _rotate_xy_points(result.lane_pts, _LOCAL_FRAME_YAW_OFFSET_RAD)
+        det_pts = _rotate_xy_points(result.det_pts, _LOCAL_FRAME_YAW_OFFSET_RAD)
+        cloud_frame_id = (
+            "camera"
+            if self._republish_sensors
+            else (frame.intrinsics.frame_id or "camera")
+        )
 
-        if result.drivable_pts is not None:
+        drivable_cloud_pts = _points_base_to_camera(
+            drivable_pts, self._base_to_camera_rotation, frame.orientation
+        )
+        lane_cloud_pts = _points_base_to_camera(
+            lane_pts, self._base_to_camera_rotation, frame.orientation
+        )
+        det_cloud_pts = _points_base_to_camera(
+            det_pts, self._base_to_camera_rotation, frame.orientation
+        )
+
+        if drivable_cloud_pts is not None:
             self._pc_drivable_pub.publish(
-                _make_pointcloud2(result.drivable_pts, 0.0, 1.0, 0.0, frame.timestamp)
+                _make_pointcloud2(
+                    drivable_cloud_pts, 0.0, 1.0, 0.0, frame.timestamp, cloud_frame_id
+                )
             )
-        if result.lane_pts is not None:
+        if lane_cloud_pts is not None:
             self._pc_lanes_pub.publish(
-                _make_pointcloud2(result.lane_pts, 1.0, 0.0, 0.0, frame.timestamp)
+                _make_pointcloud2(
+                    lane_cloud_pts, 1.0, 0.0, 0.0, frame.timestamp, cloud_frame_id
+                )
             )
-        if result.det_pts is not None:
+        if det_cloud_pts is not None:
             self._pc_det_pub.publish(
-                _make_pointcloud2(result.det_pts, 1.0, 1.0, 0.0, frame.timestamp)
+                _make_pointcloud2(
+                    det_cloud_pts, 1.0, 1.0, 0.0, frame.timestamp, cloud_frame_id
+                )
             )
 
         # Costmap
-        grid = build_costmap(
-            result.drivable_pts, result.lane_pts, result.det_pts,
-            det_groups=result.det_groups or None,
-        )
+        grid = build_costmap(drivable_pts, lane_pts, det_pts)
         self._costmap_pub.publish(_costmap_to_occupancy_grid(grid, frame.timestamp))
 
         # Markers
@@ -851,7 +999,7 @@ class Nav2Planner:
             print(
                 f"\rFrame {self._frame_num}: path={n_poses} poses, "
                 f"{len(result.detections)} det, {1/dt:.1f} FPS, "
-                f"EKF=({ego_enu[0]:.1f},{ego_enu[1]:.1f}) yaw={math.degrees(self._ekf.yaw):.0f}° "
+                f"GPS=({ego_enu[0]:.1f},{ego_enu[1]:.1f}) heading={math.degrees(heading_enu):.0f}° "
                 f"goal=({goal_x:.1f},{goal_y:.1f})",
                 end="", flush=True,
             )
@@ -868,7 +1016,7 @@ class Nav2Planner:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Nav2 path planning with EKF + perception (bag replay or live)"
+        description="Nav2 path planning with GPS + phone heading + perception (bag replay or live)"
     )
     parser.add_argument("--bag", default=None,
                         help="Path to .mcap bag file (omit for live mode)")

@@ -35,8 +35,8 @@ FOV_HALF_RAD = math.radians(FOV_DEG / 2.0)
 def _build_fov_mask() -> np.ndarray:
     """Pre-compute a boolean mask where True = inside FOV, False = outside.
 
-    Forward direction is -X (negated to align with ENU/Google Maps).
-    Grid layout: row 0 = most negative x (forward), row N = most positive x (behind).
+    Forward direction is +X.
+    Grid layout: row 0 = most negative x (behind), row N = most positive x (forward).
     Col 0 = min y (left), col N = max y (right).
     """
     mask = np.zeros((GRID_CELLS, GRID_CELLS), dtype=bool)
@@ -46,8 +46,8 @@ def _build_fov_mask() -> np.ndarray:
             x = GRID_ORIGIN + r * GRID_RESOLUTION + GRID_RESOLUTION / 2
             y = GRID_ORIGIN + c * GRID_RESOLUTION + GRID_RESOLUTION / 2
 
-            if x < 0:
-                angle = abs(math.atan2(y, -x))
+            if x > 0:
+                angle = abs(math.atan2(y, x))
                 if angle <= FOV_HALF_RAD:
                     mask[r, c] = True
 
@@ -83,15 +83,12 @@ def build_costmap(
     drivable_pts: np.ndarray | None,
     lane_pts: np.ndarray | None,
     det_pts: np.ndarray | None,
-    det_groups: list[np.ndarray] | None = None,
 ) -> np.ndarray:
     """Build a costmap grid from projected 3D points.
 
     Points are in ego-centric world frame (x=forward, y=lateral, z=up).
 
-    If det_groups is provided (list of per-detection (N,3) point arrays),
-    each detection's ground-plane bounding box is filled as lethal cost.
-    Otherwise falls back to rasterizing det_pts as individual points.
+    Detection points are rasterized as lethal cells; bounding-box expansion is not applied.
 
     Returns:
         (GRID_CELLS, GRID_CELLS) int8 array with Nav2-compatible cost values.
@@ -107,25 +104,7 @@ def build_costmap(
         row, col, valid = _world_to_grid(lane_pts[:, 0], lane_pts[:, 1])
         grid[row[valid], col[valid]] = COST_LANE
 
-    if det_groups is not None:
-        for group_pts in det_groups:
-            if len(group_pts) < 2:
-                continue
-            x_min, x_max = group_pts[:, 0].min(), group_pts[:, 0].max()
-            y_min, y_max = group_pts[:, 1].min(), group_pts[:, 1].max()
-            r_min, c_min, _ = _world_to_grid(
-                np.array([x_min]), np.array([y_min])
-            )
-            r_max, c_max, _ = _world_to_grid(
-                np.array([x_max]), np.array([y_max])
-            )
-            r0 = max(0, int(r_min[0]))
-            r1 = min(GRID_CELLS - 1, int(r_max[0]))
-            c0 = max(0, int(c_min[0]))
-            c1 = min(GRID_CELLS - 1, int(c_max[0]))
-            if r0 <= r1 and c0 <= c1:
-                grid[r0 : r1 + 1, c0 : c1 + 1] = COST_LETHAL
-    elif det_pts is not None and len(det_pts) > 0:
+    if det_pts is not None and len(det_pts) > 0:
         row, col, valid = _world_to_grid(det_pts[:, 0], det_pts[:, 1])
         grid[row[valid], col[valid]] = COST_LETHAL
 

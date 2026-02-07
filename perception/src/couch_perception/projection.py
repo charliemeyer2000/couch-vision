@@ -8,12 +8,15 @@ using IMU orientation.
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
 import cv2
 import numpy as np
 
 from couch_perception.camera_model import CameraModel, make_camera_model
-from couch_perception.yolov8_detector import Detection
+
+if TYPE_CHECKING:
+    from couch_perception.yolov8_detector import Detection
 
 
 def quat_to_rotation_matrix(q: np.ndarray) -> np.ndarray:
@@ -26,22 +29,45 @@ def quat_to_rotation_matrix(q: np.ndarray) -> np.ndarray:
     ], dtype=np.float64)
 
 
-def apply_imu_rotation(points: np.ndarray, orientation: np.ndarray | None) -> np.ndarray:
-    """Rotate camera-frame points into a gravity-aligned world frame using IMU orientation.
+_DEFAULT_CAMERA_TO_BASE_ROTATION = np.array(
+    [
+        [0.0, 0.0, 1.0],   # base +x (forward) <- camera +z
+        [-1.0, 0.0, 0.0],  # base +y (left) <- camera -x
+        [0.0, -1.0, 0.0],  # base +z (up) <- camera -y
+    ],
+    dtype=np.float64,
+)
 
-    Uses the inverse of the IMU orientation quaternion to rotate camera-frame points
-    into a gravity-aligned frame, then permutes axes so that X/Y span the ground plane
-    and Z points up.
+
+def apply_imu_rotation(
+    points: np.ndarray,
+    orientation: np.ndarray | None,
+    camera_to_base_rotation: np.ndarray | None = None,
+) -> np.ndarray:
+    """Rotate projected points with IMU and map them into a forward-facing base frame.
+
+    The IMU quaternion is used for gravity alignment (inverse rotation), then points
+    are remapped from camera axes into base axes. The axis remap defaults to the
+    historical camera-optical mapping but can be overridden with a URDF-derived
+    camera link rotation matrix.
     """
-    if orientation is None or len(points) == 0:
+    if len(points) == 0:
         return points
-    R = quat_to_rotation_matrix(orientation)
-    pts_world = (R.T @ points.T).T
-    result = np.empty_like(pts_world)
-    result[:, 0] = -pts_world[:, 0]  # forward → -X (negated to align with ENU/Google Maps)
-    result[:, 1] = pts_world[:, 2]   # lateral → Y
-    result[:, 2] = -pts_world[:, 1]  # -gravity → Z (up)
-    return result.astype(np.float32)
+
+    pts_rot = points
+    if orientation is not None:
+        R = quat_to_rotation_matrix(orientation)
+        pts_rot = (R.T @ points.T).T
+
+    camera_to_base = (
+        _DEFAULT_CAMERA_TO_BASE_ROTATION
+        if camera_to_base_rotation is None
+        else np.asarray(camera_to_base_rotation, dtype=np.float64)
+    )
+    if camera_to_base.shape != (3, 3):
+        raise ValueError("camera_to_base_rotation must be shape (3, 3)")
+
+    return (camera_to_base @ pts_rot.T).T.astype(np.float32)
 
 
 def extract_mask_pixels(
