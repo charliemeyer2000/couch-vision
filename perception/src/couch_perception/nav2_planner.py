@@ -818,6 +818,7 @@ class Nav2Planner:
         # Debug: Costmap statistics
         free_cells = int(np.sum(grid == COST_FREE))
         lethal_cells = int(np.sum(grid == COST_LETHAL))
+        unseen_cells = int(np.sum(grid == COST_UNSEEN))
         center_cost = int(grid[GRID_CELLS // 2, GRID_CELLS // 2])
 
         # Markers
@@ -863,7 +864,7 @@ class Nav2Planner:
                 f"\rFrame {self._frame_num}: path={n_poses} poses, "
                 f"{len(result.detections)} det, {1/dt:.1f} FPS, "
                 f"EKF=({ego_enu[0]:.1f},{ego_enu[1]:.1f}) "
-                f"costmap: free={free_cells} lethal={lethal_cells} center={center_cost}",
+                f"costmap: free={free_cells} lethal={lethal_cells} unseen={unseen_cells} center={center_cost}",
                 end="", flush=True,
             )
 
