@@ -4,7 +4,8 @@ Builds a Nav2-compatible occupancy grid centered at (0,0) with:
   - Drivable area → cost 0 (free)
   - Lane lines → cost 50 (soft barrier, crossable)
   - Obstacles → cost 100 (lethal)
-  - Unseen (outside FOV + unknown) → cost 98 (strongly avoided)
+  - Inside FOV, no data → cost 0 (free — visible and clear)
+  - Outside FOV → cost -1 (unknown)
 """
 
 from __future__ import annotations
@@ -94,6 +95,7 @@ def build_costmap(
         (GRID_CELLS, GRID_CELLS) int8 array with Nav2-compatible cost values.
     """
     grid = np.full((GRID_CELLS, GRID_CELLS), COST_UNSEEN, dtype=np.int8)
+    grid[_FOV_MASK] = COST_FREE
     grid[_EGO_DRIVABLE_MASK] = COST_FREE
 
     if drivable_pts is not None and len(drivable_pts) > 0:
