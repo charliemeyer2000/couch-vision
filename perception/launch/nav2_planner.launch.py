@@ -22,6 +22,9 @@ def _create_nodes(context: LaunchContext):
     )
     nav2_params = os.path.join(config_dir, "nav2_planner_params.yaml")
     rtabmap_params = os.path.join(config_dir, "rtabmap_params.yaml")
+    mount_urdf = os.path.join(config_dir, "phone_mount.urdf")
+    with open(mount_urdf, encoding="utf-8") as f:
+        robot_description = f.read()
 
     slam_backend = os.environ.get("SLAM_BACKEND", "rtabmap")
     nodes = []
@@ -34,6 +37,15 @@ def _create_nodes(context: LaunchContext):
             name="planner_server",
             output="screen",
             parameters=[nav2_params],
+        )
+    )
+    nodes.append(
+        Node(
+            package="robot_state_publisher",
+            executable="robot_state_publisher",
+            name="robot_state_publisher",
+            output="screen",
+            parameters=[{"robot_description": robot_description}],
         )
     )
 
@@ -69,16 +81,16 @@ def _create_nodes(context: LaunchContext):
         )
 
     # --- Static TF publishers ---
-    # map -> odom: Only when no SLAM (SLAM publishes this dynamically)
-    if slam_backend == "none":
-        nodes.append(
-            Node(
-                package="tf2_ros",
-                executable="static_transform_publisher",
-                name="static_tf_map_odom",
-                arguments=["0", "0", "0", "0", "0", "0", "map", "odom"],
-            )
+    # map -> odom: Always publish as identity bootstrap.
+    # RTAB-Map's dynamic transforms on /tf override this once SLAM is running.
+    nodes.append(
+        Node(
+            package="tf2_ros",
+            executable="static_transform_publisher",
+            name="static_tf_map_odom",
+            arguments=["0", "0", "0", "0", "0", "0", "map", "odom"],
         )
+    )
 
     # odom -> base_link: Always needed
     nodes.append(
@@ -89,25 +101,6 @@ def _create_nodes(context: LaunchContext):
             arguments=["0", "0", "0", "0", "0", "0", "odom", "base_link"],
         )
     )
-
-    # base_link -> camera/imu: Only when SLAM enabled
-    if slam_backend == "rtabmap":
-        nodes.append(
-            Node(
-                package="tf2_ros",
-                executable="static_transform_publisher",
-                name="static_tf_base_camera",
-                arguments=["0", "0", "0", "0", "0", "0", "base_link", "camera"],
-            )
-        )
-        nodes.append(
-            Node(
-                package="tf2_ros",
-                executable="static_transform_publisher",
-                name="static_tf_base_imu",
-                arguments=["0", "0", "0", "0", "0", "0", "base_link", "imu"],
-            )
-        )
 
     # --- Foxglove bridge (always runs) ---
     nodes.append(

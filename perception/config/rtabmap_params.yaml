@@ -45,6 +45,7 @@ rtabmap:
     Grid/MaxObstacleHeight: "2.0"
 
     Db/Sqlite3InMemory: "true"
+    database_path: ""
 
     rgb/image_transport: "raw"
     depth/image_transport: "raw"

@@ -1,0 +1,35 @@
+<?xml version="1.0"?>
+<robot name="couch_phone_mount">
+  <!-- REP-103 base frame: x=forward, y=left, z=up -->
+  <link name="base_link"/>
+
+  <!-- Physical phone mount frame:
+       - Phone is mounted 1.5m above base_link origin
+       - Phone is side-mounted and perpendicular to the ground
+       - Mapping (after 90° CW yaw correction for physical mount):
+           phone +X (right edge) -> base +Z (up)
+           phone +Z (out of screen) -> base -Y (right)
+           phone +Y (top edge) -> base -X (backward)
+  -->
+  <link name="phone_mount"/>
+  <joint name="base_to_phone_mount" type="fixed">
+    <parent link="base_link"/>
+    <child link="phone_mount"/>
+    <origin xyz="0 0 1.5" rpy="3.141592653589793 -1.5707963267948966 -1.5707963267948966"/>
+  </joint>
+
+  <!-- Keep existing topic frame IDs by exposing imu/camera links in URDF. -->
+  <link name="imu"/>
+  <joint name="phone_mount_to_imu" type="fixed">
+    <parent link="phone_mount"/>
+    <child link="imu"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <link name="camera"/>
+  <joint name="phone_mount_to_camera" type="fixed">
+    <parent link="phone_mount"/>
+    <child link="camera"/>
+    <origin xyz="0 0 0" rpy="-3.14159265359 -1.5707963267948966 -1.5707963267948966"/>
+  </joint>
+</robot>

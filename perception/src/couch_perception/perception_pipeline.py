@@ -79,6 +79,7 @@ class PerceptionPipeline:
         subsample_drivable: int = 4,
         subsample_lane: int = 2,
         subsample_bbox: int = 8,
+        camera_to_base_rotation: np.ndarray | None = None,
     ) -> None:
         if config is None:
             # Legacy path: build config from kwargs
@@ -97,6 +98,11 @@ class PerceptionPipeline:
         self.subsample_drivable = config.subsample_drivable
         self.subsample_lane = config.subsample_lane
         self.subsample_bbox = config.subsample_bbox
+        self._camera_to_base_rotation = (
+            None
+            if camera_to_base_rotation is None
+            else np.asarray(camera_to_base_rotation, dtype=np.float64)
+        )
 
         # Detection
         if config.detection_model != "none":
@@ -198,7 +204,9 @@ class PerceptionPipeline:
             )
             if len(pixels) > 0:
                 pts_3d = dcm.project_pixels_to_3d(pixels, depths)
-                drivable_pts = apply_imu_rotation(pts_3d, frame.orientation)
+                drivable_pts = apply_imu_rotation(
+                    pts_3d, frame.orientation, self._camera_to_base_rotation
+                )
 
         # Project lane lines
         lane_pts = None
@@ -210,7 +218,9 @@ class PerceptionPipeline:
             )
             if len(pixels) > 0:
                 pts_3d = dcm.project_pixels_to_3d(pixels, depths)
-                lane_pts = apply_imu_rotation(pts_3d, frame.orientation)
+                lane_pts = apply_imu_rotation(
+                    pts_3d, frame.orientation, self._camera_to_base_rotation
+                )
 
         # Project detections (per-detection groups)
         det_pts = None
@@ -227,7 +237,9 @@ class PerceptionPipeline:
                 if len(pixels) == 0:
                     continue
                 pts_3d = dcm.project_pixels_to_3d(pixels, depths_g)
-                world_pts = apply_imu_rotation(pts_3d, frame.orientation)
+                world_pts = apply_imu_rotation(
+                    pts_3d, frame.orientation, self._camera_to_base_rotation
+                )
                 det_groups.append(world_pts)
                 all_world_pts.append(world_pts)
             if all_world_pts:

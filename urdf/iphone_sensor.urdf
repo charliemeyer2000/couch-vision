@@ -1,0 +1,78 @@
+<?xml version="1.0"?>
+<!--
+  iPhone sensor URDF for CouchVision.
+
+  Frame hierarchy (per ROS REP-103/REP-105):
+    odom (ARKit world, dynamic from odometry topic)
+      └── base_link (phone body, +X forward through camera)
+            ├── camera_link (+X forward, ROS convention)
+            │     └── camera_optical (+Z forward, for image processing)
+            ├── lidar_link (colocated with camera)
+            └── imu_link (phone IMU sensor)
+
+  Coordinate conventions:
+    - base_link: X-forward (camera direction), Y-left, Z-up
+    - camera_link: Same as base_link (offset for camera position on phone body)
+    - camera_optical: Z-forward, X-right, Y-down (standard camera optical frame)
+    - imu_link: Aligned with phone's CoreMotion .xArbitraryCorrectedZVertical frame
+
+  When phone is held landscape-right (home button on right, back camera facing forward):
+    - +X points in the direction the camera sees (out the back of phone)
+    - +Y points left
+    - +Z points up
+
+  The odom → base_link transform is published dynamically by odom_tf_broadcaster
+  from the /iphone/odom topic (raw ARKit pose).
+-->
+<robot name="iphone_sensor">
+
+  <!-- Base link: phone body center. ARKit reports camera pose, so base_link is at camera. -->
+  <link name="base_link">
+    <visual>
+      <geometry>
+        <box size="0.02 0.08 0.16"/>
+      </geometry>
+      <material name="phone_body">
+        <color rgba="0.2 0.2 0.2 1"/>
+      </material>
+    </visual>
+  </link>
+
+  <!-- Camera link: at the back camera position, same orientation as base_link -->
+  <link name="camera_link"/>
+  <joint name="base_to_camera" type="fixed">
+    <parent link="base_link"/>
+    <child link="camera_link"/>
+    <!-- Camera is at the phone's origin in this model (ARKit tracks camera directly) -->
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <!-- Camera optical frame: Z-forward, X-right, Y-down (standard for image processing) -->
+  <link name="camera_optical"/>
+  <joint name="camera_to_optical" type="fixed">
+    <parent link="camera_link"/>
+    <child link="camera_optical"/>
+    <!-- Rotate from camera_link (X-forward, Y-left, Z-up) to optical (Z-forward, X-right, Y-down)
+         This is: roll -90°, then yaw -90° (or equivalently: rpy="-pi/2, 0, -pi/2") -->
+    <origin xyz="0 0 0" rpy="-1.5707963 0 -1.5707963"/>
+  </joint>
+
+  <!-- LiDAR link: colocated with camera (iPhone LiDAR is next to camera) -->
+  <link name="lidar_link"/>
+  <joint name="base_to_lidar" type="fixed">
+    <parent link="base_link"/>
+    <child link="lidar_link"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <!-- IMU link: CoreMotion uses .xArbitraryCorrectedZVertical
+       In this reference frame, Z is vertical (gravity-aligned), X is arbitrary but stable.
+       For our purposes, we align IMU with base_link (assuming phone held properly). -->
+  <link name="imu_link"/>
+  <joint name="base_to_imu" type="fixed">
+    <parent link="base_link"/>
+    <child link="imu_link"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+</robot>
