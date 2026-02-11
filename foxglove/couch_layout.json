@@ -110,12 +110,17 @@
     },
     "Image!camera": {
       "imageMode": {
-        "imageTopic": "/camera/image/compressed"
+        "imageTopic": "/perception/image_annotated/compressed"
       }
     },
     "Image!costmap": {
       "imageMode": {
         "imageTopic": "/nav/costmap_image/compressed"
+      }
+    },
+    "Image!depth": {
+      "imageMode": {
+        "imageTopic": "/camera/depth/image"
       }
     },
     "map!gps": {
@@ -155,17 +160,22 @@
       "direction": "column",
       "first": {
         "direction": "row",
-        "first": "3D!nav3d",
-        "second": "3D!slam",
+        "first": "Image!camera",
+        "second": "Image!costmap",
         "splitPercentage": 60
       },
       "second": {
         "direction": "row",
-        "first": "Image!camera",
-        "second": "Image!costmap",
-        "splitPercentage": 50
+        "first": "Image!depth",
+        "second": {
+          "direction": "column",
+          "first": "3D!nav3d",
+          "second": "3D!slam",
+          "splitPercentage": 50
+        },
+        "splitPercentage": 40
       },
-      "splitPercentage": 60
+      "splitPercentage": 55
     },
     "second": {
       "direction": "column",

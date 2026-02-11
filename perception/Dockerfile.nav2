@@ -36,6 +36,7 @@ RUN if [ "$DOCKER_ARCH" = "arm64" ]; then \
         ros-jazzy-nav2-costmap-2d \
         ros-jazzy-nav2-lifecycle-manager \
         ros-jazzy-nav2-navfn-planner \
+        ros-jazzy-robot-state-publisher \
         ros-jazzy-tf2-ros \
         ros-jazzy-foxglove-bridge \
         ros-jazzy-vision-msgs \
@@ -46,7 +47,7 @@ RUN if [ "$DOCKER_ARCH" = "arm64" ]; then \
         python3-numpy git \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
+COPY --from=docker.io/astral/uv:latest /uv /uvx /usr/local/bin/
 
 WORKDIR /perception
 

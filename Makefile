@@ -68,7 +68,7 @@ ifeq ($(HELP),1)
 full-stack:
 	@echo "make full-stack — Perception + Nav2 + SLAM pipeline"
 	@echo ""
-	@echo "Runs YOLOv8 + YOLOP perception, EKF localization, Google Maps routing,"
+	@echo "Runs YOLOv8 + YOLOP perception, GPS localization + phone heading, Google Maps routing,"
 	@echo "Nav2 path planning, and SLAM in Docker. Foxglove at ws://localhost:8765"
 	@echo ""
 	@echo "MODES"
