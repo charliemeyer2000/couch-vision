@@ -1,24 +1,24 @@
 # CouchVision - iOS Sensor Streamer for ROS2
 
 ## Project Overview
-iOS app that streams iPhone sensors (cameras, LiDAR, IMU, GPS, etc.) to ROS2 via Zenoh protocol over wired USB-C connection.
+iOS app that streams iPhone sensors (cameras, LiDAR, IMU, GPS, etc.) to ROS2 via TCP bridge over wired USB-C connection.
 
 **Bundle ID**: `com.couchvision.CouchVision`
 **Target**: iOS 16.0+, iPhone 12 Pro+ (for LiDAR)
-**ROS2 Target**: Jazzy with rmw_zenoh_cpp
+**ROS2 Target**: Jazzy with rmw_cyclonedds_cpp
 
 ## Current Status
 - [x] Project setup
 - [x] Core architecture (protocols, abstractions)
-- [ ] Zenoh communication layer (placeholder TCP bridge implemented)
+- [x] TCP bridge (iOS → bridge → ROS2 via CycloneDDS)
 - [x] Camera streaming (back wide priority)
 - [x] LiDAR depth streaming
 - [x] IMU/Motion sensors
-- [ ] GPS/Location
-- [ ] Other sensors (barometer, magnetometer, etc.)
+- [x] GPS/Location
+- [x] Other sensors (barometer, magnetometer, battery, thermal)
 - [ ] Background execution
 - [x] Configuration UI (basic)
-- [ ] Testing with ROS2
+- [x] Testing with ROS2 (Jetson live mode working)
 
 ## Architecture Decisions
 
@@ -91,32 +91,31 @@ The iOS app does NOT publish directly to ROS2. Data flows through **three layers
 ## Helpful Commands
 
 ```bash
-# Build iOS project from command line
-make build-ios
-# or: xcodebuild -project CouchVision.xcodeproj -scheme CouchVision -sdk iphoneos build
+# Full stack (Docker, runs bridge + Nav2 + perception)
+make full-stack                    # live mode (iPhone → bridge → perception)
+make full-stack BAG=bags/walk.mcap # bag replay mode
 
-# Open Xcode
-make xcode
+# Log management (stack runs in background)
+make logs-bridge    # tail iOS bridge logs
+make logs-nav2      # tail Nav2 planner logs
+make logs           # tail all logs (interleaved)
+make stop           # bring everything down
 
-# Start the TCP bridge (must be running for iPhone → ROS2 data flow)
+# Standalone bridge (without Docker, for local dev)
 make bridge
 
-# Show Mac IP addresses (needed for iPhone endpoint config)
-make ip
+# iOS
+make xcode          # open Xcode project
 
-# ROS2 tools
-make foxglove            # Start Foxglove WebSocket bridge (Linux/Jetson only)
-make topics              # List all ROS2 topics
-make hz T=/iphone/imu    # Check topic frequency
-make echo T=/iphone/odom # Echo topic messages
-make rviz                # Launch RViz2 with project config
-make rqt                 # Launch RQT dashboard
+# ROS2 debugging
+make topics                   # list all ROS2 topics
+make hz T=/iphone_charlie/imu # check topic frequency
+make echo T=/iphone_charlie/odom # echo topic messages
+make rviz                     # launch RViz2 with project config
 
-# Deploy to Jetson (pulls latest code via SSH)
-make deploy-jetson
-
-# Full quick start guide
-make quickstart
+# Utilities
+make ip             # show IP addresses
+make deploy         # pull latest code on Jetson via SSH
 ```
 
 ## File Structure
