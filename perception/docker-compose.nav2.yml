@@ -15,6 +15,7 @@ services:
       - ./src:/perception/src:ro
       - ../bags:/bags:ro
       - slam-data:/root/.ros
+      - ../cyclonedds.xml:/perception/cyclonedds.xml:ro
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
       - PYTHONUNBUFFERED=1
@@ -25,6 +26,7 @@ services:
       - DEST_LON=${DEST_LON:--78.503577}
       - LOOKAHEAD=${LOOKAHEAD:-15.0}
       - SLAM_BACKEND=${SLAM_BACKEND:-rtabmap}
+      - CYCLONEDDS_URI=file:///perception/cyclonedds.xml
     network_mode: "${NETWORK_MODE:-bridge}"
     command: [
       "--bag", "/bags/${BAG_FILE:-walk_around_university_all_data.mcap}",

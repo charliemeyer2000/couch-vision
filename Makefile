@@ -23,7 +23,8 @@ PERC_PYTHON := $(if $(filter aarch64,$(UNAME_M)),python3.10,python3.12)
 
 .PHONY: help setup xcode bridge topics hz echo rviz bag bag-play verify \
         perception-node full-stack test benchmark lint deploy clean \
-        build-extension install-extension lint-extension ip
+        build-extension install-extension lint-extension ip \
+        logs logs-bridge logs-nav2 stop
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # HELP
@@ -110,8 +111,28 @@ full-stack:
 	DEST_LAT=$(or $(DEST_LAT),38.036830) DEST_LON=$(or $(DEST_LON),-78.503577) LOOKAHEAD=$(or $(LOOKAHEAD),15.0) \
 	SLAM_BACKEND=$(SLAM_BACKEND) \
 	DOCKER_RUNTIME=$$RUNTIME DOCKER_ARCH=$$ARCH \
-	docker compose -f docker-compose.nav2.yml $$PROFILE up
+	docker compose -f docker-compose.nav2.yml $$PROFILE up -d && \
+	echo "" && \
+	echo "=== Stack running in background ===" && \
+	echo "View logs in separate terminals:" && \
+	echo "  make logs-bridge    # iOS bridge only" && \
+	echo "  make logs-nav2      # Nav2 planner only" && \
+	echo "  make logs           # Both (interleaved)" && \
+	echo "  make stop           # Stop everything" && \
+	echo ""
 endif
+
+logs:
+	cd perception && docker compose -f docker-compose.nav2.yml logs -f --tail 50
+
+logs-bridge:
+	cd perception && docker compose -f docker-compose.nav2.yml logs -f --tail 50 ios-bridge
+
+logs-nav2:
+	cd perception && docker compose -f docker-compose.nav2.yml logs -f --tail 50 nav2-planner
+
+stop:
+	cd perception && docker compose -f docker-compose.nav2.yml down
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # BRIDGE
