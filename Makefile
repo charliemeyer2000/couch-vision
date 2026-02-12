@@ -6,7 +6,7 @@ PROJECT_ROOT := $(shell pwd)
 # === Configurable defaults ===
 PORT ?= 7447
 BAG ?=
-SLAM_BACKEND ?= rtabmap
+SLAM_BACKEND ?= none
 JETSON_HOST ?= jetson-nano
 
 # ROS2 setup — searches common install locations, uses CycloneDDS
