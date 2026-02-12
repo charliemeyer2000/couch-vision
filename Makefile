@@ -260,9 +260,12 @@ clean:
 
 build-extension:
 	cd foxglove/nav-control-panel && pnpm install && pnpm build
+	cd foxglove/hardware-safety-panel && pnpm install && pnpm build
 
 install-extension:
 	cd foxglove/nav-control-panel && pnpm local-install
+	cd foxglove/hardware-safety-panel && pnpm local-install
 
 lint-extension:
 	cd foxglove/nav-control-panel && pnpm typecheck && pnpm lint && pnpm format:check
+	cd foxglove/hardware-safety-panel && pnpm typecheck && pnpm lint && pnpm format:check

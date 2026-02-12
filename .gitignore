@@ -41,6 +41,8 @@ infra/lambda/*.zip
 # Foxglove extensions
 foxglove/nav-control-panel/node_modules/
 foxglove/nav-control-panel/dist/
+foxglove/hardware-safety-panel/node_modules/
+foxglove/hardware-safety-panel/dist/
 *.tsbuildinfo
 
 # models
