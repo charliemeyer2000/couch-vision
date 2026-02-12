@@ -34,5 +34,13 @@ services:
       "--lookahead", "${LOOKAHEAD:-15.0}"
     ]
 
+  ios-bridge:
+    build:
+      context: ../bridge
+    network_mode: host
+    volumes:
+      - ../cyclonedds.xml:/bridge/cyclonedds.xml:ro
+    profiles: ["live"]
+
 volumes:
   slam-data:
