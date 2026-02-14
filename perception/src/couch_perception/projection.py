@@ -70,6 +70,12 @@ def apply_imu_rotation(
     return (camera_to_base @ pts_rot.T).T.astype(np.float32)
 
 
+MASK_DEPTH_MIN = 0.1
+MASK_DEPTH_MAX = 8.0   # iPhone LiDAR reliable range (~5m, clamped conservatively)
+BBOX_DEPTH_MIN = 0.1
+BBOX_DEPTH_MAX = 20.0
+
+
 def extract_mask_pixels(
     mask: np.ndarray, depth: np.ndarray, subsample: int = 4
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -86,7 +92,9 @@ def extract_mask_pixels(
     if mask.shape[:2] != (dh, dw):
         mask = cv2.resize(mask.astype(np.uint8), (dw, dh), interpolation=cv2.INTER_NEAREST)
 
-    ys, xs = np.where((mask > 0) & (depth > 0.1) & (depth < 50.0))
+    ys, xs = np.where(
+        (mask > 0) & (depth > MASK_DEPTH_MIN) & (depth < MASK_DEPTH_MAX)
+    )
     if subsample > 1:
         idx = np.arange(0, len(ys), subsample)
         ys, xs = ys[idx], xs[idx]
@@ -94,6 +102,28 @@ def extract_mask_pixels(
     pixels = np.column_stack([xs, ys])
     d = depth[ys, xs]
     return pixels, d
+
+
+def _extract_single_bbox(
+    det: Detection,
+    depth: np.ndarray,
+    scale_x: float,
+    scale_y: float,
+    subsample: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Extract valid pixel coords and depths for one detection bbox."""
+    dh, dw = depth.shape[:2]
+    x1 = max(0, int(det.x1 * scale_x))
+    y1 = max(0, int(det.y1 * scale_y))
+    x2 = min(dw - 1, int(det.x2 * scale_x))
+    y2 = min(dh - 1, int(det.y2 * scale_y))
+
+    ys, xs = np.mgrid[y1:y2:subsample, x1:x2:subsample]
+    xs, ys = xs.ravel(), ys.ravel()
+    d = depth[ys, xs]
+
+    valid = (d > BBOX_DEPTH_MIN) & (d < BBOX_DEPTH_MAX)
+    return np.column_stack([xs[valid], ys[valid]]), d[valid]
 
 
 def extract_bbox_pixels(
@@ -109,31 +139,17 @@ def extract_bbox_pixels(
     """
     dh, dw = depth.shape[:2]
     ih, iw = image_shape
-    scale_x = dw / iw
-    scale_y = dh / ih
+    scale_x, scale_y = dw / iw, dh / ih
 
-    all_pixels = []
-    all_depths = []
-
-    for det in detections:
-        x1 = max(0, int(det.x1 * scale_x))
-        y1 = max(0, int(det.y1 * scale_y))
-        x2 = min(dw - 1, int(det.x2 * scale_x))
-        y2 = min(dh - 1, int(det.y2 * scale_y))
-
-        ys, xs = np.mgrid[y1:y2:subsample, x1:x2:subsample]
-        xs = xs.ravel()
-        ys = ys.ravel()
-        d = depth[ys, xs]
-
-        valid = (d > 0.1) & (d < 20.0)
-        all_pixels.append(np.column_stack([xs[valid], ys[valid]]))
-        all_depths.append(d[valid])
-
-    if not all_pixels:
+    groups = [
+        _extract_single_bbox(det, depth, scale_x, scale_y, subsample)
+        for det in detections
+    ]
+    if not groups:
         return np.empty((0, 2)), np.empty((0,))
 
-    return np.vstack(all_pixels), np.concatenate(all_depths)
+    pixels, depths = zip(*groups)
+    return np.vstack(pixels), np.concatenate(depths)
 
 
 def extract_bbox_pixels_grouped(
@@ -142,32 +158,15 @@ def extract_bbox_pixels_grouped(
     image_shape: tuple[int, int],
     subsample: int = 8,
 ) -> list[tuple[np.ndarray, np.ndarray]]:
-    """Like extract_bbox_pixels but returns per-detection groups.
-
-    Returns a list of (pixels, depths) tuples, one per detection.
-    """
+    """Like extract_bbox_pixels but returns per-detection groups."""
     dh, dw = depth.shape[:2]
     ih, iw = image_shape
-    scale_x = dw / iw
-    scale_y = dh / ih
+    scale_x, scale_y = dw / iw, dh / ih
 
-    groups = []
-    for det in detections:
-        x1 = max(0, int(det.x1 * scale_x))
-        y1 = max(0, int(det.y1 * scale_y))
-        x2 = min(dw - 1, int(det.x2 * scale_x))
-        y2 = min(dh - 1, int(det.y2 * scale_y))
-
-        ys, xs = np.mgrid[y1:y2:subsample, x1:x2:subsample]
-        xs = xs.ravel()
-        ys = ys.ravel()
-        d = depth[ys, xs]
-
-        valid = (d > 0.1) & (d < 20.0)
-        pixels = np.column_stack([xs[valid], ys[valid]])
-        groups.append((pixels, d[valid]))
-
-    return groups
+    return [
+        _extract_single_bbox(det, depth, scale_x, scale_y, subsample)
+        for det in detections
+    ]
 
 
 def build_depth_camera_model(
