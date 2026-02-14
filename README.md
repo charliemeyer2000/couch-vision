@@ -44,46 +44,41 @@ make deploy-jetson
 
 ## Running
 
-### 1. Start the bridge
+### Full stack on Jetson (live mode)
 
-**On Mac (local dev):**
-```bash
-make bridge
-```
+The fastest way to run everything — starts the iOS bridge + Nav2 + perception in Docker:
 
-**On Jetson (deployment):**
 ```bash
 ssh jetson-nano
-cd ~/couch-vision && make bridge
+cd ~/couch-vision
+make full-stack                    # builds + starts in background
+make logs-bridge                   # terminal 2: iOS bridge logs
+make logs-nav2                     # terminal 3: Nav2 + perception logs
 ```
 
-### 2. Run the iOS app (Mac)
+Connect the iPhone via USB-C to the Jetson. The Jetson's USB-C port runs in device mode — the iPhone gets IP `192.168.55.100` via DHCP, Jetson is at `192.168.55.1`. In the CouchVision app, connect to `tcp://192.168.55.1:7447`.
+
+### Standalone bridge (Mac dev)
+
+For local development without Docker:
 
 ```bash
-make xcode  # Opens Xcode, build to iPhone (Cmd+R)
+make bridge                        # start bridge on Mac
+make xcode                         # open Xcode, build to iPhone (Cmd+R)
 ```
 
-### 3. Connect
+Connect the iPhone to `tcp://<mac_ip>:7447` (`make ip` to find addresses).
 
-- Get bridge machine IP: `make ip` (Mac) or `ssh jetson-nano hostname -I`
-- In the app: enter `tcp://<ip>:7447`
-- Tap Connect, enable sensors, tap Start All
-
-### 4. Verify
+### Verify
 
 ```bash
 make topics
-make hz T=/iphone/imu
+make hz T=/iphone_charlie/imu
 ```
 
-### 5. Visualize
+### Visualize
 
-Use RViz2 on machines with ROS2 installed:
-```bash
-make rviz
-```
-
-Or open [Foxglove](https://foxglove.dev) and connect to `ws://localhost:8765` (Docker full-stack) or `ws://jetson-nano:8765` (Jetson).
+Open [Foxglove](https://foxglove.dev) and connect to `ws://localhost:8765` (Docker full-stack) or `ws://jetson-nano:8765` (Jetson).
 
 Import `foxglove/couch_layout.json` for the default layout. Select "Navigation Control [local]" panel for interactive destination control (requires building the extension — see below).
 
@@ -110,8 +105,14 @@ docker run --network host \
 
 ### Full Stack (Nav2 + Perception)
 ```bash
-make full-stack BAG=bags/your_bag.mcap
-# Connect Foxglove to ws://localhost:8765
+make full-stack BAG=bags/your_bag.mcap   # bag replay
+make full-stack                          # live mode (iPhone → bridge → perception)
+
+# Stack runs in background. View logs in separate terminals:
+make logs-bridge    # iOS bridge only
+make logs-nav2      # Nav2 planner only
+make logs           # both (interleaved)
+make stop           # bring everything down
 ```
 
 ## Perception Stack
@@ -128,6 +129,8 @@ make full-stack                           # live mode (subscribes to ROS2 topics
 This auto-detects the platform:
 - **Jetson (aarch64):** uses `nvidia` container runtime, CUDA + TensorRT inference
 - **Mac/x86 (amd64):** CPU-only PyTorch inference
+
+The stack runs in background. Use `make logs-bridge` / `make logs-nav2` in separate terminals to tail individual services, or `make logs` for interleaved output. `make stop` brings everything down.
 
 Connect Foxglove to `ws://localhost:8765` to visualize.
 
@@ -200,6 +203,10 @@ make bridge         # Start iOS TCP bridge
 # Perception + Nav2
 make full-stack BAG=path.mcap              # Perception + Nav2 (Docker, bag replay)
 make full-stack                            # Live mode (subscribes to ROS2 topics)
+make logs-bridge                           # Tail iOS bridge logs
+make logs-nav2                             # Tail Nav2 planner logs
+make logs                                  # Tail all logs (interleaved)
+make stop                                  # Stop the Docker stack
 
 # Foxglove Extension
 make build-extension    # Build nav control panel (pnpm)
