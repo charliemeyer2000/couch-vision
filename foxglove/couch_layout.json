@@ -146,7 +146,8 @@
       "followingViewWidth": 30
     },
     "RosOut!logs": {},
-    "Navigation Control.Navigation Control!navctrl": {}
+    "Navigation Control.Navigation Control!navctrl": {},
+    "Hardware Safety Panel.Hardware Safety!hwsafety": {}
   },
   "globalVariables": {},
   "userNodes": {},
@@ -179,7 +180,12 @@
     },
     "second": {
       "direction": "column",
-      "first": "Navigation Control.Navigation Control!navctrl",
+      "first": {
+        "direction": "column",
+        "first": "Hardware Safety Panel.Hardware Safety!hwsafety",
+        "second": "Navigation Control.Navigation Control!navctrl",
+        "splitPercentage": 55
+      },
       "second": {
         "direction": "column",
         "first": "map!gps",
