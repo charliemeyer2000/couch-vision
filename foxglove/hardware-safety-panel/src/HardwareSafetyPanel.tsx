@@ -307,6 +307,15 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
     };
   }, [context]);
 
+  // Publish initial e-stop state so planner is in sync with panel on connect
+  const initialPublished = useRef(false);
+  useEffect(() => {
+    if (!initialPublished.current) {
+      initialPublished.current = true;
+      context.publish?.("/e_stop", { data: state.eStopped });
+    }
+  }, [context, state.eStopped]);
+
   useLayoutEffect(() => {
     context.onRender = (renderState, done) => {
       setRenderDone(() => done);
