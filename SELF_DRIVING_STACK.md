@@ -902,11 +902,14 @@ Full surround obstacle detection with no blind spots
 ### Phase 7: Safety & Polish 🛡️
 **Goal:** Reliable, safe operation
 
-**Status:** Not Started
+**Status:** In Progress — Foxglove Hardware Safety Panel implemented (PR #25), e-stop wired to nav2_planner
 
 #### Tasks
-- [ ] Add emergency stop button (hardware button → GPIO → `/e_stop` topic)
-- [ ] Implement e-stop handler in motor controller
+- [x] Add software e-stop (Foxglove Hardware Safety Panel → `/e_stop` topic → nav2_planner pauses)
+- [x] Teleop joystick/WASD in Foxglove → `/cmd_vel` (geometry_msgs/Twist)
+- [x] Velocity monitor bars, battery/thermal status display
+- [ ] Add physical emergency stop button (hardware button → GPIO → `/e_stop` topic)
+- [ ] Implement e-stop handler in motor controller (subscribe to `/e_stop`, hard-stop motors)
 - [ ] Add velocity smoother for comfortable acceleration
 - [ ] Implement collision detection (if obstacle <0.3m, hard stop)
 - [ ] Create unified launch file
@@ -1007,14 +1010,127 @@ couch-vision/
 ├── bags/                            # MCAP bag files (gitignored)
 ├── foxglove/
 │   ├── couch_layout.json
-│   └── nav-control-panel/          # Foxglove extension (pnpm, TypeScript/React)
-│       ├── src/NavControlPanel.tsx  # Interactive nav panel (Leaflet map, GO button)
+│   ├── nav-control-panel/          # Foxglove extension (pnpm, TypeScript/React)
+│   │   ├── src/NavControlPanel.tsx  # Interactive nav panel (Leaflet map, GO button)
+│   │   └── src/index.ts
+│   └── hardware-safety-panel/      # Foxglove extension — e-stop, teleop, system status
+│       ├── src/HardwareSafetyPanel.tsx
 │       └── src/index.ts
 ├── rviz/
 │   └── couchvision.rviz
 ├── Makefile                         # make full-stack, make costmap, make bev-projection, etc.
 └── SELF_DRIVING_STACK.md            # This file
 ```
+
+---
+
+## ROS2 Topic Reference
+
+Complete topic map as of 2026-02-16. **Future agents: wire new hardware/nodes to these exact topic names.** The Foxglove extensions and nav2_planner depend on them.
+
+### Sensor Input Topics (iPhone → Bridge)
+
+Published by `bridge/ios_bridge.py`. Topic prefix is configurable (default `/iphone_charlie`).
+
+| Topic | Message Type | Rate | Notes |
+|-------|-------------|------|-------|
+| `{prefix}/camera/arkit/image/compressed` | `sensor_msgs/CompressedImage` | ~11 Hz | Back camera JPEG |
+| `{prefix}/camera/arkit/camera_info` | `sensor_msgs/CameraInfo` | ~30 Hz | Camera intrinsics |
+| `{prefix}/lidar/depth/image` | `sensor_msgs/Image` | ~30 Hz | 32FC1 depth, 256×192 |
+| `{prefix}/lidar/points` | `sensor_msgs/PointCloud2` | ~30 Hz | XYZI float32 |
+| `{prefix}/imu` | `sensor_msgs/Imu` | ~100 Hz | Orientation + angular vel + linear accel |
+| `{prefix}/odom` | `nav_msgs/Odometry` | ~50 Hz | ARKit VIO pose |
+| `{prefix}/gps/fix` | `sensor_msgs/NavSatFix` | ~1 Hz | Lat/lon/alt |
+| `{prefix}/gps/velocity` | `geometry_msgs/TwistStamped` | ~1 Hz | GPS speed/course |
+| `{prefix}/heading` | `std_msgs/Float64` | ~17 Hz | Magnetic heading (degrees) |
+| `{prefix}/battery` | `sensor_msgs/BatteryState` | ~1 Hz | Battery % and temperature |
+| `{prefix}/thermal` | `std_msgs/Int32` | On change | 0=nominal, 1=fair, 2=serious, 3=critical |
+| `{prefix}/magnetic_field` | `sensor_msgs/MagneticField` | ~100 Hz | Magnetometer |
+| `{prefix}/pressure` | `sensor_msgs/FluidPressure` | ~1 Hz | Barometer |
+| `{prefix}/altitude` | `std_msgs/Float64` | ~1 Hz | Barometric altitude |
+| `/tf` | `tf2_msgs/TFMessage` | ~170 Hz | ARKit 6DOF pose transforms |
+
+### Republished Sensor Topics (Nav2 Planner → SLAM/Foxglove)
+
+Nav2 planner republishes sensor data at reduced resolution for SLAM and visualization. These are the topics that RTAB-Map and Foxglove panels consume.
+
+| Topic | Message Type | Publisher | Subscribers | Notes |
+|-------|-------------|-----------|-------------|-------|
+| `/camera/image/compressed` | `sensor_msgs/CompressedImage` | nav2_planner | RTAB-Map (via republish→raw) | 512×384 JPEG |
+| `/camera/camera_info` | `sensor_msgs/CameraInfo` | nav2_planner | RTAB-Map | Scaled intrinsics |
+| `/camera/depth/image` | `sensor_msgs/Image` | nav2_planner | RTAB-Map, Foxglove | 512×384 32FC1 |
+| `/imu` | `sensor_msgs/Imu` | nav2_planner | RTAB-Map | Republished from bag/live |
+| `/odom` | `nav_msgs/Odometry` | nav2_planner | RTAB-Map | Republished from bag/live |
+| `/gps/fix` | `sensor_msgs/NavSatFix` | nav2_planner | Foxglove Nav Control Panel | Republished GPS |
+
+### Perception Output Topics
+
+Published by `nav2_planner.py` after YOLOv8 + YOLOP inference.
+
+| Topic | Message Type | Subscribers | Notes |
+|-------|-------------|-------------|-------|
+| `/perception/image_annotated/compressed` | `sensor_msgs/CompressedImage` | Foxglove (Image panel) | Camera with detection boxes + path overlay |
+| `/perception/pointcloud/drivable` | `sensor_msgs/PointCloud2` | Foxglove (3D panel) | Drivable area points (green) |
+| `/perception/pointcloud/lanes` | `sensor_msgs/PointCloud2` | Foxglove (3D panel) | Lane line points (red) |
+| `/perception/pointcloud/detections` | `sensor_msgs/PointCloud2` | Foxglove (3D panel) | Detection bounding box points (yellow) |
+
+### Navigation Topics
+
+Published by `nav2_planner.py` for path planning and visualization.
+
+| Topic | Message Type | Subscribers | Notes |
+|-------|-------------|-------------|-------|
+| `/costmap/occupancy_grid` | `nav_msgs/OccupancyGrid` | Nav2 planner_server, Foxglove 3D | Ego-centric costmap (20m, 0.2m res) |
+| `/nav/planned_path` | `nav_msgs/Path` | Foxglove 3D panel | Nav2-planned local path |
+| `/nav/google_maps_path` | `nav_msgs/Path` | Foxglove 3D panel | Full Google Maps walking route |
+| `/nav/costmap_image/compressed` | `sensor_msgs/CompressedImage` | Foxglove Image panel | Color-coded costmap visualization |
+| `/nav/goal_marker` | `visualization_msgs/Marker` | Foxglove 3D panel | Red cube at lookahead goal |
+| `/nav/ego_marker` | `visualization_msgs/Marker` | Foxglove 3D panel | White sphere at current position |
+| `/nav/status` | `std_msgs/String` | **Hardware Safety Panel**, **Nav Control Panel** | 1Hz JSON (see below) |
+
+**`/nav/status` JSON payload:**
+```json
+{
+  "api_key_configured": true,
+  "route_resolved": true,
+  "current_dest_lat": 38.03683,
+  "current_dest_lon": -78.503577,
+  "route_points": 465,
+  "ekf_initialized": true,
+  "heading_calibrated": true,
+  "e_stopped": false
+}
+```
+
+### Control Topics (Foxglove Panels → Backend)
+
+**These are the topics that future hardware nodes MUST subscribe to.**
+
+| Topic | Message Type | Publisher | Subscriber | Notes |
+|-------|-------------|-----------|------------|-------|
+| `/cmd_vel` | `geometry_msgs/Twist` | **Hardware Safety Panel** (teleop joystick/WASD) | **Motor controller (Phase 0)** | `linear.x` (m/s) + `angular.z` (rad/s). Panel also sends zeros at 10Hz when e-stopped. |
+| `/e_stop` | `std_msgs/Bool` | **Hardware Safety Panel** | nav2_planner | `true`=stop, `false`=armed. Planner pauses perception/planning but keeps localization. **Motor controller must also subscribe.** |
+| `/nav/set_destination` | `std_msgs/String` | **Nav Control Panel** | nav2_planner | JSON: `{dest_lat, dest_lon, lookahead_m, start_lat?, start_lon?, api_key?}` |
+| `/clicked_point` | `geometry_msgs/PointStamped` | Foxglove 3D panel (click tool) | nav2_planner | Click-to-navigate in 3D view |
+
+### SLAM Topics (RTAB-Map)
+
+| Topic | Message Type | Publisher | Notes |
+|-------|-------------|-----------|-------|
+| `/map` | `nav_msgs/OccupancyGrid` | RTAB-Map | SLAM-generated occupancy grid |
+| `/mapPath` | `nav_msgs/Path` | RTAB-Map | SLAM trajectory |
+| `/cloud_map` | `sensor_msgs/PointCloud2` | RTAB-Map | SLAM point cloud |
+
+### Hardware Integration Checklist (Phase 0)
+
+When motors + ESC hardware arrive, the motor controller node must:
+
+1. **Subscribe to `/cmd_vel`** (`geometry_msgs/Twist`) — convert `linear.x` + `angular.z` to differential wheel speeds
+2. **Subscribe to `/e_stop`** (`std_msgs/Bool`) — hard-stop motors when `data=true`
+3. **Publish `/wheel_odom`** (`nav_msgs/Odometry`) — encoder-derived odometry for EKF fusion
+4. **Respect the Hardware Safety Panel**: panel defaults to e-stopped on startup, user must press ARM MOTORS before any motion
+
+The Hardware Safety Panel (`foxglove/hardware-safety-panel/`) already publishes these topics. The Nav Control Panel (`foxglove/nav-control-panel/`) handles destination setting. No changes to the Foxglove extensions are needed for hardware bring-up.
 
 ---
 
@@ -1157,6 +1273,22 @@ Custom Foxglove extension at `foxglove/nav-control-panel/` for interactive desti
 - **CSP constraint**: Leaflet CSS injected inline (Electron blocks CDN scripts)
 - **Grid tuning (PR #18)**: 40m/0.3res → 20m/0.2res, lane cost 80→50, unseen areas collapsed into single cost 98 (was -1 unknown + 99 FOV boundary), Nav2 `allow_unknown=false`, inflation layer 1.0m radius, lookahead 15m→8m
 
+### Foxglove Hardware Safety Panel Extension (PR #25)
+
+Custom Foxglove extension at `foxglove/hardware-safety-panel/` for hardware bring-up and safety:
+- **E-stop button**: publishes `std_msgs/Bool` on `/e_stop`. Defaults to stopped on startup (safety-first). Publishes initial state on connect so planner is in sync.
+- **ARM MOTORS toggle**: must be pressed before teleop works. Shows STOPPED (red) / ARMED (green) indicator.
+- **Teleop controls**: WASD keyboard + virtual joystick → publishes `geometry_msgs/Twist` on `/cmd_vel`. Configurable max linear/angular velocity.
+- **Deadman switch**: while e-stopped, continuously publishes zero `/cmd_vel` at 10Hz.
+- **Velocity monitor**: live horizontal bars showing current `linear.x` and `angular.z` from `/cmd_vel` feedback.
+- **System status**: battery %, thermal state from iPhone (subscribes to `/iphone/battery`, `/iphone/thermal`).
+- **Nav status**: route resolved, EKF init, planner paused/active (subscribes to `/nav/status`).
+- **E-stop → nav2_planner**: planner subscribes to `/e_stop`, pauses perception/planning when engaged but keeps localization running.
+- Build: `cd foxglove/hardware-safety-panel && pnpm install && pnpm build`
+- Install: `pnpm local-install` (copies to `~/.foxglove-studio/extensions/`)
+- Panel type ID in layout: `"Hardware Safety Panel.Hardware Safety!hwsafety"`
+- **Battery/thermal topic note**: panel hardcodes `/iphone/battery` and `/iphone/thermal` but live bridge uses configurable prefix (e.g. `/iphone_charlie/battery`). Panel degrades gracefully (shows "--").
+
 ### Helpful Commands
 <!-- Agents: add useful commands here -->
 - `make full-stack` — live mode: starts iOS bridge + Nav2 + perception in Docker (background). Connect iPhone via USB-C, then Foxglove to `ws://localhost:8765`.
@@ -1253,5 +1385,5 @@ RTAB-Map SLAM was integrated into the Nav2 Docker stack. Key learnings:
 
 ---
 
-*Last updated: 2026-02-12*
-*Current phase: Full-stack live mode working on Jetson + iPhone over USB-C (PR #24). Phase 4 SLAM in progress — RTAB-Map integrated with WM=6+ keyframes (PR #20). Phase 3 perception + Nav2 working end-to-end. Phase 2 EKF fuses IMU + GPS + ARKit odom + Google Maps routing. Phase 1 complete. Phase 0 hardware unblocked in parallel.*
+*Last updated: 2026-02-16*
+*Current phase: Full-stack live mode working on Jetson + iPhone over USB-C (PR #24). Hardware Safety Panel (e-stop, teleop, system status) added (PR #25). Phase 4 SLAM in progress — RTAB-Map integrated with WM=6+ keyframes (PR #20). Phase 3 perception + Nav2 working end-to-end. Phase 2 EKF fuses IMU + GPS + ARKit odom + Google Maps routing. Phase 1 complete. Phase 0 hardware unblocked in parallel.*
