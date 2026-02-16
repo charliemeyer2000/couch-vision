@@ -28,6 +28,7 @@ interface NavStatus {
   route_resolved: boolean;
   ekf_initialized: boolean;
   route_points: number;
+  e_stopped?: boolean;
 }
 
 const inputStyle: React.CSSProperties = {
@@ -690,6 +691,14 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
                 : "Route: not resolved"}
               {" · "}
               {navStatus.ekf_initialized ? "EKF: init" : "EKF: waiting"}
+              {navStatus.e_stopped != null && (
+                <>
+                  {" · "}
+                  <span style={{ color: navStatus.e_stopped ? "#ef4444" : "#22c55e" }}>
+                    {navStatus.e_stopped ? "Planner: paused" : "Planner: active"}
+                  </span>
+                </>
+              )}
             </>
           ) : (
             "Waiting for nav status..."
