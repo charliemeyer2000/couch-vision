@@ -186,8 +186,9 @@ perception/          # Python perception package (uv project)
 │   └── ...
 └── tests/           # pytest + pytest-benchmark
 foxglove/            # Foxglove config + extensions
-├── couch_layout.json  # Default panel layout
-└── nav-control-panel/ # Navigation Control extension (pnpm/TypeScript)
+├── couch_layout.json       # Default panel layout
+├── nav-control-panel/      # Navigation Control extension (destination setting, map)
+└── hardware-safety-panel/  # Hardware Safety extension (e-stop, teleop, system status)
 scripts/             # Setup scripts
 ```
 
@@ -254,11 +255,12 @@ ROS2 Topics ← rclpy publishers ← ios_bridge.py ←←←←←←←←
 
 ## ROS2 Topics
 
+### Sensor Topics (iPhone → Bridge)
+
 Topic prefix is `/<device_name>/` (configured in the iOS app, e.g. `/iphone_charlie/`).
 
 | Topic suffix | Type | Rate |
 |-------------|------|------|
-| `camera/arkit/image` | `sensor_msgs/Image` | ~13 Hz |
 | `camera/arkit/image/compressed` | `sensor_msgs/CompressedImage` | ~11 Hz |
 | `camera/arkit/camera_info` | `sensor_msgs/CameraInfo` | ~30 Hz |
 | `lidar/depth/image` | `sensor_msgs/Image` | ~30 Hz |
@@ -272,4 +274,20 @@ Topic prefix is `/<device_name>/` (configured in the iOS app, e.g. `/iphone_char
 | `pressure` | `sensor_msgs/FluidPressure` | ~1 Hz |
 | `altitude` | `std_msgs/Float64` | ~1 Hz |
 | `battery` | `sensor_msgs/BatteryState` | ~1 Hz |
+| `thermal` | `std_msgs/Int32` | On change |
 | `tf` | `tf2_msgs/TFMessage` | ~170 Hz |
+
+### Navigation & Control Topics
+
+Published/subscribed by Nav2 planner and Foxglove panels. See [SELF_DRIVING_STACK.md](SELF_DRIVING_STACK.md#ros2-topic-reference) for the full reference.
+
+| Topic | Type | Direction | Notes |
+|-------|------|-----------|-------|
+| `/cmd_vel` | `geometry_msgs/Twist` | Foxglove → Motor controller | Teleop velocity (Hardware Safety Panel) |
+| `/e_stop` | `std_msgs/Bool` | Foxglove → Planner + Motors | Emergency stop (`true`=stopped) |
+| `/nav/set_destination` | `std_msgs/String` | Foxglove → Planner | JSON destination command (Nav Control Panel) |
+| `/nav/status` | `std_msgs/String` | Planner → Foxglove | 1Hz JSON status (both panels consume this) |
+| `/nav/planned_path` | `nav_msgs/Path` | Planner → Foxglove | Nav2-planned path |
+| `/nav/google_maps_path` | `nav_msgs/Path` | Planner → Foxglove | Google Maps walking route |
+| `/costmap/occupancy_grid` | `nav_msgs/OccupancyGrid` | Planner → Nav2 | Ego-centric costmap for planning |
+| `/perception/image_annotated/compressed` | `sensor_msgs/CompressedImage` | Planner → Foxglove | Camera with detection overlays |

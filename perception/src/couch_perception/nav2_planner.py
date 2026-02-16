@@ -36,7 +36,7 @@ from nav_msgs.msg import OccupancyGrid, Odometry, Path
 from geometry_msgs.msg import PointStamped, PoseStamped
 from sensor_msgs.msg import CameraInfo, CompressedImage, Image, Imu, PointCloud2, PointField, NavSatFix
 from visualization_msgs.msg import Marker
-from std_msgs.msg import Header, ColorRGBA, String
+from std_msgs.msg import Bool, Header, ColorRGBA, String
 from builtin_interfaces.msg import Time as RosTime, Duration as RosDuration
 
 from nav2_msgs.action import ComputePathToPose
@@ -675,6 +675,12 @@ class Nav2Planner:
             PointStamped, "/clicked_point", self._on_clicked_point, qos,
         )
 
+        # E-stop: when active, skip perception/planning but keep localization running
+        self._e_stopped = False
+        self._e_stop_sub = node.create_subscription(
+            Bool, "/e_stop", self._on_e_stop, qos,
+        )
+
         if republish_sensors:
             self._camera_pub = node.create_publisher(CompressedImage, "/camera/image/compressed", qos)
             self._camera_info_pub = node.create_publisher(CameraInfo, "/camera/camera_info", qos)
@@ -722,6 +728,11 @@ class Nav2Planner:
         self._route_resolved = False
         self._route_enu = None
 
+    def _on_e_stop(self, msg: Bool) -> None:
+        if msg.data != self._e_stopped:
+            self._e_stopped = msg.data
+            print(f"\nE-STOP {'ENGAGED' if msg.data else 'RELEASED'}")
+
     def _on_destination_command(self, msg: String) -> None:
         try:
             data = json.loads(msg.data)
@@ -748,6 +759,7 @@ class Nav2Planner:
             "route_points": len(self._route_enu) if self._route_enu is not None else 0,
             "ekf_initialized": self._latest_gps_enu is not None,  # Backward-compatible field.
             "heading_calibrated": self._heading_offset_enu_from_phone is not None,
+            "e_stopped": self._e_stopped,
         }
         msg = String()
         msg.data = json.dumps(status)
@@ -1122,6 +1134,12 @@ class Nav2Planner:
             self._republish_sensors_for_slam(frame, odom_samples)
 
         self._publish_route_ego(ego_enu, heading_enu, frame.timestamp)
+
+        # E-stop: keep localization running but skip perception/planning
+        if self._e_stopped:
+            self._ego_marker_pub.publish(_make_ego_marker(frame.timestamp))
+            self._frame_num += 1
+            return
 
         # Perception → costmap
         result = self._pipeline.process_frame(frame)
