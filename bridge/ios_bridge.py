@@ -12,10 +12,8 @@ from __future__ import annotations
 
 import argparse
 import queue
-import re
 import socket
 import struct
-import subprocess
 import threading
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
@@ -235,23 +233,14 @@ class IOSBridge(Node):  # type: ignore[misc]
 
     @staticmethod
     def _get_interfaces() -> set[tuple[str, str]]:
-        """Return set of (interface_name, ipv4_address) tuples from ifconfig."""
-        try:
-            output = subprocess.check_output(["ifconfig"], text=True, timeout=5)
-        except (subprocess.SubprocessError, OSError):
-            return set()
+        """Return set of (interface_name, ipv4_address) tuples."""
+        import psutil
 
         interfaces: set[tuple[str, str]] = set()
-        current_iface = ""
-        for line in output.splitlines():
-            iface_match = re.match(r"^(\S+):", line)
-            if iface_match:
-                current_iface = iface_match.group(1)
-            inet_match = re.search(r"inet (\d+\.\d+\.\d+\.\d+)", line)
-            if inet_match and current_iface:
-                ip = inet_match.group(1)
-                if ip != "127.0.0.1":
-                    interfaces.add((current_iface, ip))
+        for name, addrs in psutil.net_if_addrs().items():
+            for addr in addrs:
+                if addr.family == socket.AF_INET and addr.address != "127.0.0.1":
+                    interfaces.add((name, addr.address))
         return interfaces
 
     def _log_interfaces(self, interfaces: set[tuple[str, str]]) -> None:

@@ -36,11 +36,10 @@ export PYTHONPATH="/perception/src:${PYTHONPATH}"
 
 if [ -n "$LIVE_MODE" ]; then
     python -m couch_perception.nav2_planner \
-        --topic-prefix "${TOPIC_PREFIX:-/iphone}" \
+        --topic-prefix "${TOPIC_PREFIX:-/iphone_charlie}" \
         --dest-lat "${DEST_LAT:-38.036830}" \
         --dest-lon "${DEST_LON:--78.503577}" \
-        --lookahead "${LOOKAHEAD:-15.0}" \
-        "$@"
+        --lookahead "${LOOKAHEAD:-15.0}"
 else
     python -m couch_perception.nav2_planner "$@"
 fi

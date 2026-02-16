@@ -17,7 +17,6 @@ COPY pyproject.toml uv.lock ./
 RUN uv venv --system-site-packages && uv sync
 
 COPY ios_bridge.py .
-COPY cyclonedds.xml .
 
 ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 ENV CYCLONEDDS_URI=file:///bridge/cyclonedds.xml

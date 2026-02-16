@@ -1,7 +1,4 @@
-"""Test costmap FOV mask fix using real bag data.
-
-Compares costmap output with and without the FOV mask applied,
-demonstrating the improvement for Nav2 path planning.
+"""Test costmap generation (FOV, edge cost, drivable projection).
 
 Run: cd perception && uv run pytest tests/test_costmap_fov.py -v --bag ../bags/filtered_walk_around.mcap
 """
@@ -19,6 +16,7 @@ from couch_perception.costmap import (
     build_costmap,
     _FOV_MASK,
     _EGO_DRIVABLE_MASK,
+    _world_to_grid,
     GRID_CELLS,
 )
 from couch_perception.costmap_visualizer import COST_FREE, COST_LANE, COST_LETHAL, COST_UNSEEN
@@ -39,12 +37,10 @@ def _build_costmap_without_fov(
     grid[_EGO_DRIVABLE_MASK] = COST_FREE
 
     if drivable_pts is not None and len(drivable_pts) > 0:
-        from couch_perception.costmap import _world_to_grid
         row, col, valid = _world_to_grid(drivable_pts[:, 0], drivable_pts[:, 1])
         grid[row[valid], col[valid]] = COST_FREE
 
     if lane_pts is not None and len(lane_pts) > 0:
-        from couch_perception.costmap import _world_to_grid
         row, col, valid = _world_to_grid(lane_pts[:, 0], lane_pts[:, 1])
         grid[row[valid], col[valid]] = COST_LANE
 
@@ -55,11 +51,11 @@ def _build_costmap_without_fov(
 
 
 class TestCostmapFOV:
-    def test_fov_mask_applied_to_empty_costmap(self):
-        """FOV cells should be free, not unknown, even with no perception data."""
+    def test_fov_cells_lethal_without_drivable_data(self):
+        """FOV cells should be LETHAL by default (no drivable points = not safe)."""
         grid = build_costmap(None, None, None)
-        fov_free = np.sum((grid == COST_FREE) & _FOV_MASK)
-        assert fov_free == _FOV_MASK.sum(), "All FOV cells should be COST_FREE"
+        fov_lethal = np.sum((grid == COST_LETHAL) & _FOV_MASK)
+        assert fov_lethal == _FOV_MASK.sum(), "All FOV cells should be COST_LETHAL without data"
 
     def test_outside_fov_remains_unknown(self):
         """Cells outside the FOV should stay COST_UNSEEN."""
@@ -68,35 +64,41 @@ class TestCostmapFOV:
         unseen_outside = np.sum(grid[outside_fov] == COST_UNSEEN)
         assert unseen_outside == outside_fov.sum(), "Non-FOV, non-ego cells should be unknown"
 
-    def test_obstacles_overwrite_fov_free(self):
-        """Obstacle points within the FOV should overwrite free cells as lethal."""
-        det_pts = np.array([[-3.0, 0.0, 0.0], [-5.0, 1.0, 0.0]], dtype=np.float32)
-        grid = build_costmap(None, None, det_pts)
-        lethal = np.sum(grid == COST_LETHAL)
-        assert lethal >= 2, "Obstacle points should be marked lethal"
+    def test_drivable_pts_mark_free(self):
+        """Drivable points should mark FOV cells as free."""
+        drivable_pts = np.array([[3.0, 0.0, 0.0], [5.0, 1.0, 0.0]], dtype=np.float32)
+        grid = build_costmap(drivable_pts, None, None)
+        free_in_fov = np.sum((grid == COST_FREE) & _FOV_MASK)
+        assert free_in_fov > 0, "Drivable points should create free cells in FOV"
 
-    def test_lanes_overwrite_fov_free(self):
-        """Lane points within the FOV should overwrite free cells."""
-        lane_pts = np.array([[-4.0, 0.5, 0.0], [-4.0, -0.5, 0.0]], dtype=np.float32)
-        grid = build_costmap(None, lane_pts, None)
-        lane_cells = np.sum(grid == COST_LANE)
-        assert lane_cells >= 2, "Lane points should be marked as lane cost"
+    def test_obstacles_remain_lethal(self):
+        """Detection points should be marked lethal even with drivable area nearby."""
+        drivable_pts = np.array([[3.0, 0.0, 0.0]], dtype=np.float32)
+        det_pts = np.array([[4.0, 1.0, 0.0]], dtype=np.float32)
+        grid = build_costmap(drivable_pts, None, det_pts)
+        row, col, valid = _world_to_grid(det_pts[:, 0], det_pts[:, 1])
+        assert grid[row[valid[0]], col[valid[0]]] == COST_LETHAL
+
+    def test_lanes_overwrite_free(self):
+        """Lane points should overwrite drivable-free cells."""
+        drivable_pts = np.array([[4.0, 0.5, 0.0]], dtype=np.float32)
+        lane_pts = np.array([[4.0, 0.5, 0.0]], dtype=np.float32)
+        grid = build_costmap(drivable_pts, lane_pts, None)
+        row, col, valid = _world_to_grid(lane_pts[:, 0], lane_pts[:, 1])
+        assert grid[row[valid[0]], col[valid[0]]] == COST_LANE
 
     def test_ego_center_always_free(self):
         """The ego cell at grid center should always be free."""
         grid = build_costmap(None, None, None)
         assert grid[GRID_CELLS // 2, GRID_CELLS // 2] == COST_FREE
 
-    def test_fov_reduces_unknown_space(self):
-        """The FOV mask should reduce unknown space vs the old approach."""
-        grid_new = build_costmap(None, None, None)
-        grid_old = _build_costmap_without_fov(None, None, None)
-
-        new_unseen = np.sum(grid_new == COST_UNSEEN)
-        old_unseen = np.sum(grid_old == COST_UNSEEN)
-        assert new_unseen < old_unseen, (
-            f"FOV fix should reduce unknown cells: {new_unseen} vs {old_unseen}"
-        )
+    def test_drivable_dilation_fills_gaps(self):
+        """Drivable area should be dilated to fill projection gaps."""
+        # Single point at (5.0, 0.0) should dilate to neighbors
+        drivable_pts = np.array([[5.0, 0.0, 0.0]], dtype=np.float32)
+        grid = build_costmap(drivable_pts, None, None)
+        free_in_fov = np.sum((grid == COST_FREE) & _FOV_MASK & ~_EGO_DRIVABLE_MASK)
+        assert free_in_fov > 1, "Dilation should create more than 1 free cell per point"
 
 
 # ── Bag-based integration test ────────────────────────────────────────────

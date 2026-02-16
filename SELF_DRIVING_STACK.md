@@ -1121,14 +1121,17 @@ The perception package was refactored to eliminate code duplication across runne
 
 ### Docker Full-Stack (Dockerfile.nav2)
 
-The `make full-stack` command runs Nav2 + foxglove_bridge + perception in a single Docker container (via Colima on macOS). Key details:
+The `make full-stack` command runs Nav2 + foxglove_bridge + perception in Docker. In live mode, a second container runs the iOS bridge. Key details:
+- Stack runs in background (`-d`). Use `make logs-bridge` / `make logs-nav2` / `make logs` to tail individual or all services. `make stop` to bring down.
 - Uses `foxglove_bridge` (C++ ROS2 node) to auto-forward ALL ROS2 topics to Foxglove on port 8765
 - Nav2 planner_server runs inside the container, receives costmaps via ROS2 topics
+- **CycloneDDS**: Both containers mount `cyclonedds.xml` (localhost-unicast, no multicast). This is required for inter-container DDS communication when using `network_mode: host`. Without matching configs, topic discovery works but data doesn't flow.
 - On macOS: requires Colima (`colima start --cpu 4 --memory 8`), NOT Docker Desktop
 - Foxglove connect to `ws://localhost:8765` to visualize camera, pointclouds, costmap, and planned path
 - **Multi-arch**: `dustynv/pytorch:r36.4.0` base on Jetson (arm64), `ros:jazzy` on amd64/Mac. CI builds amd64 only; Jetson builds locally.
 - **Volume mounts**: `./weights:/perception/weights` persists TRT engines and downloaded `.pt` files across container restarts
 - **Jetson Docker**: requires `nvidia` container runtime. If `permission denied` on Docker socket, run `sudo usermod -aG docker $USER` and re-login.
+- **Jetson USB-C connection**: Jetson USB-C port is in device mode (tegra-xudc). iPhone connects as USB host, gets `192.168.55.100` via DHCP on `l4tbr0` bridge. Bridge listens on `192.168.55.1:7447`.
 
 ### Streaming Bag Reader
 
@@ -1156,16 +1159,18 @@ Custom Foxglove extension at `foxglove/nav-control-panel/` for interactive desti
 
 ### Helpful Commands
 <!-- Agents: add useful commands here -->
-- `make foxglove` — starts Foxglove WebSocket bridge on port 8765 (Linux/Jetson only). Connect from Foxglove desktop app at `ws://<jetson-ip>:8765`. Preferred over RViz2 for remote visualization — supports compressed images natively, has GPS map panel, runs on any OS.
-- `make full-stack BAG=<path>` — runs Nav2 + foxglove_bridge + perception in Docker (bag replay). Connect Foxglove to `ws://localhost:8765`.
-- `make full-stack` — live mode: subscribes to ROS2 topics from the iOS bridge. Requires bridge running.
+- `make full-stack` — live mode: starts iOS bridge + Nav2 + perception in Docker (background). Connect iPhone via USB-C, then Foxglove to `ws://localhost:8765`.
+- `make full-stack BAG=<path>` — bag replay mode.
 - `make full-stack DEST_LAT=38.036 DEST_LON=-78.503` — set navigation destination (defaults to UVA area).
+- `make logs-bridge` — tail iOS bridge container logs only.
+- `make logs-nav2` — tail Nav2 planner container logs only.
+- `make logs` — tail all container logs (interleaved).
+- `make stop` — `docker compose down` the full stack.
 - `make test` — run perception pytest suite.
 - `make benchmark` — run pytest-benchmark profiling.
 - Foxglove layout: import `foxglove/couch_layout.json` for sensor + nav2 visualization.
 - `make build-extension` — build Foxglove nav control extension (pnpm).
 - `make install-extension` — install extension to Foxglove desktop app.
-- `make lint-extension` — typecheck + ESLint + Prettier check.
 
 ### foxglove_bridge Build (Jetson)
 
@@ -1248,5 +1253,5 @@ RTAB-Map SLAM was integrated into the Nav2 Docker stack. Key learnings:
 
 ---
 
-*Last updated: 2026-02-04*
-*Current phase: Phase 4 SLAM in progress — RTAB-Map integrated with WM=6+ keyframes (PR #20). Phase 3 perception + Nav2 working end-to-end. TRT engines auto-export on first Jetson run (PR #19). Foxglove extension for interactive destination control (PR #18). Phase 2 EKF fuses IMU + GPS + ARKit odom + Google Maps routing. Phase 1 complete. Phase 0 hardware unblocked in parallel.*
+*Last updated: 2026-02-12*
+*Current phase: Full-stack live mode working on Jetson + iPhone over USB-C (PR #24). Phase 4 SLAM in progress — RTAB-Map integrated with WM=6+ keyframes (PR #20). Phase 3 perception + Nav2 working end-to-end. Phase 2 EKF fuses IMU + GPS + ARKit odom + Google Maps routing. Phase 1 complete. Phase 0 hardware unblocked in parallel.*
