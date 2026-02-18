@@ -51,6 +51,8 @@ interface MotorStatus {
   fault_name: string;
   target_rpm: number;
   max_rpm: number;
+  commanded_rpm: number;
+  commanded_erpm: number;
   errors: number;
 }
 
@@ -834,40 +836,51 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
                     }}
                   />
                   <span style={{ fontSize: "10px", color: "#999" }}>
-                    {motorStatus.connected ? "Connected" : "Disconnected"}
+                    {motorStatus.connected ? "Connected" : "Dry Run"}
                   </span>
                 </div>
-                <VelocityBar
-                  label="RPM"
-                  value={motorStatus.rpm}
-                  maxScale={state.maxRpm || 500}
-                  unit="RPM"
-                />
-                <div
-                  style={{
-                    display: "flex",
-                    gap: "8px",
-                    fontSize: "10px",
-                    fontFamily: "monospace",
-                    color: "#999",
-                    marginTop: "2px",
-                  }}
-                >
-                  <span>
-                    FET:{" "}
-                    <span style={{ color: motorStatus.temp_fet > 80 ? "#f97316" : "#e0e0e0" }}>
-                      {motorStatus.temp_fet.toFixed(1)}C
+                {motorStatus.connected ? (
+                  <VelocityBar
+                    label="RPM"
+                    value={motorStatus.rpm}
+                    maxScale={state.maxRpm || 500}
+                    unit="RPM"
+                  />
+                ) : (
+                  <VelocityBar
+                    label="Cmd RPM"
+                    value={motorStatus.commanded_rpm}
+                    maxScale={state.maxRpm || 500}
+                    unit="RPM"
+                  />
+                )}
+                {motorStatus.connected && (
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: "8px",
+                      fontSize: "10px",
+                      fontFamily: "monospace",
+                      color: "#999",
+                      marginTop: "2px",
+                    }}
+                  >
+                    <span>
+                      FET:{" "}
+                      <span style={{ color: motorStatus.temp_fet > 80 ? "#f97316" : "#e0e0e0" }}>
+                        {motorStatus.temp_fet.toFixed(1)}C
+                      </span>
                     </span>
-                  </span>
-                  <span>
-                    Motor:{" "}
-                    <span style={{ color: motorStatus.temp_motor > 100 ? "#ef4444" : "#e0e0e0" }}>
-                      {motorStatus.temp_motor.toFixed(1)}C
+                    <span>
+                      Motor:{" "}
+                      <span style={{ color: motorStatus.temp_motor > 100 ? "#ef4444" : "#e0e0e0" }}>
+                        {motorStatus.temp_motor.toFixed(1)}C
+                      </span>
                     </span>
-                  </span>
-                  <span>{motorStatus.voltage_input.toFixed(1)}V</span>
-                  <span>{motorStatus.current_input.toFixed(1)}A</span>
-                </div>
+                    <span>{motorStatus.voltage_input.toFixed(1)}V</span>
+                    <span>{motorStatus.current_input.toFixed(1)}A</span>
+                  </div>
+                )}
                 {motorStatus.fault_code !== 0 && (
                   <div style={{ fontSize: "10px", color: "#ef4444", marginTop: "2px" }}>
                     FAULT: {motorStatus.fault_name}

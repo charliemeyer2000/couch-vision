@@ -245,6 +245,7 @@ class VescDriver(Node):
         self._reconnect_time: float = 0.0
         self._angular_warned: bool = False
         self._last_erpm_sent: int = 0
+        self._commanded_erpm: int = 0
 
         qos = QoSProfile(depth=5)
         self.create_subscription(Twist, "/cmd_vel", self._on_cmd_vel, qos)
@@ -343,7 +344,34 @@ class VescDriver(Node):
 
     # ── Command loop (50ms) ───────────────────────────────────────────────
 
+    def _compute_target_erpm(self) -> int:
+        """Compute what ERPM should be sent, independent of hardware state."""
+        if self._e_stopped:
+            return 0
+        if self._config.mode == "manual":
+            max_erpm = self._config.max_rpm * self._config.pole_pairs
+            target = self._config.target_rpm * self._config.pole_pairs
+            return max(-max_erpm, min(max_erpm, target))
+        if self._config.mode == "nav2":
+            if (
+                self._last_cmd_vel is None
+                or time.monotonic() - self._last_cmd_time > 0.5
+            ):
+                return 0
+            if abs(self._last_cmd_vel.angular.z) > 0.01 and not self._angular_warned:
+                self.get_logger().warning("angular.z ignored — single motor")
+                self._angular_warned = True
+            left_erpm, _ = _twist_to_erpm(
+                self._last_cmd_vel.linear.x, 0.0, self._config
+            )
+            return left_erpm
+        return 0
+
     def _command_loop(self) -> None:
+        # Always compute target (enables dry-run visualization without hardware)
+        erpm = self._compute_target_erpm()
+        self._commanded_erpm = erpm
+
         if self._serial is None:
             self._try_reconnect()
             return
@@ -353,29 +381,8 @@ class VescDriver(Node):
             self._last_erpm_sent = 0
             return
 
-        if self._config.mode == "manual":
-            max_erpm = self._config.max_rpm * self._config.pole_pairs
-            target_erpm = self._config.target_rpm * self._config.pole_pairs
-            target_erpm = max(-max_erpm, min(max_erpm, target_erpm))
-            self._send(_cmd_set_rpm(target_erpm))
-            self._last_erpm_sent = target_erpm
-
-        elif self._config.mode == "nav2":
-            if (
-                self._last_cmd_vel is None
-                or time.monotonic() - self._last_cmd_time > 0.5
-            ):
-                self._send(_cmd_set_rpm(0))
-                self._last_erpm_sent = 0
-                return
-            if abs(self._last_cmd_vel.angular.z) > 0.01 and not self._angular_warned:
-                self.get_logger().warning("angular.z ignored — single motor")
-                self._angular_warned = True
-            left_erpm, _ = _twist_to_erpm(
-                self._last_cmd_vel.linear.x, 0.0, self._config
-            )
-            self._send(_cmd_set_rpm(left_erpm))
-            self._last_erpm_sent = left_erpm
+        self._send(_cmd_set_rpm(erpm))
+        self._last_erpm_sent = erpm
 
     # ── Telemetry loop (100ms) ────────────────────────────────────────────
 
@@ -455,6 +462,8 @@ class VescDriver(Node):
                 if self._last_cmd_vel is not None
                 else None
             ),
+            "commanded_erpm": self._commanded_erpm,
+            "commanded_rpm": self._commanded_erpm // self._config.pole_pairs,
             "errors": self._error_count,
         }
         msg = String()
