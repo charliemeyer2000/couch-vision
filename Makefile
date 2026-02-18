@@ -107,12 +107,12 @@ full-stack:
 	cd perception && \
 	$(if $(BAG),BAG_FILE=$(patsubst bags/%,%,$(BAG)) PLAYBACK_RATE=$(or $(RATE),1.0),LIVE_MODE=1 TOPIC_PREFIX=$(or $(PREFIX),/iphone_charlie) NETWORK_MODE=host) \
 	DEST_LAT=$(or $(DEST_LAT),38.036830) DEST_LON=$(or $(DEST_LON),-78.503577) LOOKAHEAD=$(or $(LOOKAHEAD),15.0) \
-	SLAM_BACKEND=$(SLAM_BACKEND) $(if $(VESC),VESC_ENABLED=1) \
+	SLAM_BACKEND=$(SLAM_BACKEND) \
 	DOCKER_RUNTIME=$$RUNTIME DOCKER_ARCH=$$ARCH \
 	docker compose -f docker-compose.nav2.yml $$VESC_COMPOSE $$PROFILE build --build-arg DOCKER_ARCH=$$ARCH && \
 	$(if $(BAG),BAG_FILE=$(patsubst bags/%,%,$(BAG)) PLAYBACK_RATE=$(or $(RATE),1.0),LIVE_MODE=1 TOPIC_PREFIX=$(or $(PREFIX),/iphone_charlie) NETWORK_MODE=host) \
 	DEST_LAT=$(or $(DEST_LAT),38.036830) DEST_LON=$(or $(DEST_LON),-78.503577) LOOKAHEAD=$(or $(LOOKAHEAD),15.0) \
-	SLAM_BACKEND=$(SLAM_BACKEND) $(if $(VESC),VESC_ENABLED=1) \
+	SLAM_BACKEND=$(SLAM_BACKEND) \
 	DOCKER_RUNTIME=$$RUNTIME DOCKER_ARCH=$$ARCH \
 	docker compose -f docker-compose.nav2.yml $$VESC_COMPOSE $$PROFILE up -d && \
 	echo "" && \
@@ -120,12 +120,14 @@ full-stack:
 	echo "View logs in separate terminals:" && \
 	echo "  make logs-bridge    # iOS bridge only" && \
 	echo "  make logs-nav2      # Nav2 planner only" && \
-	echo "  make logs           # Both (interleaved)" && \
+	$(if $(VESC),echo "  make logs-vesc      # VESC motor driver" &&) \
+	echo "  make logs           # All (interleaved)" && \
 	echo "  make stop           # Stop everything" && \
 	echo ""
 endif
 
 logs:
+	cd perception && docker compose -f docker-compose.nav2.yml -f docker-compose.vesc.yml logs -f --tail 50 2>/dev/null || \
 	cd perception && docker compose -f docker-compose.nav2.yml logs -f --tail 50
 
 logs-bridge:
@@ -134,7 +136,11 @@ logs-bridge:
 logs-nav2:
 	cd perception && docker compose -f docker-compose.nav2.yml logs -f --tail 50 nav2-planner
 
+logs-vesc:
+	cd perception && docker compose -f docker-compose.nav2.yml -f docker-compose.vesc.yml logs -f --tail 50 vesc-driver
+
 stop:
+	cd perception && docker compose -f docker-compose.nav2.yml -f docker-compose.vesc.yml down 2>/dev/null; \
 	cd perception && docker compose -f docker-compose.nav2.yml down
 
 # ═══════════════════════════════════════════════════════════════════════════════

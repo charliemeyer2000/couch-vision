@@ -10,6 +10,7 @@ Working reference: ~/bldc/spin_test.py on the Jetson (pyserial only, no pyvesc).
 from __future__ import annotations
 
 import argparse
+import glob
 import json
 import math
 import struct
@@ -33,6 +34,37 @@ try:
     import serial
 except ImportError:
     serial = None  # type: ignore[assignment]
+
+# STM32 Virtual COM Port (Flipsky FSESC)
+_VESC_USB_VID = 0x0483
+_VESC_USB_PID = 0x5740
+
+
+def _find_vesc_port() -> str | None:
+    """Auto-detect VESC serial port by USB vendor/product ID, then by probe."""
+    if serial is None:
+        return None
+    # Fast path: match STM32 VCP by USB IDs
+    try:
+        from serial.tools.list_ports import comports
+
+        for port in comports():
+            if port.vid == _VESC_USB_VID and port.pid == _VESC_USB_PID:
+                return port.device
+    except Exception:
+        pass
+    # Fallback: probe each /dev/ttyACM* with COMM_GET_VALUES
+    for path in sorted(glob.glob("/dev/ttyACM*")):
+        try:
+            with serial.Serial(path, 115200, timeout=0.1) as s:
+                s.write(_build_packet(bytes([4])))  # COMM_GET_VALUES
+                resp = s.read(256)
+                if resp and _parse_response(resp) is not None:
+                    return path
+        except (serial.SerialException, OSError):
+            continue
+    return None
+
 
 # ── VESC protocol constants ──────────────────────────────────────────────────
 
@@ -193,7 +225,7 @@ def _stamp_from_epoch(t: float) -> RosTime:
 
 
 class VescDriver(Node):
-    def __init__(self, port: str = "/dev/ttyACM0", baud: int = 115200) -> None:
+    def __init__(self, port: str = "auto", baud: int = 115200) -> None:
         super().__init__("vesc_driver")
 
         self._port = port
@@ -225,19 +257,25 @@ class VescDriver(Node):
         self.create_timer(0.1, self._telemetry_loop)
         self.create_timer(1.0, self._publish_status)
 
-        state = "connected" if self._serial else "no device (will retry)"
-        self.get_logger().info(f"VESC driver started — {port} {state}")
+        state = "connected" if self._serial else "scanning (will retry every 5s)"
+        self.get_logger().info(f"VESC driver started — port={port} {state}")
 
     # ── Serial I/O ────────────────────────────────────────────────────────
 
     def _connect(self) -> None:
         if serial is None:
             return
+        port = self._port
+        if port == "auto":
+            port_found = _find_vesc_port()
+            if port_found is None:
+                return
+            port = port_found
         try:
-            self._serial = serial.Serial(self._port, self._baud, timeout=0.05)
-        except (serial.SerialException, OSError) as e:
+            self._serial = serial.Serial(port, self._baud, timeout=0.05)
+            self.get_logger().info(f"Connected to VESC on {port}")
+        except (serial.SerialException, OSError):
             self._serial = None
-            self.get_logger().warning(f"Serial {self._port}: {e}")
 
     def _try_reconnect(self) -> None:
         now = time.monotonic()
@@ -437,7 +475,7 @@ class VescDriver(Node):
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="VESC motor driver for ROS2")
-    parser.add_argument("--port", default="/dev/ttyACM0")
+    parser.add_argument("--port", default="auto", help="Serial port or 'auto' to scan")
     parser.add_argument("--baud", type=int, default=115200)
     args = parser.parse_args()
 

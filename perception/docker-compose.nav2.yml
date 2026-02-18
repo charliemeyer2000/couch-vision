@@ -26,8 +26,6 @@ services:
       - DEST_LON=${DEST_LON:--78.503577}
       - LOOKAHEAD=${LOOKAHEAD:-15.0}
       - SLAM_BACKEND=${SLAM_BACKEND:-rtabmap}
-      - VESC_ENABLED=${VESC_ENABLED:-}
-      - VESC_PORT=${VESC_PORT:-/dev/ttyACM0}
       - CYCLONEDDS_URI=file:///perception/cyclonedds.xml
     network_mode: "${NETWORK_MODE:-bridge}"
     command: [
