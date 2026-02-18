@@ -304,11 +304,11 @@ Phases are ordered so software work can proceed in parallel with hardware procur
 - [ ] Mount motor + wheel on couch frame
 - [ ] Wire second motor to other side of dual ESC, run motor detection on slave side
 - [ ] Set up CAN forwarding: master (CAN ID 0) controls slave (CAN ID 1)
-- [ ] Implement ROS2 VESC driver node (subscribes `/cmd_vel`, sends VESC UART commands)
-- [ ] Implement differential drive kinematics in driver node
+- [x] Implement ROS2 VESC driver node (`perception/src/couch_perception/vesc_driver.py`) — subscribes `/cmd_vel`, `/e_stop`, `/motor/config`; publishes `/wheel_odom`, `/motor/status`
+- [x] Implement differential drive kinematics in driver node (single motor for now; angular.z logged but ignored until second motor wired)
 - [ ] Test with `ros2 run teleop_twist_keyboard teleop_twist_keyboard`
-- [ ] Add wheel odometry from VESC tachometer (hall sensor counts)
-- [ ] Verify `/wheel_odom` publishes correctly
+- [x] Add wheel odometry from VESC tachometer (hall sensor counts) — publishes `/wheel_odom` Odometry
+- [ ] Verify `/wheel_odom` publishes correctly on hardware
 - [ ] Measure and document wheel separation and wheel radius
 - [ ] Determine power system (batteries, voltage regulators)
 - [ ] Set production current limits in VESC Tool (motor max, battery max, brake current)
@@ -1181,8 +1181,11 @@ Published by `nav2_planner.py` for path planning and visualization.
 
 | Topic | Message Type | Publisher | Subscriber | Notes |
 |-------|-------------|-----------|------------|-------|
-| `/cmd_vel` | `geometry_msgs/Twist` | **Hardware Safety Panel** (teleop joystick/WASD) | **Motor controller (Phase 0)** | `linear.x` (m/s) + `angular.z` (rad/s). Panel also sends zeros at 10Hz when e-stopped. |
-| `/e_stop` | `std_msgs/Bool` | **Hardware Safety Panel** | nav2_planner | `true`=stop, `false`=armed. Planner pauses perception/planning but keeps localization. **Motor controller must also subscribe.** |
+| `/cmd_vel` | `geometry_msgs/Twist` | **Hardware Safety Panel** (teleop joystick/WASD) | **VESC driver**, nav2_planner | `linear.x` (m/s) + `angular.z` (rad/s). Panel also sends zeros at 10Hz when e-stopped. |
+| `/e_stop` | `std_msgs/Bool` | **Hardware Safety Panel** | nav2_planner, **VESC driver** | `true`=stop, `false`=armed. Planner pauses perception/planning but keeps localization. VESC driver sends brake current. |
+| `/motor/config` | `std_msgs/String` | **Hardware Safety Panel** | **VESC driver** | JSON: `{mode, target_rpm, max_rpm}`. Mode is "manual" (direct RPM) or "nav2" (from `/cmd_vel`). |
+| `/motor/status` | `std_msgs/String` | **VESC driver** | **Hardware Safety Panel** | 1Hz JSON: `{connected, mode, e_stopped, rpm, temp_fet, temp_motor, voltage_input, fault_code, ...}` |
+| `/wheel_odom` | `nav_msgs/Odometry` | **VESC driver** | EKF (future) | Wheel odometry from VESC tachometer (hall sensor counts). |
 | `/nav/set_destination` | `std_msgs/String` | **Nav Control Panel** | nav2_planner | JSON: `{dest_lat, dest_lon, lookahead_m, start_lat?, start_lon?, api_key?}` |
 | `/clicked_point` | `geometry_msgs/PointStamped` | Foxglove 3D panel (click tool) | nav2_planner | Click-to-navigate in 3D view |
 
@@ -1196,14 +1199,22 @@ Published by `nav2_planner.py` for path planning and visualization.
 
 ### Hardware Integration Checklist (Phase 0)
 
-When motors + ESC hardware arrive, the motor controller node must:
+The VESC driver node (`perception/src/couch_perception/vesc_driver.py`) implements motor control:
 
-1. **Subscribe to `/cmd_vel`** (`geometry_msgs/Twist`) — convert `linear.x` + `angular.z` to differential wheel speeds
-2. **Subscribe to `/e_stop`** (`std_msgs/Bool`) — hard-stop motors when `data=true`
-3. **Publish `/wheel_odom`** (`nav_msgs/Odometry`) — encoder-derived odometry for EKF fusion
-4. **Respect the Hardware Safety Panel**: panel defaults to e-stopped on startup, user must press ARM MOTORS before any motion
+1. **Subscribe to `/cmd_vel`** (`geometry_msgs/Twist`) — converts `linear.x` + `angular.z` to differential wheel ERPM (single motor only for now)
+2. **Subscribe to `/e_stop`** (`std_msgs/Bool`) — sends brake current when `data=true`, starts e-stopped by default
+3. **Subscribe to `/motor/config`** (`std_msgs/String`) — mode toggle (manual RPM / nav2 auto), target RPM, max RPM
+4. **Publish `/wheel_odom`** (`nav_msgs/Odometry`) — tachometer-derived odometry from hall sensor counts
+5. **Publish `/motor/status`** (`std_msgs/String`) — 1Hz JSON telemetry (RPM, temps, voltage, faults, connection state)
 
-The Hardware Safety Panel (`foxglove/hardware-safety-panel/`) already publishes these topics. The Nav Control Panel (`foxglove/nav-control-panel/`) handles destination setting. No changes to the Foxglove extensions are needed for hardware bring-up.
+The **Hardware Safety Panel** has a "Motor Config" section for mode toggle, RPM inputs, and live telemetry display. Run with `make full-stack VESC=1` to enable the driver (adds USB device passthrough to Docker).
+
+**Remaining hardware tasks:**
+- Mount motor + wheel on couch frame
+- Wire second motor to slave side of dual ESC, run motor detection
+- Set up CAN forwarding (master CAN ID 0 → slave CAN ID 1) — driver is prepared for this
+- Measure wheel separation and radius, update `VescConfig` defaults
+- Determine power system (batteries)
 
 ---
 
@@ -1404,6 +1415,7 @@ Custom Foxglove extension at `foxglove/hardware-safety-panel/` for hardware brin
 <!-- Agents: add useful commands here -->
 - `make full-stack` — live mode: starts iOS bridge + Nav2 + perception in Docker (background). Connect iPhone via USB-C, then Foxglove to `ws://localhost:8765`.
 - `make full-stack BAG=<path>` — bag replay mode.
+- `make full-stack VESC=1` — enable VESC motor driver (adds USB serial device passthrough). Works with both live and bag modes.
 - `make full-stack DEST_LAT=38.036 DEST_LON=-78.503` — set navigation destination (defaults to UVA area).
 - `make logs-bridge` — tail iOS bridge container logs only.
 - `make logs-nav2` — tail Nav2 planner container logs only.
@@ -1496,5 +1508,5 @@ RTAB-Map SLAM was integrated into the Nav2 Docker stack. Key learnings:
 
 ---
 
-*Last updated: 2026-02-17*
-*Current phase: Full-stack live mode working on Jetson + iPhone over USB-C (PR #24). Hardware Safety Panel (e-stop, teleop, system status) added (PR #25). Phase 4 SLAM in progress — RTAB-Map integrated with WM=6+ keyframes (PR #20). Phase 3 perception + Nav2 working end-to-end. Phase 2 EKF fuses IMU + GPS + ARKit odom + Google Maps routing. Phase 1 complete. Phase 0 hardware in progress — ESC + motor verified, programmatic control working.*
+*Last updated: 2026-02-18*
+*Current phase: Full-stack live mode working on Jetson + iPhone over USB-C (PR #24). Hardware Safety Panel (e-stop, teleop, motor config, system status) added (PR #25). VESC driver node implemented with Foxglove motor controls (manual RPM + nav2 auto modes). Phase 4 SLAM in progress — RTAB-Map integrated with WM=6+ keyframes (PR #20). Phase 3 perception + Nav2 working end-to-end. Phase 2 EKF fuses IMU + GPS + ARKit odom + Google Maps routing. Phase 1 complete. Phase 0 hardware in progress — ESC + motor verified, VESC driver node ready, awaiting motor mount + second motor.*

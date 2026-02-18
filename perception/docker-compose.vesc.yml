@@ -1,0 +1,6 @@
+# Overlay for VESC motor driver — adds USB serial device passthrough.
+# Usage: docker compose -f docker-compose.nav2.yml -f docker-compose.vesc.yml up
+services:
+  nav2-planner:
+    devices:
+      - "${VESC_PORT:-/dev/ttyACM0}:${VESC_PORT:-/dev/ttyACM0}"

@@ -86,6 +86,7 @@ full-stack:
 	@echo "  DEST_LAT=<float>        Destination latitude (default: 38.036830)"
 	@echo "  DEST_LON=<float>        Destination longitude (default: -78.503577)"
 	@echo "  LOOKAHEAD=<float>       Path following lookahead in meters (default: 15.0)"
+	@echo "  VESC=1                  Enable VESC motor driver (requires /dev/ttyACM0)"
 	@echo ""
 	@echo "ENVIRONMENT"
 	@echo "  GOOGLE_MAPS_API_KEY     Required for routing. Set in .env or export."
@@ -94,24 +95,26 @@ full-stack:
 	@echo "  make full-stack BAG=bags/walk.mcap"
 	@echo "  make full-stack BAG=bags/walk.mcap RATE=2.0 SLAM_BACKEND=none"
 	@echo "  make full-stack SLAM_BACKEND=rtabmap  # Jetson live mode"
+	@echo "  make full-stack VESC=1                # Live mode with motor driver"
 else
 full-stack:
 	@for f in .env perception/.env; do [ -f "$$f" ] && set -a && . "./$$f" && set +a; done; \
 	ARCH=$$([ "$$(uname -m)" = "aarch64" ] && echo arm64 || echo amd64); \
 	RUNTIME=$$([ -e /dev/nvidia0 ] && echo nvidia || echo runc); \
 	PROFILE="$(if $(BAG),,--profile live)"; \
+	VESC_COMPOSE="$(if $(VESC),-f docker-compose.vesc.yml)"; \
 	$(if $(BAG),,echo ""; echo "=== LIVE MODE ==="; echo "Bridge + Nav2 stack starting together."; echo "Connect iPhone CouchVision app to one of these addresses:"; (ifconfig 2>/dev/null || ip -4 addr show) | grep "inet " | grep -v "127.0.0.1" | awk '{gsub("/[0-9]+","",$$2); print "  tcp://" $$2 ":7447"}'; echo "";) \
 	cd perception && \
 	$(if $(BAG),BAG_FILE=$(patsubst bags/%,%,$(BAG)) PLAYBACK_RATE=$(or $(RATE),1.0),LIVE_MODE=1 TOPIC_PREFIX=$(or $(PREFIX),/iphone_charlie) NETWORK_MODE=host) \
 	DEST_LAT=$(or $(DEST_LAT),38.036830) DEST_LON=$(or $(DEST_LON),-78.503577) LOOKAHEAD=$(or $(LOOKAHEAD),15.0) \
-	SLAM_BACKEND=$(SLAM_BACKEND) \
+	SLAM_BACKEND=$(SLAM_BACKEND) $(if $(VESC),VESC_ENABLED=1) \
 	DOCKER_RUNTIME=$$RUNTIME DOCKER_ARCH=$$ARCH \
-	docker compose -f docker-compose.nav2.yml $$PROFILE build --build-arg DOCKER_ARCH=$$ARCH && \
+	docker compose -f docker-compose.nav2.yml $$VESC_COMPOSE $$PROFILE build --build-arg DOCKER_ARCH=$$ARCH && \
 	$(if $(BAG),BAG_FILE=$(patsubst bags/%,%,$(BAG)) PLAYBACK_RATE=$(or $(RATE),1.0),LIVE_MODE=1 TOPIC_PREFIX=$(or $(PREFIX),/iphone_charlie) NETWORK_MODE=host) \
 	DEST_LAT=$(or $(DEST_LAT),38.036830) DEST_LON=$(or $(DEST_LON),-78.503577) LOOKAHEAD=$(or $(LOOKAHEAD),15.0) \
-	SLAM_BACKEND=$(SLAM_BACKEND) \
+	SLAM_BACKEND=$(SLAM_BACKEND) $(if $(VESC),VESC_ENABLED=1) \
 	DOCKER_RUNTIME=$$RUNTIME DOCKER_ARCH=$$ARCH \
-	docker compose -f docker-compose.nav2.yml $$PROFILE up -d && \
+	docker compose -f docker-compose.nav2.yml $$VESC_COMPOSE $$PROFILE up -d && \
 	echo "" && \
 	echo "=== Stack running in background ===" && \
 	echo "View logs in separate terminals:" && \

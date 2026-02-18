@@ -34,6 +34,14 @@ elif [ -f /opt/venv/bin/activate ]; then
 fi
 export PYTHONPATH="/perception/src:${PYTHONPATH}"
 
+# Optionally start VESC motor driver
+VESC_PID=""
+if [ -n "$VESC_ENABLED" ]; then
+    echo "Starting VESC motor driver on ${VESC_PORT:-/dev/ttyACM0}..."
+    python -m couch_perception.vesc_driver --port "${VESC_PORT:-/dev/ttyACM0}" &
+    VESC_PID=$!
+fi
+
 if [ -n "$LIVE_MODE" ]; then
     python -m couch_perception.nav2_planner \
         --topic-prefix "${TOPIC_PREFIX:-/iphone_charlie}" \
@@ -45,4 +53,5 @@ else
 fi
 
 # Cleanup
+[ -n "$VESC_PID" ] && kill $VESC_PID 2>/dev/null || true
 kill $NAV2_PID 2>/dev/null || true
