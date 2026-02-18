@@ -35,7 +35,8 @@ Building a self-driving couch using iPhones as the primary sensor platform, with
 - Workstation: Desktop with RTX 5090 (32GB VRAM) — accessible via `ssh workstation`. For heavier ML models if needed.
 - Sensors: iPhone 12 Pro+ (1 phone currently, expandable)
 - Drive: Differential drive (two powered wheels, varying left/right speeds to turn)
-- Motor Controllers: TBD (ODrive, VESC, or similar)
+- Motor Controllers: Flipsky Dual FSESC 6.7 (two independent VESC6 controllers on one PCB, CAN-linked)
+- Motor: Flipsky 7070 110KV sensored outrunner BLDC (hall sensors, 7 pole pairs, 12N/14P)
 
 **Software Stack:**
 - ROS2 Jazzy
@@ -278,29 +279,101 @@ Phases are ordered so software work can proceed in parallel with hardware procur
 ### Phase 0: Hardware Setup ⚙️
 **Goal:** Couch drives manually via teleop
 
-**Status:** Not Started — can proceed in parallel with software phases
+**Status:** In Progress — ESC and motor verified, programmatic control working
+
+#### Hardware Selected
+- **ESC:** Flipsky Dual FSESC 6.7 (two independent VESC6 controllers on one PCB, internal CAN bus)
+  - 100A continuous per side, 8V-60V input, FOC/BLDC/DC modes
+  - USB shows as `STMicroelectronics Virtual COM Port` at `/dev/ttyACM0`
+  - Firmware: v5.02, HW 60 (Flipsky variant)
+  - Correct custom firmware target: `flipsky_60` or `flipsky_60_mk5` (built from `~/bldc/`)
+- **Motor:** Flipsky 7070 110KV sensored outrunner BLDC (one motor currently, on one side of dual ESC)
+  - 7 pole pairs (12N/14P), hall sensors + temperature sensor
+  - Internal resistance: 0.055 ohm, max 100A, 4200W peak
+  - ERPM = mechanical RPM × 7 (e.g. 200 RPM = 1400 ERPM)
+- **Current power:** Bench PSU at 31.8V, 5A limit (temporary — production will use battery)
 
 #### Tasks
-- [ ] Select and purchase motors, wheels, motor controllers, encoders
-- [ ] Mount motors + wheels on couch frame
-- [ ] Wire motor controllers to Jetson Orin Nano (GPIO/PWM or CAN/UART)
-- [ ] Implement motor control node (ros2_control hardware interface)
+- [x] Select and purchase motors, wheels, motor controllers
+- [x] Wire motor to ESC (3 phase wires + hall sensor JST connector)
+- [x] Connect ESC to Jetson via USB, verify serial communication
+- [x] Install VESC Tool on Jetson (Flatpak aarch64 from Flathub)
+- [x] Run FOC motor detection and hall sensor detection in VESC Tool
+- [x] Verify programmatic motor control from Python over USB serial (`~/bldc/spin_test.py`)
+- [x] Verify telemetry readback (RPM, current, temperature, voltage, duty cycle, fault codes)
+- [ ] Mount motor + wheel on couch frame
+- [ ] Wire second motor to other side of dual ESC, run motor detection on slave side
+- [ ] Set up CAN forwarding: master (CAN ID 0) controls slave (CAN ID 1)
+- [ ] Implement ROS2 VESC driver node (subscribes `/cmd_vel`, sends VESC UART commands)
+- [ ] Implement differential drive kinematics in driver node
 - [ ] Test with `ros2 run teleop_twist_keyboard teleop_twist_keyboard`
-- [ ] Add wheel encoders
+- [ ] Add wheel odometry from VESC tachometer (hall sensor counts)
 - [ ] Verify `/wheel_odom` publishes correctly
 - [ ] Measure and document wheel separation and wheel radius
 - [ ] Determine power system (batteries, voltage regulators)
+- [ ] Set production current limits in VESC Tool (motor max, battery max, brake current)
 
 #### Hardware Specs (Fill in as determined)
 ```yaml
-wheel_separation: _____ m        # distance between wheel centers
+wheel_separation: _____ m        # distance between left/right wheel centers
 wheel_radius: _____ m            # wheel radius
 max_wheel_velocity: _____ rad/s  # motor max speed
-encoder_ticks_per_rev: _____     # if using encoders
+motor_pole_pairs: 7              # Flipsky 7070
+motor_kv: 110                    # RPM per volt
+esc_firmware: "v5.02"            # VESC firmware version
+esc_hw: "HW 60"                  # Flipsky VESC6 variant
+```
+
+#### VESC Communication Protocol (for driver node implementation)
+The VESC uses a binary UART protocol over USB serial (`/dev/ttyACM0` at 115200 baud).
+A working reference implementation exists at `~/bldc/spin_test.py`.
+
+**Packet format:**
+```
+[0x02][length:1][payload][crc16:2][0x03]     # short packet (payload < 256 bytes)
+[0x03][length:2][payload][crc16:2][0x03]     # long packet (payload >= 256 bytes)
+```
+CRC is CRC-CCITT (poly 0x1021, init 0x0000) over the payload only.
+
+**Key command IDs (payload byte 0):**
+| ID | Command | Payload | Notes |
+|----|---------|---------|-------|
+| 4  | `COMM_GET_VALUES` | (none) | Returns telemetry (see below) |
+| 5  | `COMM_SET_DUTY` | int32 (duty × 100000) | Open-loop, good for low speed |
+| 6  | `COMM_SET_CURRENT` | int32 (amps × 1000) | Torque control mode |
+| 7  | `COMM_SET_CURRENT_BRAKE` | int32 (amps × 1000) | Regen braking |
+| 8  | `COMM_SET_RPM` | int32 (ERPM) | PID speed control using hall sensors |
+
+**COMM_GET_VALUES response layout (payload after cmd byte 4):**
+| Offset | Size | Field | Scale | Unit |
+|--------|------|-------|-------|------|
+| 1 | 2 | temp_fet | /10 | °C |
+| 3 | 2 | temp_motor | /10 | °C |
+| 5 | 4 | avg_motor_current | /100 | A |
+| 9 | 4 | avg_input_current | /100 | A |
+| 13 | 4 | avg_id | /100 | A |
+| 17 | 4 | avg_iq (torque current) | /100 | A |
+| 21 | 2 | duty_cycle | /1000 | ratio |
+| 23 | 4 | erpm | /1 | ERPM |
+| 27 | 2 | v_in | /10 | V |
+| 29 | 4 | amp_hours | /10000 | Ah |
+| 33 | 4 | amp_hours_charged | /10000 | Ah |
+| 37 | 4 | watt_hours | /10000 | Wh |
+| 41 | 4 | watt_hours_charged | /10000 | Wh |
+| 45 | 4 | tachometer | raw | hall counts |
+| 49 | 4 | tachometer_abs | raw | hall counts |
+| 53 | 1 | fault_code | enum | 0=NONE |
+
+**Important timing:** Commands must be re-sent within 1000ms (VESC timeout). The spin_test script sends every 50ms. Telemetry reads take ~20ms; always re-send the motor command immediately after a telemetry read to avoid stuttering.
+
+**Wheel odometry from tachometer:** The tachometer counts hall sensor transitions. To convert to distance:
+```
+wheel_revs = tachometer / (pole_pairs * 6)    # 6 hall transitions per electrical revolution
+distance = wheel_revs * (2 * pi * wheel_radius)
 ```
 
 #### Deliverable
-Couch drives with keyboard control, `/wheel_odom` publishes from encoders
+Couch drives with keyboard control, `/wheel_odom` publishes from VESC tachometer
 
 ---
 
@@ -1216,10 +1289,13 @@ This section is for Claude Code instances and other agents to record learnings, 
 - Tailscale iptables: port 8765 needs explicit allow rule for Foxglove access from other tailnet peers (`sudo iptables -I ts-input 3 -s 100.64.0.0/10 -p tcp --dport 8765 -j ACCEPT`). This rule is NOT persistent across reboots — needs to be made permanent.
 
 ### Open Questions
-- [ ] What motor controllers to use? (ODrive, VESC, or simpler PWM?)
+- [x] ~~What motor controllers to use?~~ → Flipsky Dual FSESC 6.7 + Flipsky 7070 110KV motor
 - [ ] Actual couch dimensions?
-- [ ] Power system?
+- [ ] Power system? (currently bench PSU; need battery selection for production)
 - [ ] Do we need the Zenoh bridge to be a proper rmw_zenoh implementation, or is the TCP bridge sufficient?
+- [ ] Wheel diameter/radius? (needed for odometry and differential drive calculations)
+- [ ] Wheel separation? (distance between left and right wheel centers)
+- [ ] Second motor — same 7070 110KV for the other side?
 
 ### Discovered Issues
 
@@ -1288,6 +1364,41 @@ Custom Foxglove extension at `foxglove/hardware-safety-panel/` for hardware brin
 - Install: `pnpm local-install` (copies to `~/.foxglove-studio/extensions/`)
 - Panel type ID in layout: `"Hardware Safety Panel.Hardware Safety!hwsafety"`
 - **Battery/thermal topic note**: panel hardcodes `/iphone/battery` and `/iphone/thermal` but live bridge uses configurable prefix (e.g. `/iphone_charlie/battery`). Panel degrades gracefully (shows "--").
+
+### VESC Motor Controller Setup & Communication
+
+**Hardware:** Flipsky Dual FSESC 6.7 + Flipsky 7070 110KV motor, connected via USB to Jetson Orin Nano.
+
+**Jetson cross-compilation:** The `~/bldc/` repo contains the VESC firmware source. The bundled x86 ARM toolchain doesn't work on the aarch64 Jetson. Fix: `sudo apt install gcc-arm-none-eabi` and rename the bundled toolchain dir (`tools/gcc-arm-none-eabi-7-2018-q2-update` → `.x86bak`) so the Makefile falls through to the system compiler. Build with `make flipsky_60_mk5` (NOT `make 60_mk5` — that's the Trampa variant). Output: `build/flipsky_60_mk5/flipsky_60_mk5.bin`.
+
+**VESC Tool on Jetson:** Installed via Flatpak (`flatpak install flathub com.vesc_project.VescTool`). The official Linux zip is x86-only. Must run as root for reliable serial access: `sudo flatpak run --device=all --filesystem=/dev com.vesc_project.VescTool`. User must be in `dialout` group (`sudo usermod -aG dialout charlie`).
+
+**Motor detection in VESC Tool:** Use FOC mode, detection current 10A (not 5A — the 7070 is a large motor). Run RL detection first, then hall sensor detection. Set sensor mode to Hall Sensors. Turn OFF "Enable Phase Filters" (FSESC 6.7 doesn't have them). Turn ON "Slow ABS Max Current".
+
+**Serial protocol reference:** See `~/bldc/spin_test.py` for a complete working implementation of VESC UART communication in Python (no external VESC libraries — `pyvesc` is broken on Python 3.12). Uses `pyserial` only. Protocol, command IDs, and telemetry parsing are all documented in Phase 0 above.
+
+**Key gotchas:**
+- VESC command timeout is 1000ms. Send commands every 50ms to avoid stuttering.
+- `COMM_SET_RPM` uses ERPM (electrical RPM) = mechanical RPM × pole_pairs (7 for the 7070).
+- Telemetry reads take ~20ms. Always re-send the motor command immediately after reading to avoid a gap.
+- Current limits MUST be set in VESC Tool (Motor Settings > General > Current Limits), not in the script. The RPM PID controller decides how much current to draw internally. If your bench PSU has a 5A limit, set Motor Current Max = 5A and Battery Current Max = 5A in VESC Tool, otherwise the ESC will overcurrent the PSU and the USB device will disconnect (`Input/output error`).
+- The dual ESC has two independent controllers. USB connects to the master (CAN ID 0). The slave (CAN ID 1) is reached via CAN forwarding in VESC Tool. Each side needs independent motor detection.
+- `pyvesc` Python library is broken on Python 3.12 (PyCRC import fails). Use the raw protocol implementation in `spin_test.py` instead.
+
+**Verified telemetry fields:** RPM (from hall sensor PID), duty cycle, input voltage, motor current, input current, Iq (torque-producing), Id (field-weakening), FET temperature, motor temperature, watt-hours, amp-hours, tachometer (cumulative hall counts), fault codes.
+
+**Tachometer → wheel odometry:** `tach / (7 pole_pairs × 6 transitions) = mechanical revolutions`. Multiply by `2π × wheel_radius` for distance. The tachometer is cumulative and monotonically increasing (tachometer_abs for absolute). This gives us wheel odometry without separate encoders.
+
+**Next steps for motor integration:**
+1. Wire second motor to slave side of dual ESC, run motor detection
+2. Build a ROS2 node that subscribes to `/cmd_vel` (Twist) and converts to VESC commands:
+   - `v_left = linear.x - (angular.z × wheel_separation / 2)`
+   - `v_right = linear.x + (angular.z × wheel_separation / 2)`
+   - Convert wheel velocity to ERPM: `erpm = (v / (2π × wheel_radius)) × 60 × pole_pairs`
+   - Send `COMM_SET_RPM` to master (left) and slave via CAN forwarding (right)
+3. Publish `/wheel_odom` (nav_msgs/Odometry) from tachometer feedback
+4. Respect `/e_stop` topic (send zero current on e-stop)
+5. Wire into the existing Hardware Safety Panel (Foxglove) for teleop control
 
 ### Helpful Commands
 <!-- Agents: add useful commands here -->
@@ -1376,14 +1487,14 @@ RTAB-Map SLAM was integrated into the Nav2 Docker stack. Key learnings:
 
 ## Questions to Resolve
 
-- [ ] What motor controllers are available/being used?
-- [ ] What is the actual couch wheel configuration?
-- [ ] Do we have wheel encoders?
+- [x] ~~What motor controllers are available/being used?~~ → Flipsky Dual FSESC 6.7 (VESC6-based)
+- [x] ~~Do we have wheel encoders?~~ → No standalone encoders, but VESC hall sensor tachometer provides wheel position feedback
+- [ ] What is the actual couch wheel configuration? (wheel diameter, separation)
 - [ ] What are the actual couch dimensions?
-- [ ] Power system details?
+- [ ] Power system details? (battery voltage, capacity, max discharge current)
 - [ ] Is the current TCP bridge sufficient or do we need proper Zenoh (rmw_zenoh)?
 
 ---
 
-*Last updated: 2026-02-16*
-*Current phase: Full-stack live mode working on Jetson + iPhone over USB-C (PR #24). Hardware Safety Panel (e-stop, teleop, system status) added (PR #25). Phase 4 SLAM in progress — RTAB-Map integrated with WM=6+ keyframes (PR #20). Phase 3 perception + Nav2 working end-to-end. Phase 2 EKF fuses IMU + GPS + ARKit odom + Google Maps routing. Phase 1 complete. Phase 0 hardware unblocked in parallel.*
+*Last updated: 2026-02-17*
+*Current phase: Full-stack live mode working on Jetson + iPhone over USB-C (PR #24). Hardware Safety Panel (e-stop, teleop, system status) added (PR #25). Phase 4 SLAM in progress — RTAB-Map integrated with WM=6+ keyframes (PR #20). Phase 3 perception + Nav2 working end-to-end. Phase 2 EKF fuses IMU + GPS + ARKit odom + Google Maps routing. Phase 1 complete. Phase 0 hardware in progress — ESC + motor verified, programmatic control working.*
