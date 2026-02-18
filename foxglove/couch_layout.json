@@ -79,7 +79,7 @@
         "imageTopic": "/nav/costmap_image/compressed"
       }
     },
-    "Log!consolidated": {
+    "RosOut!consolidated": {
       "searchTerms": [],
       "minLogLevel": 1
     },
@@ -110,7 +110,7 @@
       },
       "second": {
         "direction": "row",
-        "first": "Log!consolidated",
+        "first": "RosOut!consolidated",
         "second": "3D!nav3d",
         "splitPercentage": 40
       },
