@@ -13,6 +13,10 @@ interface PanelState {
   maxLinearVel: number;
   maxAngularVel: number;
   teleopCollapsed: boolean;
+  motorCollapsed: boolean;
+  motorMode: "manual" | "nav2";
+  targetRpm: number;
+  maxRpm: number;
 }
 
 interface TwistMsg {
@@ -29,6 +33,27 @@ interface NavStatus {
   ekf_initialized: boolean;
   route_points: number;
   e_stopped?: boolean;
+}
+
+interface MotorStatus {
+  connected: boolean;
+  mode: string;
+  e_stopped: boolean;
+  rpm: number;
+  erpm: number;
+  temp_fet: number;
+  temp_motor: number;
+  current_motor: number;
+  current_input: number;
+  voltage_input: number;
+  duty_cycle: number;
+  fault_code: number;
+  fault_name: string;
+  target_rpm: number;
+  max_rpm: number;
+  commanded_rpm: number;
+  commanded_erpm: number;
+  errors: number;
 }
 
 const inputStyle: React.CSSProperties = {
@@ -279,6 +304,10 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
       maxLinearVel: s?.maxLinearVel ?? DEFAULT_MAX_LINEAR,
       maxAngularVel: s?.maxAngularVel ?? DEFAULT_MAX_ANGULAR,
       teleopCollapsed: s?.teleopCollapsed ?? false,
+      motorCollapsed: s?.motorCollapsed ?? false,
+      motorMode: s?.motorMode ?? "manual",
+      targetRpm: s?.targetRpm ?? 0,
+      maxRpm: s?.maxRpm ?? 500,
     };
   });
 
@@ -287,6 +316,7 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
   const [batteryPct, setBatteryPct] = useState<number | null>(null);
   const [thermalState, setThermalState] = useState<number | null>(null);
   const [navStatus, setNavStatus] = useState<NavStatus | null>(null);
+  const [motorStatus, setMotorStatus] = useState<MotorStatus | null>(null);
   const [renderDone, setRenderDone] = useState<(() => void) | undefined>();
 
   const keysPressed = useRef(new Set<string>());
@@ -301,9 +331,11 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
   useLayoutEffect(() => {
     context.advertise?.("/cmd_vel", "geometry_msgs/Twist");
     context.advertise?.("/e_stop", "std_msgs/Bool");
+    context.advertise?.("/motor/config", "std_msgs/String");
     return () => {
       context.unadvertise?.("/cmd_vel");
       context.unadvertise?.("/e_stop");
+      context.unadvertise?.("/motor/config");
     };
   }, [context]);
 
@@ -339,6 +371,13 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
             } catch {
               /* ignore */
             }
+          } else if (ev.topic === "/motor/status") {
+            try {
+              const data = JSON.parse((ev.message as { data: string }).data) as MotorStatus;
+              setMotorStatus(data);
+            } catch {
+              /* ignore */
+            }
           }
         }
       }
@@ -349,12 +388,25 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
       { topic: "/iphone/battery" },
       { topic: "/iphone/thermal" },
       { topic: "/nav/status" },
+      { topic: "/motor/status" },
     ]);
   }, [context]);
 
   useEffect(() => {
     renderDone?.();
   }, [renderDone]);
+
+  // Publish motor config whenever mode/RPM settings change
+  useEffect(() => {
+    const msg = {
+      data: JSON.stringify({
+        mode: state.motorMode,
+        target_rpm: state.targetRpm,
+        max_rpm: state.maxRpm,
+      }),
+    };
+    context.publish?.("/motor/config", msg);
+  }, [context, state.motorMode, state.targetRpm, state.maxRpm]);
 
   // E-stop deadman: send zeros at 10Hz while stopped
   useEffect(() => {
@@ -680,6 +732,164 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
           unit="rad/s"
           centered
         />
+      </div>
+
+      {/* Motor Config */}
+      <div style={sectionStyle}>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            cursor: "pointer",
+          }}
+          onClick={() => setState((s) => ({ ...s, motorCollapsed: !s.motorCollapsed }))}
+        >
+          <label style={{ ...labelStyle, marginBottom: 0, cursor: "pointer" }}>Motor Config</label>
+          <span style={{ fontSize: "10px", color: "#666" }}>
+            {state.motorCollapsed ? "\u25b6" : "\u25bc"}
+          </span>
+        </div>
+
+        {!state.motorCollapsed && (
+          <div style={{ marginTop: "4px" }}>
+            {/* Mode toggle */}
+            <div style={{ display: "flex", gap: "4px", marginBottom: "6px" }}>
+              {(["manual", "nav2"] as const).map((mode) => (
+                <button
+                  key={mode}
+                  onClick={() => setState((s) => ({ ...s, motorMode: mode }))}
+                  style={{
+                    flex: 1,
+                    padding: "5px",
+                    fontSize: "11px",
+                    fontWeight: "bold",
+                    background: state.motorMode === mode ? "#166534" : "#1a1a2e",
+                    color: state.motorMode === mode ? "#86efac" : "#888",
+                    border: `1px solid ${state.motorMode === mode ? "#22c55e" : "#333"}`,
+                    borderRadius: "3px",
+                    cursor: "pointer",
+                  }}
+                >
+                  {mode === "manual" ? "Manual RPM" : "Nav2 Auto"}
+                </button>
+              ))}
+            </div>
+
+            {/* RPM inputs */}
+            <div style={{ display: "flex", gap: "6px", marginBottom: "6px" }}>
+              <div style={{ flex: 1 }}>
+                <label style={labelStyle}>Target RPM</label>
+                <input
+                  type="number"
+                  step="10"
+                  min="0"
+                  max={state.maxRpm}
+                  value={state.targetRpm}
+                  onChange={(e) =>
+                    setState((s) => ({
+                      ...s,
+                      targetRpm: clamp(parseInt(e.target.value) || 0, 0, s.maxRpm),
+                    }))
+                  }
+                  style={inputStyle}
+                  disabled={state.eStopped || state.motorMode !== "manual"}
+                />
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={labelStyle}>Max RPM</label>
+                <input
+                  type="number"
+                  step="50"
+                  min="0"
+                  max="10000"
+                  value={state.maxRpm}
+                  onChange={(e) =>
+                    setState((s) => ({
+                      ...s,
+                      maxRpm: clamp(parseInt(e.target.value) || 0, 0, 10000),
+                    }))
+                  }
+                  style={inputStyle}
+                />
+              </div>
+            </div>
+
+            {/* Motor telemetry */}
+            {motorStatus && (
+              <div style={{ marginTop: "4px" }}>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "4px",
+                    marginBottom: "4px",
+                  }}
+                >
+                  <div
+                    style={{
+                      width: "6px",
+                      height: "6px",
+                      borderRadius: "50%",
+                      background: motorStatus.connected ? "#22c55e" : "#ef4444",
+                      boxShadow: `0 0 3px ${motorStatus.connected ? "#22c55e" : "#ef4444"}`,
+                    }}
+                  />
+                  <span style={{ fontSize: "10px", color: "#999" }}>
+                    {motorStatus.connected ? "Connected" : "Dry Run"}
+                  </span>
+                </div>
+                {motorStatus.connected ? (
+                  <VelocityBar
+                    label="RPM"
+                    value={motorStatus.rpm}
+                    maxScale={state.maxRpm || 500}
+                    unit="RPM"
+                  />
+                ) : (
+                  <VelocityBar
+                    label="Cmd RPM"
+                    value={motorStatus.commanded_rpm}
+                    maxScale={state.maxRpm || 500}
+                    unit="RPM"
+                  />
+                )}
+                {motorStatus.connected && (
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: "8px",
+                      fontSize: "10px",
+                      fontFamily: "monospace",
+                      color: "#999",
+                      marginTop: "2px",
+                    }}
+                  >
+                    <span>
+                      FET:{" "}
+                      <span style={{ color: motorStatus.temp_fet > 80 ? "#f97316" : "#e0e0e0" }}>
+                        {motorStatus.temp_fet.toFixed(1)}C
+                      </span>
+                    </span>
+                    <span>
+                      Motor:{" "}
+                      <span style={{ color: motorStatus.temp_motor > 100 ? "#ef4444" : "#e0e0e0" }}>
+                        {motorStatus.temp_motor.toFixed(1)}C
+                      </span>
+                    </span>
+                    <span>{motorStatus.voltage_input.toFixed(1)}V</span>
+                    <span>{motorStatus.current_input.toFixed(1)}A</span>
+                  </div>
+                )}
+                {motorStatus.fault_code !== 0 && (
+                  <div style={{ fontSize: "10px", color: "#ef4444", marginTop: "2px" }}>
+                    FAULT: {motorStatus.fault_name}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Status */}

@@ -69,45 +69,6 @@
         }
       }
     },
-    "3D!slam": {
-      "cameraState": {
-        "perspective": false,
-        "distance": 30,
-        "phi": 90,
-        "thetaOffset": 0,
-        "targetOffset": [0, 0, 0],
-        "target": [0, 0, 0],
-        "fovy": 45
-      },
-      "followMode": "follow-pose",
-      "followTf": "map",
-      "scene": {
-        "backgroundColor": "#0d1117",
-        "enableStats": false
-      },
-      "topics": {
-        "/map": {
-          "visible": true,
-          "colorMode": "map",
-          "alpha": 0.9
-        },
-        "/mapPath": {
-          "visible": true,
-          "type": "line",
-          "lineWidth": 0.1,
-          "gradient": ["#ff00ff", "#00ffff"]
-        },
-        "/cloud_map": {
-          "visible": true,
-          "pointSize": 2,
-          "colorMode": "flat",
-          "flatColor": "#44aaff"
-        },
-        "/tf": {
-          "visible": true
-        }
-      }
-    },
     "Image!camera": {
       "imageMode": {
         "imageTopic": "/perception/image_annotated/compressed"
@@ -118,10 +79,9 @@
         "imageTopic": "/nav/costmap_image/compressed"
       }
     },
-    "Image!depth": {
-      "imageMode": {
-        "imageTopic": "/camera/depth/image"
-      }
+    "RosOut!consolidated": {
+      "searchTerms": [],
+      "minLogLevel": 1
     },
     "map!gps": {
       "layer": "map",
@@ -129,23 +89,6 @@
       "followTopic": "/gps/fix",
       "zoomLevel": 17
     },
-    "Plot!imu": {
-      "paths": [
-        { "value": "/iphone/imu.orientation.x", "enabled": true, "timestampMethod": "receiveTime" },
-        { "value": "/iphone/imu.orientation.y", "enabled": true, "timestampMethod": "receiveTime" },
-        { "value": "/iphone/imu.orientation.z", "enabled": true, "timestampMethod": "receiveTime" },
-        { "value": "/iphone/imu.orientation.w", "enabled": true, "timestampMethod": "receiveTime" }
-      ],
-      "showXAxisLabels": true,
-      "showYAxisLabels": true,
-      "showLegend": true,
-      "legendDisplay": "floating",
-      "showPlotValuesInLegend": true,
-      "isSynced": true,
-      "xAxisVal": "timestamp",
-      "followingViewWidth": 30
-    },
-    "RosOut!logs": {},
     "Navigation Control.Navigation Control!navctrl": {},
     "Hardware Safety Panel.Hardware Safety!hwsafety": {}
   },
@@ -167,13 +110,8 @@
       },
       "second": {
         "direction": "row",
-        "first": "Image!depth",
-        "second": {
-          "direction": "column",
-          "first": "3D!nav3d",
-          "second": "3D!slam",
-          "splitPercentage": 50
-        },
+        "first": "RosOut!consolidated",
+        "second": "3D!nav3d",
         "splitPercentage": 40
       },
       "splitPercentage": 55
@@ -186,17 +124,7 @@
         "second": "Navigation Control.Navigation Control!navctrl",
         "splitPercentage": 55
       },
-      "second": {
-        "direction": "column",
-        "first": "map!gps",
-        "second": {
-          "direction": "column",
-          "first": "Plot!imu",
-          "second": "RosOut!logs",
-          "splitPercentage": 60
-        },
-        "splitPercentage": 50
-      },
+      "second": "map!gps",
       "splitPercentage": 45
     },
     "splitPercentage": 70

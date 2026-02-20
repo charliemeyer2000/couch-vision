@@ -28,10 +28,12 @@ dependencies = [
     "polyline>=2.0",
     "pyproj>=3.6",
     "requests>=2.28",
+    "pyserial>=3.5",
 ]
 
 [project.scripts]
 couch-nav2-planner = "couch_perception.nav2_planner:main"
+vesc-driver = "couch_perception.vesc_driver:main"
 
 [dependency-groups]
 dev = [

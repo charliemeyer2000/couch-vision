@@ -1,0 +1,22 @@
+# VESC motor driver service — separate container with USB device access.
+# Usage: docker compose -f docker-compose.nav2.yml -f docker-compose.vesc.yml up
+services:
+  vesc-driver:
+    build:
+      context: .
+      dockerfile: Dockerfile.nav2
+      args:
+        DOCKER_ARCH: "${DOCKER_ARCH:-amd64}"
+    runtime: "${DOCKER_RUNTIME:-runc}"
+    privileged: true
+    volumes:
+      - /dev:/dev
+      - ./src:/perception/src:ro
+      - ../cyclonedds.xml:/perception/cyclonedds.xml:ro
+    environment:
+      - PYTHONUNBUFFERED=1
+      - CYCLONEDDS_URI=file:///perception/cyclonedds.xml
+    network_mode: "${NETWORK_MODE:-bridge}"
+    entrypoint: ["/entrypoint_vesc.sh"]
+    command: []
+    restart: unless-stopped
