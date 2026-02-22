@@ -113,6 +113,11 @@ make hz T=/iphone_charlie/imu # check topic frequency
 make echo T=/iphone_charlie/odom # echo topic messages
 make rviz                     # launch RViz2 with project config
 
+# Foxglove extensions
+make build-extension    # build all Foxglove panel extensions
+make install-extension  # install extensions into local Foxglove
+make lint-extension     # typecheck + lint + format check
+
 # Utilities
 make ip             # show IP addresses
 make deploy         # pull latest code on Jetson via SSH
