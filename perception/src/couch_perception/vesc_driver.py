@@ -193,6 +193,9 @@ class VescConfig:
     wheel_radius: float = 0.1
     wheel_separation: float = 0.5
     pole_pairs: int = 7
+    stall_current_threshold: float = 10.0  # amps — stall if current exceeds this
+    stall_rpm_threshold: int = 50  # ERPM — stall if |erpm| below this
+    stall_duration_s: float = 1.0  # seconds — how long before declaring stall
 
 
 def _twist_to_erpm(
@@ -246,6 +249,8 @@ class VescDriver(Node):
         self._angular_warned: bool = False
         self._last_erpm_sent: int = 0
         self._commanded_erpm: int = 0
+        self._stall_start: float | None = None
+        self._motor_stalled: bool = False
 
         qos = QoSProfile(depth=5)
         self.create_subscription(Twist, "/cmd_vel", self._on_cmd_vel, qos)
@@ -323,6 +328,9 @@ class VescDriver(Node):
             self.get_logger().info(f"E-STOP {'ENGAGED' if msg.data else 'RELEASED'}")
             if msg.data:
                 self._send(_cmd_set_current(0.0))
+            else:
+                self._motor_stalled = False
+                self._stall_start = None
 
     def _on_config(self, msg: String) -> None:
         try:
@@ -341,6 +349,12 @@ class VescDriver(Node):
             self._config.wheel_separation = float(data["wheel_separation"])
         if "pole_pairs" in data:
             self._config.pole_pairs = int(data["pole_pairs"])
+        if "stall_current_threshold" in data:
+            self._config.stall_current_threshold = max(0.0, float(data["stall_current_threshold"]))
+        if "stall_rpm_threshold" in data:
+            self._config.stall_rpm_threshold = max(0, int(data["stall_rpm_threshold"]))
+        if "stall_duration_s" in data:
+            self._config.stall_duration_s = max(0.1, float(data["stall_duration_s"]))
 
     # ── Command loop (50ms) ───────────────────────────────────────────────
 
@@ -406,11 +420,41 @@ class VescDriver(Node):
             return
 
         self._latest_telemetry = telemetry
+        self._check_stall(telemetry)
         self._publish_odom(telemetry)
 
         # Re-send motor command to avoid VESC 1000ms timeout
         if not self._e_stopped and self._last_erpm_sent != 0:
             self._send(_cmd_set_rpm(self._last_erpm_sent))
+
+    def _check_stall(self, telemetry: VescTelemetry) -> None:
+        """Detect motor stall: high current + near-zero RPM sustained over threshold."""
+        cfg = self._config
+        commanding_motion = not self._e_stopped and self._last_erpm_sent != 0
+        high_current = abs(telemetry.current_motor) > cfg.stall_current_threshold
+        low_rpm = abs(telemetry.erpm) < cfg.stall_rpm_threshold
+
+        if commanding_motion and high_current and low_rpm:
+            now = time.monotonic()
+            if self._stall_start is None:
+                self._stall_start = now
+            elif now - self._stall_start >= cfg.stall_duration_s:
+                if not self._motor_stalled:
+                    self._motor_stalled = True
+                    self.get_logger().error(
+                        f"MOTOR STALL DETECTED — "
+                        f"current={telemetry.current_motor:.1f}A, "
+                        f"erpm={telemetry.erpm}, triggering e-stop"
+                    )
+                    self._e_stopped = True
+                    self._send(_cmd_set_current(0.0))
+        else:
+            self._stall_start = None
+            if self._motor_stalled and self._e_stopped:
+                # Keep stalled flag until e-stop is manually released
+                pass
+            elif not self._e_stopped:
+                self._motor_stalled = False
 
     def _publish_odom(self, telemetry: VescTelemetry) -> None:
         now = time.time()
@@ -444,6 +488,7 @@ class VescDriver(Node):
             "connected": self._serial is not None,
             "mode": self._config.mode,
             "e_stopped": self._e_stopped,
+            "stalled": self._motor_stalled,
             "rpm": v.erpm // self._config.pole_pairs,
             "erpm": v.erpm,
             "temp_fet": v.temp_fet,
