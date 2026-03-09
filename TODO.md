@@ -29,7 +29,7 @@ Full todo list for tomorrow
 ### Extra
 
 - [ ] creating a urdf to model the new couch and update localization
-- [ ] detection motor stalled conditions
+- [x] detection motor stalled conditions
 - [ ] braking / holding in an incline
 - [ ] safety hardening -> if the planner crashes how long before the motors stop moving
 - [ ] takeover behavior -> should be automatic if the user gives a vehicle input instead of switching between automatic and manual mode

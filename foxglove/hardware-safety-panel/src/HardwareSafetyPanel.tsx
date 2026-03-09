@@ -39,6 +39,7 @@ interface MotorStatus {
   connected: boolean;
   mode: string;
   e_stopped: boolean;
+  stalled: boolean;
   rpm: number;
   erpm: number;
   temp_fet: number;
@@ -884,6 +885,22 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
                 {motorStatus.fault_code !== 0 && (
                   <div style={{ fontSize: "10px", color: "#ef4444", marginTop: "2px" }}>
                     FAULT: {motorStatus.fault_name}
+                  </div>
+                )}
+                {motorStatus.stalled && (
+                  <div
+                    style={{
+                      fontSize: "10px",
+                      color: "#fbbf24",
+                      background: "#422006",
+                      border: "1px solid #f59e0b",
+                      borderRadius: "3px",
+                      padding: "3px 6px",
+                      marginTop: "4px",
+                      fontWeight: "bold",
+                    }}
+                  >
+                    MOTOR STALL DETECTED — arm to clear
                   </div>
                 )}
               </div>
