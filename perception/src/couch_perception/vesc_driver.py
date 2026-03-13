@@ -1,6 +1,6 @@
 """VESC motor driver — Flipsky Dual FSESC 6.7 over USB serial.
 
-Dual ESC: master (CAN ID 0) direct over USB, slave (CAN ID 1) via CAN forwarding.
+Dual ESC: master direct over USB, slave (CAN ID 19) via CAN forwarding.
 Single motor for now; angular.z from /cmd_vel is ignored until second motor is wired.
 
 Protocol reference: SELF_DRIVING_STACK.md § "VESC Communication Protocol"

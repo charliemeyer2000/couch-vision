@@ -4,14 +4,16 @@
 Both motors resist displacement and actively return to their starting position.
 Uses COMM_SET_CURRENT (bypasses VESC speed PID) with a tachometer-based position
 PID running on this host. Master motor controlled directly over USB; slave motor
-via CAN forwarding (CAN ID 1).
+via CAN forwarding (slave CAN ID 19).
 
+Monitors total input current from PSU and scales back if approaching the limit.
 Requires VESC Tool to be disconnected (serial port exclusive access).
 
 Usage:
     uv run --with pyserial python hold_test.py
-    uv run --with pyserial python hold_test.py --single   # master only
+    uv run --with pyserial python hold_test.py --single       # master only
     uv run --with pyserial python hold_test.py --kp 1.0 --max-current 5.0
+    uv run --with pyserial python hold_test.py --psu-limit 20  # 20A PSU budget
 """
 
 from __future__ import annotations
@@ -141,17 +143,36 @@ class PID:
 
 class VescConn:
     def __init__(self, port: str, baud: int = 115200):
-        # inter_byte_timeout: return from read() 10ms after last byte received,
-        # so we don't wait for the full timeout on every transaction.
-        self.ser = serial.Serial(
-            port, baud, timeout=0.2, inter_byte_timeout=0.01
-        )
+        self.ser = serial.Serial(port, baud, timeout=0.05)
 
-    def _transact(self, payload: bytes) -> bytes | None:
+    def _read_packet(self, timeout: float = 0.2) -> bytes:
+        """Read until a complete VESC packet is received or timeout."""
+        buf = b""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            avail = self.ser.in_waiting
+            if avail:
+                buf += self.ser.read(avail)
+                # Check for complete short packet (0x02)
+                if len(buf) >= 5 and buf[0] == 0x02:
+                    expected = buf[1] + 5
+                    if len(buf) >= expected:
+                        return buf[:expected]
+                # Check for complete long packet (0x03)
+                if len(buf) >= 6 and buf[0] == 0x03:
+                    plen = struct.unpack(">H", buf[1:3])[0]
+                    expected = plen + 6
+                    if len(buf) >= expected:
+                        return buf[:expected]
+            else:
+                time.sleep(0.001)
+        return buf
+
+    def _transact(self, payload: bytes, timeout: float = 0.2) -> bytes | None:
         """Send command, read and parse response. Returns payload or None."""
         self.ser.reset_input_buffer()
         self.ser.write(_build_packet(payload))
-        raw = self.ser.read(256)
+        raw = self._read_packet(timeout)
         return _parse_response(raw)
 
     def _send(self, payload: bytes) -> None:
@@ -159,13 +180,16 @@ class VescConn:
         self.ser.write(_build_packet(payload))
 
     def get_values(self, can_id: int | None = None) -> dict | None:
-        """Read telemetry. can_id=None for master, 1 for slave."""
+        """Read telemetry. can_id=None for master, integer for CAN-forwarded."""
         if can_id is not None:
             cmd = bytes([COMM_FORWARD_CAN, can_id, COMM_GET_VALUES])
+            # CAN forwarding adds round-trip latency
+            timeout = 0.5
         else:
             cmd = bytes([COMM_GET_VALUES])
+            timeout = 0.2
 
-        resp = self._transact(cmd)
+        resp = self._transact(cmd, timeout)
         if resp is None or len(resp) < 54 or resp[0] != COMM_GET_VALUES:
             return None
 
@@ -175,9 +199,19 @@ class VescConn:
             "erpm": struct.unpack(">i", d[22:26])[0],
             "voltage": struct.unpack(">h", d[26:28])[0] / 10.0,
             "current_motor": struct.unpack(">i", d[4:8])[0] / 100.0,
+            "current_input": struct.unpack(">i", d[8:12])[0] / 100.0,
             "temp_fet": struct.unpack(">h", d[0:2])[0] / 10.0,
             "fault": d[52],
         }
+
+    def scan_can(self, max_id: int = 3) -> list[int]:
+        """Probe CAN IDs 0..max_id and return those that respond."""
+        found = []
+        for cid in range(max_id + 1):
+            vals = self.get_values(can_id=cid)
+            if vals is not None:
+                found.append(cid)
+        return found
 
     def set_current(self, amps: float, can_id: int | None = None) -> None:
         """Command motor current. Positive = forward, negative = reverse."""
@@ -205,6 +239,7 @@ def main() -> None:
     parser.add_argument("--max-displacement", type=int, default=500,
                         help="Safety cutoff: max tach counts from home before disabling (~12 revs at 42 counts/rev)")
     parser.add_argument("--rate", type=float, default=50.0, help="Control loop target Hz")
+    parser.add_argument("--slave-can-id", type=int, default=19, help="CAN ID of slave motor (default: 19)")
     parser.add_argument("--single", action="store_true", help="Master motor only, skip slave")
     parser.add_argument("--invert", action="store_true",
                         help="Invert current direction (use if motor runs away instead of holding)")
@@ -231,10 +266,10 @@ def main() -> None:
 
     sign = -1.0 if args.invert else 1.0
 
-    # Which motors to control: None = master (direct USB), 1 = slave (CAN)
+    # Which motors to control: None = master (direct USB), 19 = slave (CAN)
     motor_ids: list[int | None] = [None]
     if not args.single:
-        motor_ids.append(1)
+        motor_ids.append(args.slave_can_id)
 
     # Read initial positions
     homes: dict[int | None, int] = {}

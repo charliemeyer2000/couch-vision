@@ -62,6 +62,17 @@ The iOS app does NOT publish directly to ROS2. Data flows through **three layers
 
 **Architecture decision:** Kept sensor managers as standalone classes rather than using inheritance. They share patterns but the complexity of a base class wasn't worth it for 3 sensors.
 
+## VESC / Motor Hardware
+
+- **ESC**: Flipsky Dual FSESC 6.7 (two controllers, one board)
+- **PSU**: 25A, 24V power supply
+- **Motor config**: `vesc_mcconf_24v.xml` (FOC, Hall sensors, 14 poles / 7 pole pairs, gear ratio 3, 83mm wheel)
+- **USB**: Master controller only — shows up as STM32 VCP (`vid=0x0483 pid=0x5740`)
+- **Slave CAN ID: 19** — must use `COMM_FORWARD_CAN` (cmd 34) to reach second motor
+- **VESC speed PID is poorly tuned** — oscillates between -100%/+100% duty when using `COMM_SET_RPM`. Use `COMM_SET_CURRENT` with a host-side PID instead, or `COMM_SET_DUTY` for open-loop testing.
+- **VESC Tool must be closed** before any serial access from scripts (exclusive port)
+- Hold test: `uv run --with pyserial python hold_test.py`
+
 ## Common Learnings / Gotchas
 
 ### iOS Sensor Access
