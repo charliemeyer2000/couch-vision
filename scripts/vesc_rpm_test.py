@@ -1,14 +1,24 @@
-import struct, time, serial
+import argparse
+import struct
+import time
+
+import serial
 from serial.tools.list_ports import comports
 
-COMM_SET_RPM = 8
 COMM_GET_VALUES = 4
+COMM_SET_RPM = 8
 COMM_FORWARD_CAN = 34
-SLAVE_CAN = 19
-POLE_PAIRS = 7
-TARGET_RPM = 200
-TARGET_ERPM = TARGET_RPM * POLE_PAIRS  # 1400
-DURATION = 5.0
+
+FAULT_NAMES = {
+    0: "NONE",
+    1: "OVER_VOLTAGE",
+    2: "UNDER_VOLTAGE",
+    3: "DRV",
+    4: "ABS_OVER_CURRENT",
+    5: "OVER_TEMP_FET",
+    6: "OVER_TEMP_MOTOR",
+}
+
 
 def crc16(data):
     crc = 0
@@ -19,90 +29,142 @@ def crc16(data):
             crc &= 0xFFFF
     return crc
 
+
 def pkt(payload):
-    c = crc16(payload)
-    return bytes([0x02, len(payload)]) + payload + c.to_bytes(2, "big") + bytes([0x03])
+    crc = crc16(payload)
+    return bytes([0x02, len(payload)]) + payload + crc.to_bytes(2, "big") + bytes([0x03])
+
 
 def parse(buf):
-    if len(buf) < 5 or buf[0] != 0x02: return None
+    if len(buf) < 5 or buf[0] != 0x02:
+        return None
     length = buf[1]
-    if len(buf) < length + 5: return None
-    p = buf[2:2+length]
-    cr = struct.unpack(">H", buf[2+length:4+length])[0]
-    return p if crc16(p) == cr else None
+    if len(buf) < length + 5:
+        return None
+    payload = buf[2 : 2 + length]
+    crc = struct.unpack(">H", buf[2 + length : 4 + length])[0]
+    return payload if crc16(payload) == crc else None
 
-def read_pkt(s, timeout=0.3):
+
+def read_pkt(serial_port, timeout=0.08):
     buf = b""
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        avail = s.in_waiting
-        if avail:
-            buf += s.read(avail)
+        available = serial_port.in_waiting
+        if available:
+            buf += serial_port.read(available)
             if len(buf) >= 5 and buf[0] == 0x02 and len(buf) >= buf[1] + 5:
                 return buf
         else:
             time.sleep(0.002)
     return buf
 
-port = None
-for p in comports():
-    if p.vid == 0x0483 and p.pid == 0x5740:
-        port = p.device; break
-assert port, "No VESC found"
-s = serial.Serial(port, 115200, timeout=0.05)
 
-def set_rpm(erpm, can_id=None):
-    erpm_bytes = struct.pack(">i", erpm)
-    if can_id is not None:
-        s.write(pkt(bytes([COMM_FORWARD_CAN, can_id, COMM_SET_RPM]) + erpm_bytes))
-    else:
-        s.write(pkt(bytes([COMM_SET_RPM]) + erpm_bytes))
+def find_vesc_port():
+    for port in comports():
+        if port.vid == 0x0483 and port.pid == 0x5740:
+            return port.device
+    raise RuntimeError("No VESC found")
 
-def get_values(can_id=None):
-    s.reset_input_buffer()
+
+def set_rpm(serial_port, erpm, can_id=None):
+    payload = struct.pack(">i", erpm)
     if can_id is not None:
-        s.write(pkt(bytes([COMM_FORWARD_CAN, can_id, COMM_GET_VALUES])))
+        serial_port.write(pkt(bytes([COMM_FORWARD_CAN, can_id, COMM_SET_RPM]) + payload))
+        return
+    serial_port.write(pkt(bytes([COMM_SET_RPM]) + payload))
+
+
+def get_values(serial_port, can_id=None):
+    serial_port.reset_input_buffer()
+    if can_id is not None:
+        serial_port.write(pkt(bytes([COMM_FORWARD_CAN, can_id, COMM_GET_VALUES])))
     else:
-        s.write(pkt(bytes([COMM_GET_VALUES])))
-    raw = read_pkt(s, 0.5)
-    p = parse(raw)
-    if p and len(p) >= 54 and p[0] == 4:
-        d = p[1:]
+        serial_port.write(pkt(bytes([COMM_GET_VALUES])))
+    payload = parse(read_pkt(serial_port))
+    if payload and len(payload) >= 54 and payload[0] == COMM_GET_VALUES:
+        data = payload[1:]
+        fault_code = data[52]
         return {
-            "erpm": struct.unpack(">i", d[22:26])[0],
-            "duty": struct.unpack(">h", d[20:22])[0] / 1000.0,
-            "i_motor": struct.unpack(">i", d[4:8])[0] / 100.0,
-            "i_input": struct.unpack(">i", d[8:12])[0] / 100.0,
-            "v_in": struct.unpack(">h", d[26:28])[0] / 10.0,
+            "erpm": struct.unpack(">i", data[22:26])[0],
+            "duty": struct.unpack(">h", data[20:22])[0] / 1000.0,
+            "i_motor": struct.unpack(">i", data[4:8])[0] / 100.0,
+            "i_input": struct.unpack(">i", data[8:12])[0] / 100.0,
+            "v_in": struct.unpack(">h", data[26:28])[0] / 10.0,
+            "fault_code": fault_code,
+            "fault_name": FAULT_NAMES.get(fault_code, "UNKNOWN"),
         }
     return None
 
-print(f"Port: {port}")
-print(f"Target: {TARGET_RPM} RPM = {TARGET_ERPM} ERPM for {DURATION}s\n")
 
-print(f"{'t':>4s}  {'':>1s} {'ERPM':>6s} {'duty':>6s} {'I_mot':>6s} {'I_in':>6s} {'V':>5s}")
-print("-" * 50)
+def controller_targets(mode, slave_can):
+    if mode == "master":
+        return [("M", None)]
+    if mode == "slave":
+        return [("S", slave_can)]
+    return [("M", None), ("S", slave_can)]
 
-start = time.monotonic()
-while time.monotonic() - start < DURATION:
-    set_rpm(TARGET_ERPM)               # master
-    set_rpm(TARGET_ERPM, SLAVE_CAN)    # slave
 
-    # Read master telemetry
-    vm = get_values()
-    vs = get_values(SLAVE_CAN)
+def parse_args():
+    parser = argparse.ArgumentParser(description="Send RPM commands to one or both VESC controllers.")
+    parser.add_argument("--target-rpm", type=int, default=400)
+    parser.add_argument("--duration", type=float, default=5.0)
+    parser.add_argument("--pole-pairs", type=int, default=7)
+    parser.add_argument("--slave-can", type=int, default=19)
+    parser.add_argument("--baud", type=int, default=115200)
+    parser.add_argument(
+        "--controllers",
+        choices=("master", "slave", "both"),
+        default="both",
+        help="Use 'master' or 'slave' to verify whether the supply only trips when both sides are active.",
+    )
+    parser.add_argument("--sample-period", type=float, default=0.3)
+    return parser.parse_args()
 
-    t = time.monotonic() - start
-    if vm:
-        print(f"{t:4.1f}  M {vm['erpm']:+6d} {vm['duty']:+6.3f} {vm['i_motor']:+6.2f}A {vm['i_input']:+6.2f}A {vm['v_in']:5.1f}V")
-    if vs:
-        print(f"      S {vs['erpm']:+6d} {vs['duty']:+6.3f} {vs['i_motor']:+6.2f}A {vs['i_input']:+6.2f}A {vs['v_in']:5.1f}V")
 
-    time.sleep(0.3)
+def main():
+    args = parse_args()
+    port = find_vesc_port()
+    serial_port = serial.Serial(port, args.baud, timeout=0.02)
+    targets = controller_targets(args.controllers, args.slave_can)
+    target_erpm = args.target_rpm * args.pole_pairs
 
-# Stop
-zero = struct.pack(">i", 0)
-s.write(pkt(bytes([COMM_SET_RPM]) + zero))
-s.write(pkt(bytes([COMM_FORWARD_CAN, SLAVE_CAN, COMM_SET_RPM]) + zero))
-print("\nStopped.")
-s.close()
+    print(f"Port: {port}")
+    print(
+        f"Target: {args.target_rpm} RPM = {target_erpm} ERPM for {args.duration}s "
+        f"on {args.controllers}\n"
+    )
+    print(f"{'t':>4s}  {'':>1s} {'ERPM':>6s} {'duty':>6s} {'I_mot':>7s} {'I_in':>7s} {'V':>5s}  fault")
+    print("-" * 72)
+
+    try:
+        start = time.monotonic()
+        while time.monotonic() - start < args.duration:
+            for _, can_id in targets:
+                set_rpm(serial_port, target_erpm, can_id)
+
+            t = time.monotonic() - start
+            for label, can_id in targets:
+                values = get_values(serial_port, can_id)
+                if values is None:
+                    print(f"{t:4.1f}  {label} {'--':>6s} {'--':>6s} {'--':>7s} {'--':>7s} {'--':>5s}  NO_DATA")
+                    continue
+                print(
+                    f"{t:4.1f}  {label} "
+                    f"{values['erpm']:+6d} "
+                    f"{values['duty']:+6.3f} "
+                    f"{values['i_motor']:+7.2f}A "
+                    f"{values['i_input']:+7.2f}A "
+                    f"{values['v_in']:5.1f}V  "
+                    f"{values['fault_name']}"
+                )
+            time.sleep(args.sample_period)
+    finally:
+        for _, can_id in targets:
+            set_rpm(serial_port, 0, can_id)
+        serial_port.close()
+        print("\nStopped.")
+
+
+if __name__ == "__main__":
+    main()
