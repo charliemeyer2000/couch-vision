@@ -1,10 +1,14 @@
 """VESC motor driver — Flipsky Dual FSESC 6.7 over USB serial.
 
-Dual ESC: master direct over USB, slave (CAN ID 19) via CAN forwarding.
-Single motor for now; angular.z from /cmd_vel is ignored until second motor is wired.
+Dual ESC: master (right wheel, inverted) direct over USB,
+slave (left wheel, CAN ID 19) via CAN forwarding.
+
+Uses COMM_SET_RPM for both motors. Differential drive from /cmd_vel
+maps to left/right wheel ERPM targets with proper inversion.
 
 Protocol reference: SELF_DRIVING_STACK.md § "VESC Communication Protocol"
-Working reference: ~/bldc/spin_test.py on the Jetson (pyserial only, no pyvesc).
+Known issue: VESC firmware comm_usb.c has a sticky was_timeout flag that
+can kill USB comms. Keep serial timeouts ≤100ms and read promptly.
 """
 
 from __future__ import annotations
@@ -39,12 +43,18 @@ except ImportError:
 _VESC_USB_VID = 0x0483
 _VESC_USB_PID = 0x5740
 
+# Hardware defaults (Flipsky Dual FSESC 6.7)
+DEFAULT_SLAVE_CAN_ID = 19
+DEFAULT_POLE_PAIRS = 7
+DEFAULT_WHEEL_RADIUS = 0.0415  # 83mm diameter from vesc_mcconf_24v.xml
+DEFAULT_WHEEL_SEPARATION = 0.5
+DEFAULT_GEAR_RATIO = 3
+
 
 def _find_vesc_port() -> str | None:
     """Auto-detect VESC serial port by USB vendor/product ID, then by probe."""
     if serial is None:
         return None
-    # Fast path: match STM32 VCP by USB IDs
     try:
         from serial.tools.list_ports import comports
 
@@ -53,16 +63,16 @@ def _find_vesc_port() -> str | None:
                 return port.device
     except Exception:
         pass
-    # Fallback: probe each /dev/ttyACM* with COMM_GET_VALUES
-    for path in sorted(glob.glob("/dev/ttyACM*")):
-        try:
-            with serial.Serial(path, 115200, timeout=0.1) as s:
-                s.write(_build_packet(bytes([4])))  # COMM_GET_VALUES
-                resp = s.read(256)
-                if resp and _parse_response(resp) is not None:
-                    return path
-        except (serial.SerialException, OSError):
-            continue
+    for pattern in ["/dev/ttyACM*", "/dev/cu.usbmodem*"]:
+        for path in sorted(glob.glob(pattern)):
+            try:
+                with serial.Serial(path, 115200, timeout=0.1) as s:
+                    s.write(_build_packet(bytes([COMM_GET_VALUES])))
+                    resp = s.read(256)
+                    if resp and _parse_response(resp) is not None:
+                        return path
+            except (serial.SerialException, OSError):
+                continue
     return None
 
 
@@ -70,8 +80,8 @@ def _find_vesc_port() -> str | None:
 
 COMM_GET_VALUES = 4
 COMM_SET_CURRENT = 6
-COMM_SET_CURRENT_BRAKE = 7
 COMM_SET_RPM = 8
+COMM_FORWARD_CAN = 34
 
 FAULT_NAMES = {
     0: "NONE",
@@ -88,7 +98,6 @@ FAULT_NAMES = {
 
 
 def _crc16(data: bytes) -> int:
-    """CRC-CCITT (poly 0x1021, init 0x0000)."""
     crc = 0x0000
     for b in data:
         crc ^= b << 8
@@ -99,7 +108,6 @@ def _crc16(data: bytes) -> int:
 
 
 def _build_packet(payload: bytes) -> bytes:
-    """Short packet: [0x02][len:1][payload][crc16:2][0x03]."""
     crc = _crc16(payload)
     return (
         bytes([0x02, len(payload)]) + payload + crc.to_bytes(2, "big") + bytes([0x03])
@@ -107,10 +115,8 @@ def _build_packet(payload: bytes) -> bytes:
 
 
 def _parse_response(buf: bytes) -> bytes | None:
-    """Extract payload from VESC response, or None on invalid/corrupt frame."""
     if len(buf) < 5:
         return None
-    # Short packet (0x02)
     if buf[0] == 0x02:
         length = buf[1]
         if len(buf) < length + 5:
@@ -118,7 +124,6 @@ def _parse_response(buf: bytes) -> bytes | None:
         payload = buf[2 : 2 + length]
         crc_recv = struct.unpack(">H", buf[2 + length : 4 + length])[0]
         return payload if _crc16(payload) == crc_recv else None
-    # Long packet (0x03)
     if buf[0] == 0x03:
         length = struct.unpack(">H", buf[1:3])[0]
         if len(buf) < length + 6:
@@ -127,23 +132,6 @@ def _parse_response(buf: bytes) -> bytes | None:
         crc_recv = struct.unpack(">H", buf[3 + length : 5 + length])[0]
         return payload if _crc16(payload) == crc_recv else None
     return None
-
-
-# ── Command builders ─────────────────────────────────────────────────────────
-
-
-def _cmd_get_values() -> bytes:
-    return _build_packet(bytes([COMM_GET_VALUES]))
-
-
-def _cmd_set_rpm(erpm: int) -> bytes:
-    return _build_packet(bytes([COMM_SET_RPM]) + struct.pack(">i", erpm))
-
-
-def _cmd_set_current(amps: float) -> bytes:
-    return _build_packet(
-        bytes([COMM_SET_CURRENT]) + struct.pack(">i", int(amps * 1000))
-    )
 
 
 # ── Telemetry ────────────────────────────────────────────────────────────────
@@ -164,7 +152,6 @@ class VescTelemetry:
 
 
 def _parse_get_values(payload: bytes) -> VescTelemetry | None:
-    """Parse COMM_GET_VALUES response. Layout from SELF_DRIVING_STACK.md."""
     if len(payload) < 54 or payload[0] != COMM_GET_VALUES:
         return None
     d = payload[1:]
@@ -190,15 +177,23 @@ class VescConfig:
     mode: str = "manual"
     target_rpm: int = 0
     max_rpm: int = 500
-    wheel_radius: float = 0.1
-    wheel_separation: float = 0.5
-    pole_pairs: int = 7
+    wheel_radius: float = DEFAULT_WHEEL_RADIUS
+    wheel_separation: float = DEFAULT_WHEEL_SEPARATION
+    pole_pairs: int = DEFAULT_POLE_PAIRS
+    gear_ratio: int = DEFAULT_GEAR_RATIO
+    slave_can_id: int = DEFAULT_SLAVE_CAN_ID
+    invert_master: bool = True
+    invert_slave: bool = False
 
 
 def _twist_to_erpm(
     linear_x: float, angular_z: float, cfg: VescConfig
 ) -> tuple[int, int]:
-    """Differential drive: Twist → (left_erpm, right_erpm)."""
+    """Differential drive: Twist → (left_erpm, right_erpm).
+
+    Returns ERPM values with inversion already applied for each motor.
+    Master = right wheel, slave = left wheel.
+    """
     v_left = linear_x - (angular_z * cfg.wheel_separation / 2.0)
     v_right = linear_x + (angular_z * cfg.wheel_separation / 2.0)
     max_erpm = cfg.max_rpm * cfg.pole_pairs
@@ -207,7 +202,14 @@ def _twist_to_erpm(
         mech_rpm = v / (2.0 * math.pi * cfg.wheel_radius) * 60.0
         return max(-max_erpm, min(max_erpm, int(mech_rpm * cfg.pole_pairs)))
 
-    return to_erpm(v_left), to_erpm(v_right)
+    left_erpm = to_erpm(v_left)
+    right_erpm = to_erpm(v_right)
+
+    # Apply per-motor inversion: master=right, slave=left
+    master_erpm = -right_erpm if cfg.invert_master else right_erpm
+    slave_erpm = -left_erpm if cfg.invert_slave else left_erpm
+
+    return master_erpm, slave_erpm
 
 
 def _tachometer_to_distance(tach_delta: int, cfg: VescConfig) -> float:
@@ -238,14 +240,15 @@ class VescDriver(Node):
         self._e_stopped: bool = True
         self._last_cmd_vel: Twist | None = None
         self._last_cmd_time: float = 0.0
-        self._last_tachometer: int | None = None
+
+        # Per-motor state: None = master (USB), can_id = slave (CAN)
+        self._last_tachometer: dict[int | None, int | None] = {None: None}
         self._last_odom_time: float | None = None
-        self._latest_telemetry: VescTelemetry | None = None
+        self._latest_telemetry: dict[int | None, VescTelemetry | None] = {None: None}
         self._error_count: int = 0
         self._reconnect_time: float = 0.0
-        self._angular_warned: bool = False
-        self._last_erpm_sent: int = 0
-        self._commanded_erpm: int = 0
+        self._commanded_erpm: dict[int | None, int] = {None: 0}
+        self._telemetry_tick: int = 0
 
         qos = QoSProfile(depth=5)
         self.create_subscription(Twist, "/cmd_vel", self._on_cmd_vel, qos)
@@ -260,6 +263,11 @@ class VescDriver(Node):
 
         state = "connected" if self._serial else "scanning (will retry every 5s)"
         self.get_logger().info(f"VESC driver started — port={port} {state}")
+
+    @property
+    def _motor_ids(self) -> list[int | None]:
+        """Motor IDs to control: None=master, can_id=slave."""
+        return [None, self._config.slave_can_id]
 
     # ── Serial I/O ────────────────────────────────────────────────────────
 
@@ -285,8 +293,11 @@ class VescDriver(Node):
         self._reconnect_time = now
         self._connect()
 
-    def _send(self, packet: bytes) -> None:
-        """Send a command packet. Lock must NOT be held by caller."""
+    def _send(self, payload: bytes, can_id: int | None = None) -> None:
+        """Fire-and-forget command. can_id=None for master, int for CAN slave."""
+        if can_id is not None:
+            payload = bytes([COMM_FORWARD_CAN, can_id]) + payload
+        packet = _build_packet(payload)
         with self._serial_lock:
             if self._serial is None:
                 return
@@ -295,21 +306,55 @@ class VescDriver(Node):
             except (serial.SerialException, OSError):
                 self._serial = None
 
-    def _transact(self, packet: bytes, size: int = 256) -> bytes:
-        """Send a command and read the response atomically.
-
-        Holds the serial lock for the entire exchange to prevent
-        interleaved writes from the command loop.
-        """
-        with self._serial_lock:
+    def _read_packet(self, timeout: float = 0.1) -> bytes:
+        """Read a complete VESC packet, respecting the USB timeout budget."""
+        buf = b""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
             if self._serial is None:
                 return b""
+            avail = self._serial.in_waiting
+            if avail:
+                buf += self._serial.read(avail)
+                if len(buf) >= 5 and buf[0] == 0x02:
+                    expected = buf[1] + 5
+                    if len(buf) >= expected:
+                        return buf[:expected]
+                if len(buf) >= 6 and buf[0] == 0x03:
+                    plen = struct.unpack(">H", buf[1:3])[0]
+                    expected = plen + 6
+                    if len(buf) >= expected:
+                        return buf[:expected]
+            else:
+                time.sleep(0.001)
+        return buf
+
+    def _transact(self, payload: bytes, can_id: int | None = None) -> VescTelemetry | None:
+        """Send COMM_GET_VALUES and parse the response. Thread-safe."""
+        if can_id is not None:
+            full_payload = bytes([COMM_FORWARD_CAN, can_id]) + payload
+            timeout = 0.08  # CAN adds latency
+        else:
+            full_payload = payload
+            timeout = 0.05
+
+        with self._serial_lock:
+            if self._serial is None:
+                return None
             try:
-                self._serial.write(packet)
-                return self._serial.read(size)
+                self._serial.reset_input_buffer()
+                self._serial.write(_build_packet(full_payload))
             except (serial.SerialException, OSError):
                 self._serial = None
-                return b""
+                return None
+
+        raw = self._read_packet(timeout)
+        if not raw:
+            return None
+        resp = _parse_response(raw)
+        if resp is None:
+            return None
+        return _parse_get_values(resp)
 
     # ── Callbacks ─────────────────────────────────────────────────────────
 
@@ -322,7 +367,11 @@ class VescDriver(Node):
             self._e_stopped = msg.data
             self.get_logger().info(f"E-STOP {'ENGAGED' if msg.data else 'RELEASED'}")
             if msg.data:
-                self._send(_cmd_set_current(0.0))
+                for mid in self._motor_ids:
+                    self._send(
+                        bytes([COMM_SET_CURRENT]) + struct.pack(">i", 0),
+                        can_id=mid,
+                    )
 
     def _on_config(self, msg: String) -> None:
         try:
@@ -341,120 +390,182 @@ class VescDriver(Node):
             self._config.wheel_separation = float(data["wheel_separation"])
         if "pole_pairs" in data:
             self._config.pole_pairs = int(data["pole_pairs"])
+        if "invert_master" in data:
+            self._config.invert_master = bool(data["invert_master"])
+        if "invert_slave" in data:
+            self._config.invert_slave = bool(data["invert_slave"])
 
-    # ── Command loop (50ms) ───────────────────────────────────────────────
+    # ── Command loop (50ms / 20Hz) ───────────────────────────────────────
 
-    def _compute_target_erpm(self) -> int:
-        """Compute what ERPM should be sent, independent of hardware state."""
+    def _compute_target_erpm(self) -> tuple[int, int]:
+        """Compute (master_erpm, slave_erpm) with inversion applied."""
         if self._e_stopped:
-            return 0
+            return 0, 0
         if self._config.mode == "manual":
             max_erpm = self._config.max_rpm * self._config.pole_pairs
             target = self._config.target_rpm * self._config.pole_pairs
-            return max(-max_erpm, min(max_erpm, target))
+            clamped = max(-max_erpm, min(max_erpm, target))
+            # Manual mode: same RPM to both, apply inversion
+            m = -clamped if self._config.invert_master else clamped
+            s = -clamped if self._config.invert_slave else clamped
+            return m, s
         if self._config.mode == "nav2":
             if (
                 self._last_cmd_vel is None
                 or time.monotonic() - self._last_cmd_time > 0.5
             ):
-                return 0
-            if abs(self._last_cmd_vel.angular.z) > 0.01 and not self._angular_warned:
-                self.get_logger().warning("angular.z ignored — single motor")
-                self._angular_warned = True
-            left_erpm, _ = _twist_to_erpm(
-                self._last_cmd_vel.linear.x, 0.0, self._config
+                return 0, 0
+            return _twist_to_erpm(
+                self._last_cmd_vel.linear.x,
+                self._last_cmd_vel.angular.z,
+                self._config,
             )
-            return left_erpm
-        return 0
+        return 0, 0
 
     def _command_loop(self) -> None:
-        # Always compute target (enables dry-run visualization without hardware)
-        erpm = self._compute_target_erpm()
-        self._commanded_erpm = erpm
+        master_erpm, slave_erpm = self._compute_target_erpm()
+        self._commanded_erpm[None] = master_erpm
+        self._commanded_erpm[self._config.slave_can_id] = slave_erpm
 
         if self._serial is None:
             self._try_reconnect()
             return
 
         if self._e_stopped:
-            self._send(_cmd_set_current(0.0))
-            self._last_erpm_sent = 0
+            zero_current = bytes([COMM_SET_CURRENT]) + struct.pack(">i", 0)
+            self._send(zero_current)
+            self._send(zero_current, can_id=self._config.slave_can_id)
             return
 
-        self._send(_cmd_set_rpm(erpm))
-        self._last_erpm_sent = erpm
+        rpm_payload_master = bytes([COMM_SET_RPM]) + struct.pack(">i", master_erpm)
+        rpm_payload_slave = bytes([COMM_SET_RPM]) + struct.pack(">i", slave_erpm)
+        self._send(rpm_payload_master)
+        self._send(rpm_payload_slave, can_id=self._config.slave_can_id)
 
-    # ── Telemetry loop (100ms) ────────────────────────────────────────────
+    # ── Telemetry loop (100ms / 10Hz) ────────────────────────────────────
 
     def _telemetry_loop(self) -> None:
         if self._serial is None:
             return
 
-        # Atomic send+read prevents command loop from interleaving writes
-        raw = self._transact(_cmd_get_values())
-        if not raw:
-            return
+        self._telemetry_tick += 1
 
-        payload = _parse_response(raw)
-        if payload is None:
+        # Master: every tick (10Hz)
+        master_telem = self._transact(bytes([COMM_GET_VALUES]))
+        if master_telem is not None:
+            self._latest_telemetry[None] = master_telem
+        else:
             self._error_count += 1
-            return
 
-        telemetry = _parse_get_values(payload)
-        if telemetry is None:
-            self._error_count += 1
-            return
+        # Slave: every 2nd tick (5Hz) to reduce USB bus contention
+        slave_id = self._config.slave_can_id
+        if self._telemetry_tick % 2 == 0:
+            slave_telem = self._transact(bytes([COMM_GET_VALUES]), can_id=slave_id)
+            if slave_telem is not None:
+                self._latest_telemetry[slave_id] = slave_telem
 
-        self._latest_telemetry = telemetry
-        self._publish_odom(telemetry)
+        self._publish_odom()
 
-        # Re-send motor command to avoid VESC 1000ms timeout
-        if not self._e_stopped and self._last_erpm_sent != 0:
-            self._send(_cmd_set_rpm(self._last_erpm_sent))
+        # Re-send motor commands to avoid VESC 1000ms timeout
+        if not self._e_stopped:
+            m_erpm = self._commanded_erpm.get(None, 0)
+            s_erpm = self._commanded_erpm.get(slave_id, 0)
+            if m_erpm != 0:
+                self._send(bytes([COMM_SET_RPM]) + struct.pack(">i", m_erpm))
+            if s_erpm != 0:
+                self._send(
+                    bytes([COMM_SET_RPM]) + struct.pack(">i", s_erpm),
+                    can_id=slave_id,
+                )
 
-    def _publish_odom(self, telemetry: VescTelemetry) -> None:
+    def _publish_odom(self) -> None:
         now = time.time()
-        tach = telemetry.tachometer
+        m_telem = self._latest_telemetry.get(None)
+        s_telem = self._latest_telemetry.get(self._config.slave_can_id)
 
-        if self._last_tachometer is not None and self._last_odom_time is not None:
+        if m_telem is None:
+            return
+
+        m_tach = m_telem.tachometer
+        # Invert tachometer reading to match physical direction
+        if self._config.invert_master:
+            m_tach = -m_tach
+
+        s_tach = None
+        if s_telem is not None:
+            s_tach = s_telem.tachometer
+            if self._config.invert_slave:
+                s_tach = -s_tach
+
+        last_m = self._last_tachometer.get(None)
+        if last_m is not None and self._last_odom_time is not None:
             dt = now - self._last_odom_time
             if dt > 0:
-                distance = _tachometer_to_distance(
-                    tach - self._last_tachometer, self._config
-                )
+                m_dist = _tachometer_to_distance(m_tach - last_m, self._config)
+
+                if s_tach is not None:
+                    last_s = self._last_tachometer.get(self._config.slave_can_id)
+                    if last_s is not None:
+                        s_dist = _tachometer_to_distance(s_tach - last_s, self._config)
+                        linear_v = (m_dist + s_dist) / (2.0 * dt)
+                        angular_v = (m_dist - s_dist) / (self._config.wheel_separation * dt)
+                    else:
+                        linear_v = m_dist / dt
+                        angular_v = 0.0
+                else:
+                    linear_v = m_dist / dt
+                    angular_v = 0.0
+
                 msg = Odometry()
                 msg.header.stamp = _stamp_from_epoch(now)
                 msg.header.frame_id = "odom"
                 msg.child_frame_id = "base_link"
-                msg.twist.twist.linear.x = distance / dt
-                msg.twist.covariance[0] = 0.01  # linear.x
-                msg.twist.covariance[35] = 99.0  # angular.z (no steering data yet)
+                msg.twist.twist.linear.x = linear_v
+                msg.twist.twist.angular.z = angular_v
+                msg.twist.covariance[0] = 0.01
+                msg.twist.covariance[35] = 0.05 if s_tach is not None else 99.0
                 self._odom_pub.publish(msg)
 
-        self._last_tachometer = tach
+        self._last_tachometer[None] = m_tach
+        if s_tach is not None:
+            self._last_tachometer[self._config.slave_can_id] = s_tach
         self._last_odom_time = now
 
     # ── Status (1Hz) ──────────────────────────────────────────────────────
 
     def _publish_status(self) -> None:
-        t = self._latest_telemetry
         zero = VescTelemetry()
-        v = t or zero
-        status = {
+        m = self._latest_telemetry.get(None) or zero
+        s = self._latest_telemetry.get(self._config.slave_can_id) or zero
+        pp = self._config.pole_pairs
+        m_cmd = self._commanded_erpm.get(None, 0)
+        s_cmd = self._commanded_erpm.get(self._config.slave_can_id, 0)
+
+        def _motor_dict(t: VescTelemetry, cmd: int) -> dict:
+            return {
+                "rpm": t.erpm // pp,
+                "erpm": t.erpm,
+                "temp_fet": t.temp_fet,
+                "temp_motor": t.temp_motor,
+                "current_motor": t.current_motor,
+                "current_input": t.current_input,
+                "voltage_input": t.voltage_input,
+                "duty_cycle": t.duty_cycle,
+                "tachometer": t.tachometer,
+                "fault_code": t.fault_code,
+                "fault_name": FAULT_NAMES.get(t.fault_code, "UNKNOWN"),
+                "commanded_erpm": cmd,
+                "commanded_rpm": cmd // pp,
+            }
+
+        # Top-level fields use master values for Foxglove panel compatibility
+        status: dict = {
             "connected": self._serial is not None,
             "mode": self._config.mode,
             "e_stopped": self._e_stopped,
-            "rpm": v.erpm // self._config.pole_pairs,
-            "erpm": v.erpm,
-            "temp_fet": v.temp_fet,
-            "temp_motor": v.temp_motor,
-            "current_motor": v.current_motor,
-            "current_input": v.current_input,
-            "voltage_input": v.voltage_input,
-            "duty_cycle": v.duty_cycle,
-            "tachometer": v.tachometer,
-            "fault_code": v.fault_code,
-            "fault_name": FAULT_NAMES.get(v.fault_code, "UNKNOWN"),
+            **_motor_dict(m, m_cmd),
+            "master": _motor_dict(m, m_cmd),
+            "slave": _motor_dict(s, s_cmd),
             "target_rpm": self._config.target_rpm,
             "max_rpm": self._config.max_rpm,
             "cmd_vel_age_ms": (
@@ -462,8 +573,8 @@ class VescDriver(Node):
                 if self._last_cmd_vel is not None
                 else None
             ),
-            "commanded_erpm": self._commanded_erpm,
-            "commanded_rpm": self._commanded_erpm // self._config.pole_pairs,
+            "invert_master": self._config.invert_master,
+            "invert_slave": self._config.invert_slave,
             "errors": self._error_count,
         }
         msg = String()
@@ -473,7 +584,9 @@ class VescDriver(Node):
     # ── Lifecycle ─────────────────────────────────────────────────────────
 
     def shutdown(self) -> None:
-        self._send(_cmd_set_current(0.0))
+        zero_current = bytes([COMM_SET_CURRENT]) + struct.pack(">i", 0)
+        self._send(zero_current)
+        self._send(zero_current, can_id=self._config.slave_can_id)
         with self._serial_lock:
             if self._serial is not None:
                 self._serial.close()

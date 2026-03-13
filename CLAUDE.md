@@ -73,7 +73,7 @@ The iOS app does NOT publish directly to ROS2. Data flows through **three layers
 - **VESC Tool must be closed** before any serial access from scripts (exclusive port)
 - **Known USB hang bug**: VESC firmware `comm_usb.c` has a sticky `was_timeout` flag — if the host doesn't read USB data within 100ms, all subsequent writes use `TIME_IMMEDIATE` and responses are silently dropped forever. Only fix is power cycle. Keep serial read timeouts well under 100ms and read promptly after every write. CAN forwarding latency makes this worse.
 - **Firmware**: v5.02, HW 60 Flipsky variant (build target `flipsky_60_mk5`)
-- Hold test: `uv run --with pyserial python hold_test.py`
+- Scripts in `scripts/`: `vesc_hold_test.py`, `vesc_hold_test_erpm.py`, `vesc_rpm_test.py`, `vesc_wasd_rpm_control.py`
 
 ## Common Learnings / Gotchas
 
