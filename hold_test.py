@@ -143,7 +143,10 @@ class PID:
 
 class VescConn:
     def __init__(self, port: str, baud: int = 115200):
-        self.ser = serial.Serial(port, baud, timeout=0.05)
+        # timeout must be well under 100ms to avoid triggering the sticky
+        # was_timeout flag in VESC firmware comm_usb.c — but not so low that
+        # we miss data. write_timeout prevents blocking if USB endpoint stalls.
+        self.ser = serial.Serial(port, baud, timeout=0.1, write_timeout=0.1)
 
     def _read_packet(self, timeout: float = 0.2) -> bytes:
         """Read until a complete VESC packet is received or timeout."""
@@ -262,6 +265,17 @@ def main() -> None:
             print(f"ERROR: {port} is busy — close VESC Tool first.")
         else:
             print(f"ERROR: {e}")
+        sys.exit(1)
+
+    # Health check: the VESC firmware has a sticky USB timeout bug (comm_usb.c
+    # was_timeout flag) that makes it stop responding until power cycled.
+    # Detect this early rather than silently failing.
+    print("Health check...")
+    hc = vesc.get_values()
+    if hc is None:
+        print("ERROR: VESC not responding — power cycle the ESC and try again.")
+        print("       (Known STM32 USB CDC bug: comm_usb.c was_timeout flag latches)")
+        vesc.close()
         sys.exit(1)
 
     sign = -1.0 if args.invert else 1.0

@@ -273,7 +273,7 @@ class VescDriver(Node):
                 return
             port = port_found
         try:
-            self._serial = serial.Serial(port, self._baud, timeout=0.05)
+            self._serial = serial.Serial(port, self._baud, timeout=0.1, write_timeout=0.1)
             self.get_logger().info(f"Connected to VESC on {port}")
         except (serial.SerialException, OSError):
             self._serial = None
