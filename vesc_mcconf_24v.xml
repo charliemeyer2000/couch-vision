@@ -6,11 +6,11 @@
     <sensor_mode>0</sensor_mode>
     <l_current_max>46.31</l_current_max>
     <l_current_min>-46.31</l_current_min>
-    <l_in_current_max>25</l_in_current_max>
-    <l_in_current_min>-60</l_in_current_min>
+    <l_in_current_max>12</l_in_current_max>
+    <l_in_current_min>0</l_in_current_min>
     <l_abs_current_max>150</l_abs_current_max>
-    <l_min_erpm>-100000</l_min_erpm>
-    <l_max_erpm>100000</l_max_erpm>
+    <l_min_erpm>-10000</l_min_erpm>
+    <l_max_erpm>10000</l_max_erpm>
     <l_erpm_start>0.8</l_erpm_start>
     <l_max_erpm_fbrake>300</l_max_erpm_fbrake>
     <l_max_erpm_fbrake_cc>1500</l_max_erpm_fbrake_cc>
@@ -114,7 +114,7 @@
     <s_pid_kd_filter>0.2</s_pid_kd_filter>
     <s_pid_min_erpm>900</s_pid_min_erpm>
     <s_pid_allow_braking>1</s_pid_allow_braking>
-    <s_pid_ramp_erpms_s>-1</s_pid_ramp_erpms_s>
+    <s_pid_ramp_erpms_s>8000</s_pid_ramp_erpms_s>
     <p_pid_kp>0.03</p_pid_kp>
     <p_pid_ki>0</p_pid_ki>
     <p_pid_kd>0.0004</p_pid_kd>
