@@ -21,10 +21,10 @@ ROS2_SETUP := export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp; \
 UNAME_M := $(shell uname -m)
 PERC_PYTHON := $(if $(filter aarch64,$(UNAME_M)),python3.10,python3.12)
 
-.PHONY: help setup xcode bridge topics hz echo rviz bag bag-play verify \
-        perception-node full-stack test benchmark lint deploy clean \
-        build-extension install-extension lint-extension ip \
-        logs logs-bridge logs-nav2 stop
+.PHONY: help setup xcode bridge topics hz echo bag \
+        full-stack test lint clean \
+        build-extension install-extension lint-extension \
+        logs logs-bridge logs-nav2 logs-vesc stop
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # HELP
@@ -34,37 +34,39 @@ help:
 	@echo "CouchVision — iOS Sensor Streamer for ROS2"
 	@echo ""
 	@echo "MAIN COMMANDS"
-	@echo "  make full-stack BAG=<path>    Run perception + Nav2 + SLAM pipeline"
-	@echo "  make bridge                   Run iOS→ROS2 TCP bridge"
-	@echo "  make test                     Run perception tests"
+	@echo "  make full-stack               Live mode (perception + Nav2)"
+	@echo "  make full-stack VESC=1        Live mode with motor driver"
+	@echo "  make full-stack BAG=<path>    Replay a recorded bag file"
+	@echo "  make bridge                   Run iOS→ROS2 TCP bridge (no Docker)"
 	@echo ""
 	@echo "  Add HELP=1 to any command for detailed options:"
 	@echo "    make full-stack HELP=1"
 	@echo "    make bridge HELP=1"
 	@echo "    make test HELP=1"
 	@echo ""
-	@echo "SETUP"
-	@echo "  make setup                    Install dependencies (Homebrew, ROS2, uv)"
+	@echo "STACK MANAGEMENT"
+	@echo "  make logs                     Tail all container logs"
+	@echo "  make logs-bridge              Tail iOS bridge logs"
+	@echo "  make logs-nav2                Tail Nav2 + perception logs"
+	@echo "  make logs-vesc                Tail VESC motor driver logs"
+	@echo "  make stop                     Stop Docker stack"
+	@echo ""
+	@echo "DEVELOPMENT"
+	@echo "  make setup                    Install dependencies"
 	@echo "  make xcode                    Open iOS project in Xcode"
+	@echo "  make test                     Run perception tests"
+	@echo "  make lint                     Run pre-commit linters"
+	@echo "  make bag                      Record all ROS2 topics to MCAP"
 	@echo ""
 	@echo "ROS2 DEBUGGING"
 	@echo "  make topics                   List all ROS2 topics"
 	@echo "  make hz T=/topic              Show publish rate of a topic"
 	@echo "  make echo T=/topic            Print messages from a topic"
-	@echo "  make rviz                     Launch RViz2 with project config"
 	@echo ""
 	@echo "FOXGLOVE EXTENSIONS"
 	@echo "  make build-extension          Build all Foxglove panel extensions"
 	@echo "  make install-extension        Install extensions into local Foxglove"
-	@echo "  make lint-extension           Typecheck + lint + format check extensions"
-	@echo ""
-	@echo "UTILITIES"
-	@echo "  make bag                      Record all ROS2 topics to MCAP"
-	@echo "  make bag-play F=path          Play back a bag file"
-	@echo "  make verify BAG=<path>        Verify bag file contents"
-	@echo "  make deploy                   Deploy code to Jetson"
-	@echo "  make lint                     Run pre-commit linters"
-	@echo "  make clean                    Remove build artifacts"
+	@echo "  make lint-extension           Typecheck + lint + format check"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # FULL-STACK (main command)
@@ -83,24 +85,24 @@ full-stack:
 	@echo ""
 	@echo "OPTIONS"
 	@echo "  BAG=<path>              MCAP bag file path (omit for live mode)"
+	@echo "  VESC=1                  Enable VESC motor driver (requires /dev/ttyACM0)"
 	@echo "  RATE=<float>            Playback speed multiplier (default: 1.0)"
 	@echo "  PREFIX=<string>         Topic prefix for live mode (default: /iphone_charlie)"
-	@echo "  SLAM_BACKEND=<type>     SLAM algorithm (default: rtabmap)"
+	@echo "  SLAM_BACKEND=<type>     SLAM algorithm (default: none)"
 	@echo "                            none    — No SLAM, static TF only"
 	@echo "                            rtabmap — RTAB-Map visual SLAM"
 	@echo "  DEST_LAT=<float>        Destination latitude (default: 38.036830)"
 	@echo "  DEST_LON=<float>        Destination longitude (default: -78.503577)"
 	@echo "  LOOKAHEAD=<float>       Path following lookahead in meters (default: 15.0)"
-	@echo "  VESC=1                  Enable VESC motor driver (requires /dev/ttyACM0)"
 	@echo ""
 	@echo "ENVIRONMENT"
 	@echo "  GOOGLE_MAPS_API_KEY     Required for routing. Set in .env or export."
 	@echo ""
 	@echo "EXAMPLES"
+	@echo "  make full-stack VESC=1                # Live mode with motors"
 	@echo "  make full-stack BAG=bags/walk.mcap"
 	@echo "  make full-stack BAG=bags/walk.mcap RATE=2.0 SLAM_BACKEND=none"
-	@echo "  make full-stack SLAM_BACKEND=rtabmap  # Jetson live mode"
-	@echo "  make full-stack VESC=1                # Live mode with motor driver"
+	@echo "  make full-stack SLAM_BACKEND=rtabmap  # Jetson live mode with SLAM"
 else
 full-stack:
 	@for f in .env perception/.env; do [ -f "$$f" ] && set -a && . "./$$f" && set +a; done; \
@@ -154,7 +156,7 @@ stop:
 
 ifeq ($(HELP),1)
 bridge:
-	@echo "make bridge — iOS to ROS2 TCP bridge"
+	@echo "make bridge — iOS to ROS2 TCP bridge (standalone, no Docker)"
 	@echo ""
 	@echo "Receives sensor data from iPhone app over TCP and publishes to ROS2."
 	@echo "Run this on your Mac, then connect iPhone to the displayed address."
@@ -199,9 +201,6 @@ test:
 	cd perception && uv run --group dev pytest tests/ -v $(ARGS)
 endif
 
-benchmark:
-	cd perception && uv run --group dev pytest tests/test_benchmark.py -v --benchmark-enable $(ARGS)
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # SETUP & iOS
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -221,29 +220,17 @@ topics:
 
 hz:
 ifndef T
-	@echo "Usage: make hz T=/iphone/imu"
+	@echo "Usage: make hz T=/iphone_charlie/imu"
 else
 	@$(ROS2_SETUP) && ros2 topic hz $(T)
 endif
 
 echo:
 ifndef T
-	@echo "Usage: make echo T=/iphone/imu"
+	@echo "Usage: make echo T=/iphone_charlie/odom"
 else
 	@$(ROS2_SETUP) && ros2 topic echo $(T)
 endif
-
-rviz:
-	@$(ROS2_SETUP) && rviz2 -d $(PROJECT_ROOT)/rviz/couchvision.rviz
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# PERCEPTION (standalone)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-perception-node:
-	@$(ROS2_SETUP) && cd perception && \
-	([ -f .venv/pyvenv.cfg ] && grep -q "include-system-site-packages = true" .venv/pyvenv.cfg || uv venv --python $(PERC_PYTHON) --system-site-packages) && \
-	uv sync --quiet && uv run python -m couch_perception.ros_node $(ARGS)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # UTILITIES
@@ -253,38 +240,8 @@ bag:
 	@mkdir -p bags
 	@$(ROS2_SETUP) && ros2 bag record -a -o bags/$$(date +%Y-%m-%d_%H-%M-%S)
 
-bag-play:
-	@$(ROS2_SETUP) && ros2 bag play $(F)
-
-verify:
-ifndef BAG
-	@echo "Usage: make verify BAG=bags/walk.mcap"
-else
-	uv run --with mcap,numpy,matplotlib python verify_bag.py $(BAG)
-endif
-
-ifeq ($(HELP),1)
-deploy:
-	@echo "make deploy — Deploy code to Jetson"
-	@echo ""
-	@echo "Pulls latest git changes on the Jetson via SSH."
-	@echo ""
-	@echo "OPTIONS"
-	@echo "  JETSON_HOST=<hostname>    SSH host (default: jetson-nano)"
-	@echo ""
-	@echo "EXAMPLES"
-	@echo "  make deploy"
-	@echo "  make deploy JETSON_HOST=jetson-orin"
-else
-deploy:
-	ssh $(JETSON_HOST) 'cd ~/couch-vision && git pull'
-endif
-
 lint:
 	pre-commit run --all-files
-
-ip:
-	@ifconfig | grep "inet " | grep -v 127.0.0.1 | awk '{print $$2}'
 
 clean:
 	rm -rf build/ DerivedData/
@@ -292,7 +249,7 @@ clean:
 	cd perception && rm -rf .venv __pycache__ .pytest_cache
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# FOXGLOVE EXTENSION
+# FOXGLOVE EXTENSIONS
 # ═══════════════════════════════════════════════════════════════════════════════
 
 build-extension:

@@ -1,10 +1,10 @@
 # CouchVision
 
-iOS app that streams iPhone sensor data to ROS2 over TCP.
+iOS app that streams iPhone sensor data to ROS2 over TCP, with perception, Nav2 path planning, and VESC motor control.
 
-**Sensors:** Camera, LiDAR depth, IMU
+**Sensors:** Camera, LiDAR depth, IMU, GPS, magnetometer, barometer
 **iOS Target:** iPhone 12 Pro+ (iOS 16+)
-**ROS2:** Jazzy
+**ROS2:** Jazzy with CycloneDDS
 
 ## Platform Requirements
 
@@ -12,238 +12,134 @@ iOS app that streams iPhone sensor data to ROS2 over TCP.
 |-----------|-------|----------------|
 | iOS App (Xcode) | ✅ | ❌ |
 | ROS2 Bridge | ✅ (dev) | ✅ (deploy) |
+| Perception + Nav2 | ✅ (CPU) | ✅ (TensorRT) |
+| VESC Motor Driver | ❌ | ✅ (requires /dev/ttyACM0) |
 | Foxglove Viewer | ✅ | ❌ (headless) |
 
 **macOS** is for iOS development (Xcode + Swift) and visualization (Foxglove app).
-**Jetson Orin Nano** is the deployment target — runs ROS2, the TCP bridge, and Foxglove bridge. Accessible via `ssh jetson-nano` (Tailscale).
-
-All contributors on the tailnet can access the Jetson with `ssh jetson-nano`.
+**Jetson Orin Nano** is the deployment target — runs ROS2, the TCP bridge, perception, and motor control. Accessible via `ssh jetson-nano` (Tailscale).
 
 ## Setup
 
-### macOS (iOS development)
+### macOS
 
 ```bash
 make setup
 ```
 
-Installs: uv, xcodegen, SwiftLint, SwiftFormat, pre-commit, generates Xcode project.
+Installs: uv, xcodegen, SwiftLint, SwiftFormat, pre-commit, generates Xcode project. Optionally installs ROS2 Jazzy (Apple Silicon native) for local testing.
 
-Optional — ROS2 for local testing (Apple Silicon native): `make setup` will prompt to install ROS2 at the end.
-
-### Jetson Orin Nano (deployment)
+### Jetson Orin Nano
 
 The Jetson (`ssh jetson-nano`) has ROS2 Jazzy built from source at `~/ros2_jazzy/` and this repo cloned at `~/couch-vision/`.
 
-**foxglove_bridge** is already built from source in the ROS2 workspace (the SDK binary only supports Linux aarch64, not macOS). The build required patching `rosx_introspection` for Jazzy compatibility — see [Agent Notes in SELF_DRIVING_STACK.md](SELF_DRIVING_STACK.md#agent-notes--learnings).
-
-To deploy latest code to Jetson:
-```bash
-make deploy-jetson
-```
-
 ## Running
 
-### Full stack on Jetson (live mode)
+### Full stack on Jetson
 
-The fastest way to run everything — starts the iOS bridge + Nav2 + perception in Docker:
+Starts the iOS bridge + perception + Nav2 planner in Docker:
 
 ```bash
 ssh jetson-nano
 cd ~/couch-vision
-make full-stack                    # builds + starts in background
-make logs-bridge                   # terminal 2: iOS bridge logs
-make logs-nav2                     # terminal 3: Nav2 + perception logs
+make full-stack                       # perception + Nav2 only
+make full-stack VESC=1                # with VESC motor driver
 ```
 
-Connect the iPhone via USB-C to the Jetson. The Jetson's USB-C port runs in device mode — the iPhone gets IP `192.168.55.100` via DHCP, Jetson is at `192.168.55.1`. In the CouchVision app, connect to `tcp://192.168.55.1:7447`.
+**`VESC=1` is required to run motors.** Without it, the VESC driver container is not started and `/cmd_vel` messages have no effect.
+
+Monitor logs in separate terminals:
+```bash
+make logs-bridge    # iOS bridge
+make logs-nav2      # Nav2 + perception
+make logs-vesc      # VESC motor driver (only with VESC=1)
+make logs           # all services interleaved
+make stop           # bring everything down
+```
+
+Connect iPhone via USB-C to the Jetson. USB-C device mode gives iPhone `192.168.55.100`, Jetson `192.168.55.1`. In CouchVision app, connect to `tcp://192.168.55.1:7447`.
+
+#### Full stack options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `VESC=1` | off | Enable VESC motor driver |
+| `BAG=path.mcap` | (live mode) | Replay a recorded bag file (visualization only, no motor output) |
+| `RATE=2.0` | 1.0 | Bag playback speed |
+| `PREFIX=/name` | /iphone_charlie | Topic prefix for live mode |
+| `SLAM_BACKEND=rtabmap` | none | SLAM algorithm (none or rtabmap) |
+| `DEST_LAT`, `DEST_LON` | UVA grounds | Navigation destination |
+| `LOOKAHEAD=15.0` | 15.0 | Path following lookahead (meters) |
+
+Run `make full-stack HELP=1` for detailed help.
 
 ### Standalone bridge (Mac dev)
 
 For local development without Docker:
 
 ```bash
-make bridge                        # start bridge on Mac
-make xcode                         # open Xcode, build to iPhone (Cmd+R)
+make bridge         # start bridge on Mac (PORT=7447 default)
+make xcode          # open Xcode, build to iPhone (Cmd+R)
 ```
 
-Connect the iPhone to `tcp://<mac_ip>:7447` (`make ip` to find addresses).
-
-### Verify
-
-```bash
-make topics
-make hz T=/iphone_charlie/imu
-```
+Bridge prints local IP addresses on start. Connect the iPhone to `tcp://<mac_ip>:7447`.
 
 ### Visualize
 
-Open [Foxglove](https://foxglove.dev) and connect to `ws://localhost:8765` (Docker full-stack) or `ws://jetson-nano:8765` (Jetson).
+Open [Foxglove](https://foxglove.dev) and connect to `ws://localhost:8765` (local Docker) or `ws://jetson-nano:8765` (remote Jetson).
 
-Import `foxglove/couch_layout.json` for the default layout. Select "Navigation Control [local]" panel for interactive destination control (requires building the extension — see below).
+Import `foxglove/couch_layout.json` for the default layout.
 
-## Bag Files
+## Foxglove Panels
 
-Recorded ROS2 bag files are stored in a public S3 bucket:
+Two custom Foxglove extensions provide the control UI:
 
-**https://couch-vision-bags.s3.amazonaws.com**
+### Hardware Safety Panel
 
-Download a bag:
+E-stop, teleop controls, motor telemetry, system status.
+
+**Control modes:**
+- **Gamepad** (default) — Sticks drive directly (no deadman button). Shows warning if no gamepad connected. WASD keys and mouse joystick disabled.
+- **WASD** — Keyboard WASD + mouse drag joystick + gamepad sticks all active.
+- **Nav2** — All teleop inputs disabled, Nav2 controller publishes `/cmd_vel`.
+
+**Motor config:**
+- **Max RPM** — ERPM safety clamp sent to VESC driver.
+- **Ramp (RPM/s)** — Slew rate limit for acceleration and deceleration. Prevents torque spikes that could twist the motor out of its mounting. Default 500 RPM/s (0→max in ~1s). Set to 0 to disable. E-stop always bypasses the ramp for immediate stop.
+
+**E-stop sources:** Panel button, keyboard, gamepad B/Circle (arm with A/Cross). Gamepad e-stop/arm works in all modes.
+
+### Nav Control Panel
+
+Set navigation destinations on a map, view route status. Publishes `/nav/set_destination`, displays `/nav/status`.
+
+### Building extensions
+
 ```bash
-aws s3 cp s3://couch-vision-bags/<filename> .
-# or just curl/wget the URL directly
+make build-extension    # build both panels
+make install-extension  # install to local Foxglove
+make lint-extension     # typecheck + lint + format check
 ```
 
-## Docker
+## VESC Motor Hardware
 
-### iOS Bridge
-```bash
-docker run --network host \
-  -v $(pwd)/cyclonedds.xml:/bridge/cyclonedds.xml:ro \
-  charliemeyer2000/couch-vision-bridge:latest
-```
+- **ESC:** Flipsky Dual FSESC 6.7 (two controllers, one board)
+- **PSU:** 25A, 24V power supply
+- **USB:** Master controller only (STM32 VCP, `vid=0x0483 pid=0x5740`). Slave CAN ID 19.
+- **Driver:** `perception/src/couch_perception/vesc_driver.py` — ROS2 node, differential drive, ERPM ramp rate, wheel odometry
+- **Scripts:** `scripts/vesc_*.py` — standalone motor testing (WASD, hold tests, RPM tests)
 
-### Full Stack (Nav2 + Perception)
-```bash
-make full-stack BAG=bags/your_bag.mcap   # bag replay
-make full-stack                          # live mode (iPhone → bridge → perception)
-
-# Stack runs in background. View logs in separate terminals:
-make logs-bridge    # iOS bridge only
-make logs-nav2      # Nav2 planner only
-make logs           # both (interleaved)
-make stop           # bring everything down
-```
+See [CLAUDE.md](CLAUDE.md) for detailed VESC configuration, known firmware bugs, and tuning notes.
 
 ## Perception Stack
 
-The perception pipeline runs YOLOv8 (object detection) + YOLOP (drivable area / lane segmentation) and feeds results into Nav2 for path planning.
+YOLOv8 (object detection) + YOLOP (drivable area / lane segmentation), feeding into Nav2 for path planning.
 
-### Running with Docker
-
-```bash
-make full-stack BAG=bags/your_bag.mcap   # bag replay mode
-make full-stack                           # live mode (subscribes to ROS2 topics)
-```
-
-This auto-detects the platform:
-- **Jetson (aarch64):** uses `nvidia` container runtime, CUDA + TensorRT inference
+Auto-detects platform:
+- **Jetson (aarch64):** NVIDIA runtime, CUDA + TensorRT inference
 - **Mac/x86 (amd64):** CPU-only PyTorch inference
 
-The stack runs in background. Use `make logs-bridge` / `make logs-nav2` in separate terminals to tail individual services, or `make logs` for interleaved output. `make stop` brings everything down.
-
-Connect Foxglove to `ws://localhost:8765` to visualize.
-
-### TensorRT engine auto-export
-
-On the first CUDA run, TRT engines are built automatically from weights:
-- **YOLOv8:** exports from `.pt` via ultralytics (~10 min on Orin)
-- **YOLOP:** exports PyTorch → ONNX → TRT FP16 (~8 min on Orin)
-
-Engines are saved to `perception/weights/` which is volume-mounted, so they persist between container restarts. Delete `*.engine` files to force re-export (needed when TensorRT version changes).
-
-### Weights
-
-Place model weights in `perception/weights/`:
-- `yolov8n.pt` — downloaded automatically by ultralytics on first run
-- `yolop_repo/` — cloned automatically from GitHub on first run
-- `*.engine` — TRT engines, auto-exported on first CUDA run
-
-### Jetson setup
-
-CI only builds amd64 Docker images. On Jetson, the image builds locally on first `make full-stack`:
-
-```bash
-ssh jetson-nano
-cd ~/couch-vision
-make full-stack BAG=bags/your_bag.mcap
-```
-
-First run takes longer (Docker build + TRT engine export). Subsequent runs start in seconds.
-
-## Development
-
-### Project structure
-
-```
-CouchVision/         # iOS app (Swift)
-├── App/             # SwiftUI views
-├── Core/            # Coordinator, protocols, utilities
-├── Sensors/         # Camera, LiDAR, Motion managers
-├── ROS/             # Message types, CDR encoder
-└── Networking/      # Publisher implementations
-bridge/              # Python ROS2 bridge
-perception/          # Python perception package (uv project)
-├── configs/         # Pipeline presets (default, fast, accurate)
-├── src/couch_perception/
-│   ├── config.py            # PipelineConfig + YAML loading
-│   ├── perception_pipeline.py
-│   ├── yolov8_detector.py   # YOLOv8 (TensorRT > CUDA > MPS > CPU)
-│   ├── yolop_detector.py    # YOLOP (TensorRT FP16 > CUDA > CPU)
-│   ├── costmap.py           # Costmap building logic
-│   ├── frame_source.py      # BagSource + LiveSource
-│   ├── nav2_planner.py      # Nav2 + EKF + perception (bag or live)
-│   └── ...
-└── tests/           # pytest + pytest-benchmark
-foxglove/            # Foxglove config + extensions
-├── couch_layout.json       # Default panel layout
-├── nav-control-panel/      # Navigation Control extension (destination setting, map)
-└── hardware-safety-panel/  # Hardware Safety extension (e-stop, teleop, system status)
-scripts/             # Setup scripts
-```
-
-### Commands
-
-```bash
-# iOS (Mac only)
-make xcode          # Open Xcode project
-
-# ROS2 Bridge (Mac or Jetson)
-make bridge         # Start iOS TCP bridge
-
-# Perception + Nav2
-make full-stack BAG=path.mcap              # Perception + Nav2 (Docker, bag replay)
-make full-stack                            # Live mode (subscribes to ROS2 topics)
-make logs-bridge                           # Tail iOS bridge logs
-make logs-nav2                             # Tail Nav2 planner logs
-make logs                                  # Tail all logs (interleaved)
-make stop                                  # Stop the Docker stack
-
-# Foxglove Extension
-make build-extension    # Build nav control panel (pnpm)
-make install-extension  # Install to Foxglove desktop app
-make lint-extension     # Typecheck + ESLint + Prettier
-
-# Testing
-make test           # Run perception tests
-make benchmark      # Run component benchmarks
-
-# Deployment
-make deploy-jetson  # Pull latest code on Jetson
-
-# Linting
-make lint           # Run all linters (pre-commit)
-```
-
-### Adding a sensor
-
-1. Create manager in `CouchVision/Sensors/`
-2. Add `@Published` state and Combine publisher
-3. Register in `SensorCoordinator`
-4. Add UI toggle in `ContentView`
-
-### Pre-commit hooks
-
-Runs on commit: SwiftFormat, SwiftLint, ruff (Python), ESLint + Prettier (TypeScript).
-
-Manual: `pre-commit run --all-files`
-
-**Important:** The Swift hooks use your system-installed SwiftFormat/SwiftLint. CI uses the latest Homebrew versions, so your local versions must match. Run `make setup` periodically to stay in sync — it upgrades these tools automatically. If CI fails on formatting but local hooks pass, this version mismatch is likely the cause:
-
-```bash
-make setup        # upgrades swiftformat/swiftlint to latest
-swiftformat .     # reformat with new version
-```
+TensorRT engines are auto-exported on first CUDA run (~10-18 min on Orin). Engines persist in `perception/weights/` between container restarts. Delete `*.engine` to force re-export.
 
 ## Architecture
 
@@ -251,13 +147,19 @@ swiftformat .     # reformat with new version
 iPhone Sensors → Sensor Managers → SensorCoordinator → TCP
                                                         ↓
 ROS2 Topics ← rclpy publishers ← ios_bridge.py ←←←←←←←←
+                    ↓
+              Perception (YOLO) → Costmap → Nav2 → /cmd_vel
+                                                       ↓
+                              Foxglove Panel ← /motor/status ← VESC Driver → Motors
+                                            → /motor/config →      ↑
+                                            → /e_stop ─────────────┘
 ```
 
 ## ROS2 Topics
 
 ### Sensor Topics (iPhone → Bridge)
 
-Topic prefix is `/<device_name>/` (configured in the iOS app, e.g. `/iphone_charlie/`).
+Topic prefix is `/<device_name>/` (e.g. `/iphone_charlie/`).
 
 | Topic suffix | Type | Rate |
 |-------------|------|------|
@@ -279,15 +181,105 @@ Topic prefix is `/<device_name>/` (configured in the iOS app, e.g. `/iphone_char
 
 ### Navigation & Control Topics
 
-Published/subscribed by Nav2 planner and Foxglove panels. See [SELF_DRIVING_STACK.md](SELF_DRIVING_STACK.md#ros2-topic-reference) for the full reference.
-
-| Topic | Type | Direction | Notes |
-|-------|------|-----------|-------|
-| `/cmd_vel` | `geometry_msgs/Twist` | Foxglove → Motor controller | Teleop velocity (Hardware Safety Panel) |
-| `/e_stop` | `std_msgs/Bool` | Foxglove → Planner + Motors | Emergency stop (`true`=stopped) |
-| `/nav/set_destination` | `std_msgs/String` | Foxglove → Planner | JSON destination command (Nav Control Panel) |
-| `/nav/status` | `std_msgs/String` | Planner → Foxglove | 1Hz JSON status (both panels consume this) |
+| Topic | Type | Direction | Description |
+|-------|------|-----------|-------------|
+| `/cmd_vel` | `geometry_msgs/Twist` | Panel/Nav2 → VESC | Velocity commands |
+| `/e_stop` | `std_msgs/Bool` | Panel → Planner + VESC | Emergency stop (`true`=stopped) |
+| `/motor/config` | `std_msgs/String` | Panel → VESC | `{mode, max_rpm, max_ramp_rpm_s}` |
+| `/motor/status` | `std_msgs/String` | VESC → Panel | RPM, temps, voltage, faults, ramp config |
+| `/wheel_odom` | `nav_msgs/Odometry` | VESC → ROS2 | Wheel encoder odometry |
+| `/teleop/status` | `std_msgs/String` | Panel → All | `{mode, active_source, gamepad_connected, e_stopped}` (2Hz) |
+| `/nav/set_destination` | `std_msgs/String` | Nav Panel → Planner | JSON destination command |
+| `/nav/status` | `std_msgs/String` | Planner → Panels | 1Hz JSON status |
 | `/nav/planned_path` | `nav_msgs/Path` | Planner → Foxglove | Nav2-planned path |
 | `/nav/google_maps_path` | `nav_msgs/Path` | Planner → Foxglove | Google Maps walking route |
-| `/costmap/occupancy_grid` | `nav_msgs/OccupancyGrid` | Planner → Nav2 | Ego-centric costmap for planning |
 | `/perception/image_annotated/compressed` | `sensor_msgs/CompressedImage` | Planner → Foxglove | Camera with detection overlays |
+
+## Project Structure
+
+```
+CouchVision/              # iOS app (Swift)
+├── App/                  # SwiftUI views (ContentView, SettingsView)
+├── Core/                 # Coordinator, protocols, utilities
+├── Sensors/              # Camera, LiDAR, Motion, Location, DeviceStatus managers
+├── ROS/                  # Message structs, CDR encoder
+├── Networking/           # TCP publisher
+└── Resources/            # Info.plist
+CouchVisionWidgets/       # iOS Live Activity widget
+bridge/                   # Python iOS→ROS2 TCP bridge
+perception/               # Python perception + planning (uv project)
+├── configs/              # Pipeline presets (default, fast, accurate)
+├── src/couch_perception/
+│   ├── vesc_driver.py    # VESC motor driver (ROS2 node)
+│   ├── nav2_planner.py   # Nav2 + EKF + perception orchestrator
+│   ├── perception_pipeline.py
+│   ├── yolov8_detector.py
+│   ├── yolop_detector.py
+│   ├── costmap.py
+│   ├── ekf.py            # Extended Kalman Filter
+│   ├── frame_source.py   # BagSource + LiveSource
+│   ├── geo.py            # GPS/coordinate utilities
+│   └── ...
+└── tests/
+foxglove/                 # Foxglove config + panel extensions
+├── couch_layout.json     # Default panel layout
+├── nav-control-panel/    # Navigation destination + map
+└── hardware-safety-panel/ # E-stop, teleop, motor config
+scripts/                  # Setup + VESC test scripts
+urdf/                     # Robot description (iphone_sensor.urdf)
+infra/                    # Terraform (S3 bag storage)
+bags/                     # Recorded MCAP bag files
+```
+
+## Commands Reference
+
+```bash
+# Full stack (Docker, run on Jetson)
+make full-stack                     # perception + Nav2
+make full-stack VESC=1              # with motor driver
+make full-stack BAG=bags/walk.mcap  # bag replay (visualization only)
+make logs                           # tail all container logs
+make logs-bridge                    # tail bridge logs
+make logs-nav2                      # tail Nav2 logs
+make logs-vesc                      # tail VESC driver logs
+make stop                           # stop Docker stack
+
+# Bridge (standalone, no Docker, run on Mac)
+make bridge                         # start TCP bridge (PORT=7447)
+make xcode                          # open Xcode project
+
+# ROS2 debugging
+make topics                         # list all topics
+make hz T=/iphone_charlie/imu       # topic publish rate
+make echo T=/iphone_charlie/odom    # print topic messages
+
+# Foxglove extensions
+make build-extension                # build both panels
+make install-extension              # install to local Foxglove
+make lint-extension                 # typecheck + lint + format check
+
+# Development
+make setup                          # install all dependencies
+make test                           # run perception tests
+make test ARGS='-k test_ekf'        # run specific tests
+make bag                            # record all topics to MCAP
+make lint                           # run all pre-commit linters
+make clean                          # remove build artifacts + venvs
+```
+
+## Bag Files
+
+Recorded ROS2 bags are stored in a public S3 bucket:
+
+```bash
+aws s3 cp s3://couch-vision-bags/<filename> .
+# or curl/wget from https://couch-vision-bags.s3.amazonaws.com
+```
+
+## Pre-commit Hooks
+
+Runs on commit: SwiftFormat, SwiftLint, ruff (Python), ESLint + Prettier (TypeScript).
+
+Run manually: `pre-commit run --all-files`
+
+The Swift hooks use system-installed SwiftFormat/SwiftLint. If CI fails but local hooks pass, run `make setup` to upgrade to matching versions.
