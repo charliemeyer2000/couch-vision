@@ -23,6 +23,7 @@ interface PanelState {
   motorCollapsed: boolean;
   motorMode: ControlMode;
   maxRpm: number;
+  rampRpmPerSec: number;
 }
 
 interface TwistMsg {
@@ -317,6 +318,7 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
       motorCollapsed: s?.motorCollapsed ?? false,
       motorMode: validMode,
       maxRpm: s?.maxRpm ?? 500,
+      rampRpmPerSec: s?.rampRpmPerSec ?? 500,
     };
   });
 
@@ -421,9 +423,10 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
       data: JSON.stringify({
         mode: "nav2",
         max_rpm: state.maxRpm,
+        max_ramp_rpm_s: state.rampRpmPerSec,
       }),
     });
-  }, [context, state.maxRpm]);
+  }, [context, state.maxRpm, state.rampRpmPerSec]);
 
   // E-stop deadman: send zeros at 10Hz while stopped
   useEffect(() => {
@@ -1046,22 +1049,41 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
 
         {!state.motorCollapsed && (
           <div style={{ marginTop: "4px" }}>
-            <div style={{ marginBottom: "6px" }}>
-              <label style={labelStyle}>Max RPM</label>
-              <input
-                type="number"
-                step="50"
-                min="0"
-                max="10000"
-                value={state.maxRpm}
-                onChange={(e) =>
-                  setState((s) => ({
-                    ...s,
-                    maxRpm: clamp(parseInt(e.target.value) || 0, 0, 10000),
-                  }))
-                }
-                style={inputStyle}
-              />
+            <div style={{ display: "flex", gap: "6px", marginBottom: "6px" }}>
+              <div style={{ flex: 1 }}>
+                <label style={labelStyle}>Max RPM</label>
+                <input
+                  type="number"
+                  step="50"
+                  min="0"
+                  max="10000"
+                  value={state.maxRpm}
+                  onChange={(e) =>
+                    setState((s) => ({
+                      ...s,
+                      maxRpm: clamp(parseInt(e.target.value) || 0, 0, 10000),
+                    }))
+                  }
+                  style={inputStyle}
+                />
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={labelStyle}>Ramp (RPM/s)</label>
+                <input
+                  type="number"
+                  step="50"
+                  min="0"
+                  max="5000"
+                  value={state.rampRpmPerSec}
+                  onChange={(e) =>
+                    setState((s) => ({
+                      ...s,
+                      rampRpmPerSec: clamp(parseInt(e.target.value) || 0, 0, 5000),
+                    }))
+                  }
+                  style={inputStyle}
+                />
+              </div>
             </div>
 
             {/* Motor telemetry */}

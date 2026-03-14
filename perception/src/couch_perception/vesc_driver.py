@@ -184,6 +184,7 @@ class VescConfig:
     slave_can_id: int = DEFAULT_SLAVE_CAN_ID
     invert_master: bool = True
     invert_slave: bool = False
+    max_ramp_rpm_s: int = 500  # max RPM change per second (0 = no limit)
 
 
 def _twist_to_erpm(
@@ -394,8 +395,25 @@ class VescDriver(Node):
             self._config.invert_master = bool(data["invert_master"])
         if "invert_slave" in data:
             self._config.invert_slave = bool(data["invert_slave"])
+        if "max_ramp_rpm_s" in data:
+            self._config.max_ramp_rpm_s = max(0, int(data["max_ramp_rpm_s"]))
 
     # ── Command loop (50ms / 20Hz) ───────────────────────────────────────
+
+    _COMMAND_PERIOD_S = 0.05
+
+    def _ramp_erpm(self, motor_id: int | None, target: int) -> int:
+        """Slew-rate limit ERPM toward target to prevent torque spikes."""
+        if self._config.max_ramp_rpm_s <= 0:
+            return target
+        current = self._commanded_erpm.get(motor_id, 0)
+        max_step = max(
+            1, int(self._config.max_ramp_rpm_s * self._config.pole_pairs * self._COMMAND_PERIOD_S)
+        )
+        delta = target - current
+        if abs(delta) <= max_step:
+            return target
+        return current + (max_step if delta > 0 else -max_step)
 
     def _compute_target_erpm(self) -> tuple[int, int]:
         """Compute (master_erpm, slave_erpm) with inversion applied."""
@@ -423,24 +441,34 @@ class VescDriver(Node):
         return 0, 0
 
     def _command_loop(self) -> None:
-        master_erpm, slave_erpm = self._compute_target_erpm()
-        self._commanded_erpm[None] = master_erpm
-        self._commanded_erpm[self._config.slave_can_id] = slave_erpm
+        master_target, slave_target = self._compute_target_erpm()
 
         if self._serial is None:
+            # Motor physically stopped — reset ramp so we start from 0 on reconnect
+            self._commanded_erpm[None] = 0
+            self._commanded_erpm[self._config.slave_can_id] = 0
             self._try_reconnect()
             return
 
         if self._e_stopped:
+            # Bypass ramp — immediate zero current for safety
+            self._commanded_erpm[None] = 0
+            self._commanded_erpm[self._config.slave_can_id] = 0
             zero_current = bytes([COMM_SET_CURRENT]) + struct.pack(">i", 0)
             self._send(zero_current)
             self._send(zero_current, can_id=self._config.slave_can_id)
             return
 
-        rpm_payload_master = bytes([COMM_SET_RPM]) + struct.pack(">i", master_erpm)
-        rpm_payload_slave = bytes([COMM_SET_RPM]) + struct.pack(">i", slave_erpm)
-        self._send(rpm_payload_master)
-        self._send(rpm_payload_slave, can_id=self._config.slave_can_id)
+        master_erpm = self._ramp_erpm(None, master_target)
+        slave_erpm = self._ramp_erpm(self._config.slave_can_id, slave_target)
+        self._commanded_erpm[None] = master_erpm
+        self._commanded_erpm[self._config.slave_can_id] = slave_erpm
+
+        self._send(bytes([COMM_SET_RPM]) + struct.pack(">i", master_erpm))
+        self._send(
+            bytes([COMM_SET_RPM]) + struct.pack(">i", slave_erpm),
+            can_id=self._config.slave_can_id,
+        )
 
     # ── Telemetry loop (100ms / 10Hz) ────────────────────────────────────
 
@@ -575,6 +603,7 @@ class VescDriver(Node):
             ),
             "invert_master": self._config.invert_master,
             "invert_slave": self._config.invert_slave,
+            "max_ramp_rpm_s": self._config.max_ramp_rpm_s,
             "errors": self._error_count,
         }
         msg = String()
