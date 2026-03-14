@@ -635,24 +635,23 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
 
       if (!stickActive) return;
 
-      // L1/LB (button 4) = deadman
-      if (!gp.buttons[4]?.pressed) {
-        if (activeSourceRef.current === "gamepad") setActiveSource("none");
-        return;
-      }
-
       const leftY = applyDeadzone(gp.axes[1] ?? 0);
       const rightX =
         gp.axes.length > 2
           ? applyDeadzone(gp.axes[2]!)
           : applyDeadzone(gp.axes[0] ?? 0);
 
-      if (leftY !== 0 || rightX !== 0) setActiveSource("gamepad");
-
-      context.publish?.("/cmd_vel", {
-        linear: { x: -leftY * state.maxLinearVel, y: 0, z: 0 },
-        angular: { x: 0, y: 0, z: -rightX * state.maxAngularVel },
-      });
+      const hasInput = leftY !== 0 || rightX !== 0;
+      if (hasInput) {
+        setActiveSource("gamepad");
+        context.publish?.("/cmd_vel", {
+          linear: { x: -leftY * state.maxLinearVel, y: 0, z: 0 },
+          angular: { x: 0, y: 0, z: -rightX * state.maxAngularVel },
+        });
+      } else if (activeSourceRef.current === "gamepad") {
+        setActiveSource("none");
+        context.publish?.("/cmd_vel", zeroTwist());
+      }
     }, PUBLISH_RATE_MS);
 
     return () => clearInterval(interval);
@@ -959,8 +958,8 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
                   }}
                 >
                   {state.motorMode === "wasd"
-                    ? "WASD keys \u00b7 drag joystick \u00b7 gamepad (hold L1)"
-                    : "Hold L1 + sticks to drive"}
+                    ? "WASD keys \u00b7 drag joystick \u00b7 gamepad sticks"
+                    : "Use sticks to drive"}
                 </div>
 
                 {gamepadConnected && (
