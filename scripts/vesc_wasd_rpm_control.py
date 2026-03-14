@@ -46,8 +46,8 @@ DEFAULT_INVERT_MASTER = True
 DEFAULT_INVERT_SLAVE = False
 DEFAULT_TURN_MODE = "spin"
 DEFAULT_MASTER_SIDE = "right"
-MASTER_TELEMETRY_TIMEOUT = 0.05
-SLAVE_TELEMETRY_TIMEOUT = 0.08
+MASTER_TELEMETRY_TIMEOUT = 0.005
+SLAVE_TELEMETRY_TIMEOUT = 0.008
 SLAVE_POLL_DIVIDER = 4
 TELEMETRY_STALE_TIMEOUT = 0.30
 
@@ -604,10 +604,8 @@ def main() -> None:
                         continue
 
                     hold_erpm = int(pids[motor_id].update(float(error), now))
-                    invert = args.invert_master if motor_id is None else args.invert_slave
-                    command = apply_inversion(hold_erpm, invert)
-                    vesc.set_rpm(command, motor_id)
-                    commanded_erpm[motor_id] = command
+                    vesc.set_rpm(hold_erpm, motor_id)
+                    commanded_erpm[motor_id] = hold_erpm
 
                 for motor_id in motor_ids:
                     if motor_id in faulted or not telemetry_poll_due(motor_id, loop_index):
