@@ -3,10 +3,17 @@ import { ReactElement, useEffect, useLayoutEffect, useState, useCallback, useRef
 import { createRoot } from "react-dom/client";
 
 const PUBLISH_RATE_MS = 100;
+const HEARTBEAT_RATE_MS = 500;
 const DEFAULT_MAX_LINEAR = 0.5;
 const DEFAULT_MAX_ANGULAR = 0.5;
 const VEL_BAR_MAX_LINEAR = 2.0;
 const VEL_BAR_MAX_ANGULAR = 2.0;
+const GAMEPAD_DEADZONE = 0.15;
+
+type ControlMode = "gamepad" | "wasd" | "nav2";
+type ActiveSource = "keyboard" | "joystick" | "gamepad" | "none";
+
+const VALID_MODES: ControlMode[] = ["gamepad", "wasd", "nav2"];
 
 interface PanelState {
   eStopped: boolean;
@@ -14,8 +21,7 @@ interface PanelState {
   maxAngularVel: number;
   teleopCollapsed: boolean;
   motorCollapsed: boolean;
-  motorMode: "manual" | "nav2";
-  targetRpm: number;
+  motorMode: ControlMode;
   maxRpm: number;
 }
 
@@ -299,17 +305,27 @@ function Joystick({
 function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): ReactElement {
   const [state, setState] = useState<PanelState>(() => {
     const s = context.initialState as Partial<PanelState> | undefined;
+    const savedMode = s?.motorMode as string | undefined;
+    const validMode = VALID_MODES.includes(savedMode as ControlMode)
+      ? (savedMode as ControlMode)
+      : "gamepad";
     return {
       eStopped: s?.eStopped ?? true,
       maxLinearVel: s?.maxLinearVel ?? DEFAULT_MAX_LINEAR,
       maxAngularVel: s?.maxAngularVel ?? DEFAULT_MAX_ANGULAR,
       teleopCollapsed: s?.teleopCollapsed ?? false,
       motorCollapsed: s?.motorCollapsed ?? false,
-      motorMode: s?.motorMode ?? "manual",
-      targetRpm: s?.targetRpm ?? 0,
+      motorMode: validMode,
       maxRpm: s?.maxRpm ?? 500,
     };
   });
+
+  const [activeSource, setActiveSourceState] = useState<ActiveSource>("none");
+  const activeSourceRef = useRef<ActiveSource>("none");
+  const setActiveSource = useCallback((src: ActiveSource) => {
+    activeSourceRef.current = src;
+    setActiveSourceState(src);
+  }, []);
 
   const [currentLinear, setCurrentLinear] = useState(0);
   const [currentAngular, setCurrentAngular] = useState(0);
@@ -318,11 +334,13 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
   const [navStatus, setNavStatus] = useState<NavStatus | null>(null);
   const [motorStatus, setMotorStatus] = useState<MotorStatus | null>(null);
   const [renderDone, setRenderDone] = useState<(() => void) | undefined>();
+  const [gamepadConnected, setGamepadConnected] = useState(false);
 
   const keysPressed = useRef(new Set<string>());
   const teleopInterval = useRef<ReturnType<typeof setInterval> | null>(null);
   const joystickInterval = useRef<ReturnType<typeof setInterval> | null>(null);
   const joystickVel = useRef({ linear: 0, angular: 0 });
+  const gamepadButtons = useRef<boolean[]>([]);
 
   useEffect(() => {
     context.saveState(state);
@@ -332,14 +350,15 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
     context.advertise?.("/cmd_vel", "geometry_msgs/Twist");
     context.advertise?.("/e_stop", "std_msgs/Bool");
     context.advertise?.("/motor/config", "std_msgs/String");
+    context.advertise?.("/teleop/status", "std_msgs/String");
     return () => {
       context.unadvertise?.("/cmd_vel");
       context.unadvertise?.("/e_stop");
       context.unadvertise?.("/motor/config");
+      context.unadvertise?.("/teleop/status");
     };
   }, [context]);
 
-  // Publish initial e-stop state so planner is in sync with panel on connect
   const initialPublished = useRef(false);
   useEffect(() => {
     if (!initialPublished.current) {
@@ -396,17 +415,15 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
     renderDone?.();
   }, [renderDone]);
 
-  // Publish motor config whenever mode/RPM settings change
+  // Publish motor config — always mode: "nav2", no target_rpm
   useEffect(() => {
-    const msg = {
+    context.publish?.("/motor/config", {
       data: JSON.stringify({
-        mode: state.motorMode,
-        target_rpm: state.targetRpm,
+        mode: "nav2",
         max_rpm: state.maxRpm,
       }),
-    };
-    context.publish?.("/motor/config", msg);
-  }, [context, state.motorMode, state.targetRpm, state.maxRpm]);
+    });
+  }, [context, state.maxRpm]);
 
   // E-stop deadman: send zeros at 10Hz while stopped
   useEffect(() => {
@@ -416,6 +433,21 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
     }, PUBLISH_RATE_MS);
     return () => clearInterval(interval);
   }, [context, state.eStopped]);
+
+  // Heartbeat: publish /teleop/status at 2Hz
+  useEffect(() => {
+    const interval = setInterval(() => {
+      context.publish?.("/teleop/status", {
+        data: JSON.stringify({
+          mode: state.motorMode,
+          active_source: activeSourceRef.current,
+          gamepad_connected: gamepadConnected,
+          e_stopped: state.eStopped,
+        }),
+      });
+    }, HEARTBEAT_RATE_MS);
+    return () => clearInterval(interval);
+  }, [context, state.motorMode, gamepadConnected, state.eStopped]);
 
   const handleEStop = useCallback(() => {
     setState((s) => ({ ...s, eStopped: true }));
@@ -428,9 +460,19 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
     context.publish?.("/e_stop", { data: false });
   }, [context]);
 
+  const handleModeChange = useCallback(
+    (newMode: ControlMode) => {
+      context.publish?.("/cmd_vel", zeroTwist());
+      setActiveSource("none");
+      setState((s) => ({ ...s, motorMode: newMode }));
+    },
+    [context, setActiveSource],
+  );
+
+  // WASD keyboard controls — only in WASD mode
   useEffect(() => {
-    const teleopActive = !state.eStopped && !state.teleopCollapsed;
-    if (!teleopActive) {
+    const active = !state.eStopped && !state.teleopCollapsed && state.motorMode === "wasd";
+    if (!active) {
       if (teleopInterval.current) {
         clearInterval(teleopInterval.current);
         teleopInterval.current = null;
@@ -470,6 +512,7 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
       if (["w", "a", "s", "d"].includes(key)) {
         e.stopPropagation();
         keysPressed.current.add(key);
+        setActiveSource("keyboard");
         startPublishing();
       }
     };
@@ -479,6 +522,7 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
       if (["w", "a", "s", "d"].includes(key)) {
         keysPressed.current.delete(key);
         if (keysPressed.current.size === 0) {
+          setActiveSource("none");
           stopPublishing();
         }
       }
@@ -491,10 +535,19 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
       window.removeEventListener("keyup", handleKeyUp);
       stopPublishing();
     };
-  }, [context, state.eStopped, state.teleopCollapsed, state.maxLinearVel, state.maxAngularVel]);
+  }, [
+    context,
+    state.eStopped,
+    state.teleopCollapsed,
+    state.motorMode,
+    state.maxLinearVel,
+    state.maxAngularVel,
+    setActiveSource,
+  ]);
 
   const handleJoystickMove = useCallback(
     (nx: number, ny: number) => {
+      setActiveSource("joystick");
       joystickVel.current = {
         linear: ny * state.maxLinearVel,
         angular: -nx * state.maxAngularVel,
@@ -508,7 +561,7 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
         }, PUBLISH_RATE_MS);
       }
     },
-    [context, state.maxLinearVel, state.maxAngularVel],
+    [context, state.maxLinearVel, state.maxAngularVel, setActiveSource],
   );
 
   const handleJoystickRelease = useCallback(() => {
@@ -518,7 +571,102 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
     }
     joystickVel.current = { linear: 0, angular: 0 };
     context.publish?.("/cmd_vel", zeroTwist());
-  }, [context]);
+    setActiveSource("none");
+  }, [context, setActiveSource]);
+
+  // Gamepad connection tracking
+  useEffect(() => {
+    const handleConnect = () => setGamepadConnected(true);
+    const handleDisconnect = () => {
+      setGamepadConnected(false);
+      gamepadButtons.current = [];
+    };
+    window.addEventListener("gamepadconnected", handleConnect);
+    window.addEventListener("gamepaddisconnected", handleDisconnect);
+
+    const gamepads = navigator.getGamepads?.();
+    if (gamepads) {
+      for (const gp of gamepads) {
+        if (gp) {
+          setGamepadConnected(true);
+          break;
+        }
+      }
+    }
+
+    return () => {
+      window.removeEventListener("gamepadconnected", handleConnect);
+      window.removeEventListener("gamepaddisconnected", handleDisconnect);
+    };
+  }, []);
+
+  // Gamepad polling — e-stop/arm always active, sticks only in gamepad/wasd mode
+  useEffect(() => {
+    const stickActive =
+      !state.eStopped &&
+      !state.teleopCollapsed &&
+      (state.motorMode === "gamepad" || state.motorMode === "wasd");
+
+    const applyDeadzone = (v: number): number => {
+      if (Math.abs(v) < GAMEPAD_DEADZONE) return 0;
+      const sign = v > 0 ? 1 : -1;
+      return sign * ((Math.abs(v) - GAMEPAD_DEADZONE) / (1 - GAMEPAD_DEADZONE));
+    };
+
+    const interval = setInterval(() => {
+      const gps = navigator.getGamepads?.();
+      if (!gps) return;
+
+      let gp: Gamepad | null = null;
+      for (const g of gps) {
+        if (g) {
+          gp = g;
+          break;
+        }
+      }
+      if (!gp) return;
+
+      // E-stop/arm buttons — always active regardless of mode
+      const curr = Array.from(gp.buttons).map((b) => b.pressed);
+      const prev = gamepadButtons.current;
+      if (curr[1] && !prev[1]) handleEStop();
+      if (curr[0] && !prev[0]) handleArm();
+      gamepadButtons.current = curr;
+
+      if (!stickActive) return;
+
+      // L1/LB (button 4) = deadman
+      if (!gp.buttons[4]?.pressed) {
+        if (activeSourceRef.current === "gamepad") setActiveSource("none");
+        return;
+      }
+
+      const leftY = applyDeadzone(gp.axes[1] ?? 0);
+      const rightX =
+        gp.axes.length > 2
+          ? applyDeadzone(gp.axes[2]!)
+          : applyDeadzone(gp.axes[0] ?? 0);
+
+      if (leftY !== 0 || rightX !== 0) setActiveSource("gamepad");
+
+      context.publish?.("/cmd_vel", {
+        linear: { x: -leftY * state.maxLinearVel, y: 0, z: 0 },
+        angular: { x: 0, y: 0, z: -rightX * state.maxAngularVel },
+      });
+    }, PUBLISH_RATE_MS);
+
+    return () => clearInterval(interval);
+  }, [
+    context,
+    state.eStopped,
+    state.teleopCollapsed,
+    state.motorMode,
+    state.maxLinearVel,
+    state.maxAngularVel,
+    handleEStop,
+    handleArm,
+    setActiveSource,
+  ]);
 
   const thermalLabel = (val: number | null): { text: string; color: string } => {
     switch (val) {
@@ -543,6 +691,26 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
   };
 
   const thermal = thermalLabel(thermalState);
+
+  const modeLabel = (mode: ControlMode): string => {
+    switch (mode) {
+      case "gamepad":
+        return "Gamepad";
+      case "wasd":
+        return "WASD";
+      case "nav2":
+        return "Nav2";
+    }
+  };
+
+  const sourceBadge =
+    activeSource === "keyboard"
+      ? "KB"
+      : activeSource === "joystick"
+        ? "JOY"
+        : activeSource === "gamepad"
+          ? "PAD"
+          : "idle";
 
   return (
     <div
@@ -645,54 +813,180 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
 
         {!state.teleopCollapsed && (
           <div style={{ position: "relative", marginTop: "4px" }}>
-            <div style={{ display: "flex", gap: "6px", marginBottom: "4px" }}>
-              <div style={{ flex: 1 }}>
-                <label style={labelStyle}>Max Linear (m/s)</label>
-                <input
-                  type="number"
-                  step="0.1"
-                  min="0"
-                  max="2.0"
-                  value={state.maxLinearVel}
-                  onChange={(e) =>
-                    setState((s) => ({
-                      ...s,
-                      maxLinearVel: clamp(parseFloat(e.target.value) || 0, 0, 2.0),
-                    }))
-                  }
-                  style={inputStyle}
-                  disabled={state.eStopped}
-                />
-              </div>
-              <div style={{ flex: 1 }}>
-                <label style={labelStyle}>Max Angular (rad/s)</label>
-                <input
-                  type="number"
-                  step="0.1"
-                  min="0"
-                  max="2.0"
-                  value={state.maxAngularVel}
-                  onChange={(e) =>
-                    setState((s) => ({
-                      ...s,
-                      maxAngularVel: clamp(parseFloat(e.target.value) || 0, 0, 2.0),
-                    }))
-                  }
-                  style={inputStyle}
-                  disabled={state.eStopped}
-                />
-              </div>
+            {/* Mode selector */}
+            <div style={{ display: "flex", gap: "4px", marginBottom: "6px" }}>
+              {(["gamepad", "wasd", "nav2"] as const).map((mode) => (
+                <button
+                  key={mode}
+                  onClick={() => handleModeChange(mode)}
+                  style={{
+                    flex: 1,
+                    padding: "5px",
+                    fontSize: "11px",
+                    fontWeight: "bold",
+                    background: state.motorMode === mode ? "#166534" : "#1a1a2e",
+                    color: state.motorMode === mode ? "#86efac" : "#888",
+                    border: `1px solid ${state.motorMode === mode ? "#22c55e" : "#333"}`,
+                    borderRadius: "3px",
+                    cursor: "pointer",
+                  }}
+                >
+                  {modeLabel(mode)}
+                </button>
+              ))}
             </div>
 
-            <Joystick
-              disabled={state.eStopped}
-              onMove={handleJoystickMove}
-              onRelease={handleJoystickRelease}
-            />
+            {/* Active source badge — teleop modes only */}
+            {state.motorMode !== "nav2" && (
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: "4px",
+                  marginBottom: "4px",
+                }}
+              >
+                <div
+                  style={{
+                    width: "6px",
+                    height: "6px",
+                    borderRadius: "50%",
+                    background: activeSource === "none" ? "#555" : "#22c55e",
+                    boxShadow: activeSource !== "none" ? "0 0 3px #22c55e" : "none",
+                  }}
+                />
+                <span
+                  style={{
+                    fontSize: "9px",
+                    color: activeSource === "none" ? "#555" : "#22c55e",
+                  }}
+                >
+                  {sourceBadge}
+                </span>
+              </div>
+            )}
 
-            <div style={{ fontSize: "9px", color: "#555", textAlign: "center", marginTop: "2px" }}>
-              WASD keys or drag joystick
-            </div>
+            {/* Gamepad mode: warning if no gamepad */}
+            {state.motorMode === "gamepad" && !gamepadConnected && (
+              <div
+                style={{
+                  padding: "8px",
+                  background: "#332b00",
+                  border: "1px solid #f59e0b",
+                  borderRadius: "3px",
+                  marginBottom: "6px",
+                  textAlign: "center",
+                  fontSize: "11px",
+                  color: "#f59e0b",
+                }}
+              >
+                Connect gamepad to drive
+              </div>
+            )}
+
+            {/* Nav2 mode: teleop disabled message */}
+            {state.motorMode === "nav2" && (
+              <div
+                style={{
+                  padding: "8px",
+                  textAlign: "center",
+                  fontSize: "11px",
+                  color: "#555",
+                }}
+              >
+                Teleop disabled — Nav2 controls active
+              </div>
+            )}
+
+            {/* Velocity inputs + controls — shown in gamepad and wasd modes */}
+            {state.motorMode !== "nav2" && (
+              <>
+                <div style={{ display: "flex", gap: "6px", marginBottom: "4px" }}>
+                  <div style={{ flex: 1 }}>
+                    <label style={labelStyle}>Max Linear (m/s)</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="0"
+                      max="2.0"
+                      value={state.maxLinearVel}
+                      onChange={(e) =>
+                        setState((s) => ({
+                          ...s,
+                          maxLinearVel: clamp(parseFloat(e.target.value) || 0, 0, 2.0),
+                        }))
+                      }
+                      style={inputStyle}
+                      disabled={state.eStopped}
+                    />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <label style={labelStyle}>Max Angular (rad/s)</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="0"
+                      max="2.0"
+                      value={state.maxAngularVel}
+                      onChange={(e) =>
+                        setState((s) => ({
+                          ...s,
+                          maxAngularVel: clamp(parseFloat(e.target.value) || 0, 0, 2.0),
+                        }))
+                      }
+                      style={inputStyle}
+                      disabled={state.eStopped}
+                    />
+                  </div>
+                </div>
+
+                {/* Joystick — only in WASD mode */}
+                {state.motorMode === "wasd" && (
+                  <Joystick
+                    disabled={state.eStopped}
+                    onMove={handleJoystickMove}
+                    onRelease={handleJoystickRelease}
+                  />
+                )}
+
+                <div
+                  style={{
+                    fontSize: "9px",
+                    color: "#555",
+                    textAlign: "center",
+                    marginTop: "2px",
+                  }}
+                >
+                  {state.motorMode === "wasd"
+                    ? "WASD keys \u00b7 drag joystick \u00b7 gamepad (hold L1)"
+                    : "Hold L1 + sticks to drive"}
+                </div>
+
+                {gamepadConnected && (
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: "4px",
+                      marginTop: "3px",
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: "6px",
+                        height: "6px",
+                        borderRadius: "50%",
+                        background: "#22c55e",
+                        boxShadow: "0 0 3px #22c55e",
+                      }}
+                    />
+                    <span style={{ fontSize: "9px", color: "#22c55e" }}>Gamepad</span>
+                  </div>
+                )}
+              </>
+            )}
 
             {state.eStopped && (
               <div
@@ -753,66 +1047,22 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
 
         {!state.motorCollapsed && (
           <div style={{ marginTop: "4px" }}>
-            {/* Mode toggle */}
-            <div style={{ display: "flex", gap: "4px", marginBottom: "6px" }}>
-              {(["manual", "nav2"] as const).map((mode) => (
-                <button
-                  key={mode}
-                  onClick={() => setState((s) => ({ ...s, motorMode: mode }))}
-                  style={{
-                    flex: 1,
-                    padding: "5px",
-                    fontSize: "11px",
-                    fontWeight: "bold",
-                    background: state.motorMode === mode ? "#166534" : "#1a1a2e",
-                    color: state.motorMode === mode ? "#86efac" : "#888",
-                    border: `1px solid ${state.motorMode === mode ? "#22c55e" : "#333"}`,
-                    borderRadius: "3px",
-                    cursor: "pointer",
-                  }}
-                >
-                  {mode === "manual" ? "Manual RPM" : "Nav2 Auto"}
-                </button>
-              ))}
-            </div>
-
-            {/* RPM inputs */}
-            <div style={{ display: "flex", gap: "6px", marginBottom: "6px" }}>
-              <div style={{ flex: 1 }}>
-                <label style={labelStyle}>Target RPM</label>
-                <input
-                  type="number"
-                  step="10"
-                  min="0"
-                  max={state.maxRpm}
-                  value={state.targetRpm}
-                  onChange={(e) =>
-                    setState((s) => ({
-                      ...s,
-                      targetRpm: clamp(parseInt(e.target.value) || 0, 0, s.maxRpm),
-                    }))
-                  }
-                  style={inputStyle}
-                  disabled={state.eStopped || state.motorMode !== "manual"}
-                />
-              </div>
-              <div style={{ flex: 1 }}>
-                <label style={labelStyle}>Max RPM</label>
-                <input
-                  type="number"
-                  step="50"
-                  min="0"
-                  max="10000"
-                  value={state.maxRpm}
-                  onChange={(e) =>
-                    setState((s) => ({
-                      ...s,
-                      maxRpm: clamp(parseInt(e.target.value) || 0, 0, 10000),
-                    }))
-                  }
-                  style={inputStyle}
-                />
-              </div>
+            <div style={{ marginBottom: "6px" }}>
+              <label style={labelStyle}>Max RPM</label>
+              <input
+                type="number"
+                step="50"
+                min="0"
+                max="10000"
+                value={state.maxRpm}
+                onChange={(e) =>
+                  setState((s) => ({
+                    ...s,
+                    maxRpm: clamp(parseInt(e.target.value) || 0, 0, 10000),
+                  }))
+                }
+                style={inputStyle}
+              />
             </div>
 
             {/* Motor telemetry */}
@@ -908,11 +1158,11 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
               {navStatus.route_resolved
                 ? `Route: ${navStatus.route_points} pts`
                 : "Route: not resolved"}
-              {" · "}
+              {" \u00b7 "}
               {navStatus.ekf_initialized ? "EKF: init" : "EKF: waiting"}
               {navStatus.e_stopped != null && (
                 <>
-                  {" · "}
+                  {" \u00b7 "}
                   <span style={{ color: navStatus.e_stopped ? "#ef4444" : "#22c55e" }}>
                     {navStatus.e_stopped ? "Planner: paused" : "Planner: active"}
                   </span>
