@@ -80,6 +80,7 @@ def _find_vesc_port() -> str | None:
 
 COMM_GET_VALUES = 4
 COMM_SET_CURRENT = 6
+COMM_SET_CURRENT_BRAKE = 7
 COMM_SET_RPM = 8
 COMM_FORWARD_CAN = 34
 
@@ -186,7 +187,8 @@ class VescConfig:
     invert_slave: bool = False
     ramp_up_rpm_s: int = 500  # acceleration rate, RPM/s (0 = no limit)
     ramp_down_rpm_s: int = 500  # deceleration rate, RPM/s (0 = no limit)
-    stop_rpm: int = 0  # below this RPM, coast instead of PID hold (0 = disabled)
+    stop_rpm: int = 0  # below this RPM, brake instead of PID hold (0 = disabled)
+    brake_current: float = 15.0  # braking current in amps when stopping (0 = coast)
     max_linear_vel: float = 0.0  # clamp cmd_vel linear.x (0 = no limit)
     max_angular_vel: float = 0.0  # clamp cmd_vel angular.z (0 = no limit)
 
@@ -411,6 +413,8 @@ class VescDriver(Node):
             self._config.ramp_down_rpm_s = max(0, int(data["ramp_down_rpm_s"]))
         if "stop_rpm" in data:
             self._config.stop_rpm = max(0, int(data["stop_rpm"]))
+        if "brake_current" in data:
+            self._config.brake_current = max(0.0, float(data["brake_current"]))
         if "max_linear_vel" in data:
             self._config.max_linear_vel = max(0.0, float(data["max_linear_vel"]))
         if "max_angular_vel" in data:
@@ -481,40 +485,44 @@ class VescDriver(Node):
             return
 
         if self._e_stopped:
-            # Bypass ramp — immediate zero current for safety
+            # Bypass ramp — immediate brake for safety
             self._commanded_erpm[None] = 0
             self._commanded_erpm[self._config.slave_can_id] = 0
-            zero_current = bytes([COMM_SET_CURRENT]) + struct.pack(">i", 0)
-            self._send(zero_current)
-            self._send(zero_current, can_id=self._config.slave_can_id)
+            brake_cmd = bytes([COMM_SET_CURRENT_BRAKE]) + struct.pack(
+                ">i", int(self._config.brake_current * 1000)
+            ) if self._config.brake_current > 0 else (
+                bytes([COMM_SET_CURRENT]) + struct.pack(">i", 0)
+            )
+            self._send(brake_cmd)
+            self._send(brake_cmd, can_id=self._config.slave_can_id)
+            return
+
+        # When both targets are zero, skip ramp and brake immediately.
+        # Ramp is only useful for smooth acceleration / speed changes.
+        if master_target == 0 and slave_target == 0:
+            self._commanded_erpm[None] = 0
+            self._commanded_erpm[self._config.slave_can_id] = 0
+            if self._config.brake_current > 0:
+                brake_cmd = bytes([COMM_SET_CURRENT_BRAKE]) + struct.pack(
+                    ">i", int(self._config.brake_current * 1000)
+                )
+            else:
+                brake_cmd = bytes([COMM_SET_CURRENT]) + struct.pack(">i", 0)
+            self._send(brake_cmd)
+            self._send(brake_cmd, can_id=self._config.slave_can_id)
             return
 
         master_erpm = self._ramp_erpm(None, master_target)
         slave_erpm = self._ramp_erpm(self._config.slave_can_id, slave_target)
 
-        # Stop threshold: coast with zero current instead of PID hold at low RPM
-        stop_erpm = self._config.stop_rpm * self._config.pole_pairs
-        if stop_erpm > 0:
-            if abs(master_target) <= stop_erpm and abs(master_erpm) <= stop_erpm:
-                master_erpm = 0
-            if abs(slave_target) <= stop_erpm and abs(slave_erpm) <= stop_erpm:
-                slave_erpm = 0
-
         self._commanded_erpm[None] = master_erpm
         self._commanded_erpm[self._config.slave_can_id] = slave_erpm
 
-        zero_current = bytes([COMM_SET_CURRENT]) + struct.pack(">i", 0)
-        if master_erpm == 0:
-            self._send(zero_current)
-        else:
-            self._send(bytes([COMM_SET_RPM]) + struct.pack(">i", master_erpm))
-        if slave_erpm == 0:
-            self._send(zero_current, can_id=self._config.slave_can_id)
-        else:
-            self._send(
-                bytes([COMM_SET_RPM]) + struct.pack(">i", slave_erpm),
-                can_id=self._config.slave_can_id,
-            )
+        self._send(bytes([COMM_SET_RPM]) + struct.pack(">i", master_erpm))
+        self._send(
+            bytes([COMM_SET_RPM]) + struct.pack(">i", slave_erpm),
+            can_id=self._config.slave_can_id,
+        )
 
     # ── Telemetry loop (100ms / 10Hz) ────────────────────────────────────
 
@@ -652,6 +660,7 @@ class VescDriver(Node):
             "ramp_up_rpm_s": self._config.ramp_up_rpm_s,
             "ramp_down_rpm_s": self._config.ramp_down_rpm_s,
             "stop_rpm": self._config.stop_rpm,
+            "brake_current": self._config.brake_current,
             "max_linear_vel": self._config.max_linear_vel,
             "max_angular_vel": self._config.max_angular_vel,
             "errors": self._error_count,

@@ -24,6 +24,7 @@ interface PanelState {
   motorMode: ControlMode;
   maxRpm: number;
   stopRpm: number;
+  brakeCurrent: number;
   rampUpRpmPerSec: number;
   rampDownRpmPerSec: number;
   maxRpmLimit: number;
@@ -341,6 +342,7 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
       motorMode: validMode,
       maxRpm: s?.maxRpm ?? 500,
       stopRpm: s?.stopRpm ?? 50,
+      brakeCurrent: s?.brakeCurrent ?? 15,
       rampUpRpmPerSec: s?.rampUpRpmPerSec ?? 500,
       rampDownRpmPerSec: s?.rampDownRpmPerSec ?? 500,
       maxRpmLimit: s?.maxRpmLimit ?? 10000,
@@ -466,13 +468,14 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
         mode: "nav2",
         max_rpm: state.maxRpm,
         stop_rpm: state.stopRpm,
+        brake_current: state.brakeCurrent,
         ramp_up_rpm_s: state.rampUpRpmPerSec,
         ramp_down_rpm_s: state.rampDownRpmPerSec,
         max_linear_vel: state.maxLinearVel,
         max_angular_vel: state.maxAngularVel,
       }),
     });
-  }, [context, state.maxRpm, state.stopRpm, state.rampUpRpmPerSec, state.rampDownRpmPerSec, state.maxLinearVel, state.maxAngularVel]);
+  }, [context, state.maxRpm, state.stopRpm, state.brakeCurrent, state.rampUpRpmPerSec, state.rampDownRpmPerSec, state.maxLinearVel, state.maxAngularVel]);
 
   // Publish path follower config
   useEffect(() => {
@@ -1212,6 +1215,23 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
                     setState((s) => ({
                       ...s,
                       stopRpm: clamp(parseInt(e.target.value) || 0, 0, 500),
+                    }))
+                  }
+                  style={inputStyle}
+                />
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={labelStyle}>Brake (A)</label>
+                <input
+                  type="number"
+                  step="1"
+                  min="0"
+                  max="30"
+                  value={state.brakeCurrent}
+                  onChange={(e) =>
+                    setState((s) => ({
+                      ...s,
+                      brakeCurrent: clamp(parseFloat(e.target.value) || 0, 0, 30),
                     }))
                   }
                   style={inputStyle}

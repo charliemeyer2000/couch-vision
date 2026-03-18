@@ -16,7 +16,8 @@ ROS2_SETUP := export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp; \
               source ~/ros2_jazzy/install/setup.bash 2>/dev/null || \
               source ~/ros2_ws/install/setup.bash 2>/dev/null || \
               source /opt/ros/jazzy/setup.bash 2>/dev/null || \
-              (echo "Error: ROS2 Jazzy not found. See README.md for install instructions." && exit 1)
+              source /opt/ros/humble/setup.bash 2>/dev/null || \
+              (echo "Error: ROS2 not found. See README.md for install instructions." && exit 1)
 
 # Platform detection
 UNAME_M := $(shell uname -m)
