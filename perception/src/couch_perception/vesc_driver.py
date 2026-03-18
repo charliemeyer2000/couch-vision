@@ -184,7 +184,11 @@ class VescConfig:
     slave_can_id: int = DEFAULT_SLAVE_CAN_ID
     invert_master: bool = True
     invert_slave: bool = False
-    max_ramp_rpm_s: int = 500  # max RPM change per second (0 = no limit)
+    ramp_up_rpm_s: int = 500  # acceleration rate, RPM/s (0 = no limit)
+    ramp_down_rpm_s: int = 500  # deceleration rate, RPM/s (0 = no limit)
+    stop_rpm: int = 0  # below this RPM, coast instead of PID hold (0 = disabled)
+    max_linear_vel: float = 0.0  # clamp cmd_vel linear.x (0 = no limit)
+    max_angular_vel: float = 0.0  # clamp cmd_vel angular.z (0 = no limit)
 
 
 def _twist_to_erpm(
@@ -396,7 +400,19 @@ class VescDriver(Node):
         if "invert_slave" in data:
             self._config.invert_slave = bool(data["invert_slave"])
         if "max_ramp_rpm_s" in data:
-            self._config.max_ramp_rpm_s = max(0, int(data["max_ramp_rpm_s"]))
+            v = max(0, int(data["max_ramp_rpm_s"]))
+            self._config.ramp_up_rpm_s = v
+            self._config.ramp_down_rpm_s = v
+        if "ramp_up_rpm_s" in data:
+            self._config.ramp_up_rpm_s = max(0, int(data["ramp_up_rpm_s"]))
+        if "ramp_down_rpm_s" in data:
+            self._config.ramp_down_rpm_s = max(0, int(data["ramp_down_rpm_s"]))
+        if "stop_rpm" in data:
+            self._config.stop_rpm = max(0, int(data["stop_rpm"]))
+        if "max_linear_vel" in data:
+            self._config.max_linear_vel = max(0.0, float(data["max_linear_vel"]))
+        if "max_angular_vel" in data:
+            self._config.max_angular_vel = max(0.0, float(data["max_angular_vel"]))
 
     # ── Command loop (50ms / 20Hz) ───────────────────────────────────────
 
@@ -404,13 +420,23 @@ class VescDriver(Node):
 
     def _ramp_erpm(self, motor_id: int | None, target: int) -> int:
         """Slew-rate limit ERPM toward target to prevent torque spikes."""
-        if self._config.max_ramp_rpm_s <= 0:
-            return target
         current = self._commanded_erpm.get(motor_id, 0)
-        max_step = max(
-            1, int(self._config.max_ramp_rpm_s * self._config.pole_pairs * self._COMMAND_PERIOD_S)
-        )
         delta = target - current
+        if delta == 0:
+            return target
+
+        # Pick rate: accelerating (delta same sign as current) vs decelerating
+        if current == 0 or (delta > 0) == (current > 0):
+            ramp_rpm_s = self._config.ramp_up_rpm_s
+        else:
+            ramp_rpm_s = self._config.ramp_down_rpm_s
+
+        if ramp_rpm_s <= 0:
+            return target
+
+        max_step = max(
+            1, int(ramp_rpm_s * self._config.pole_pairs * self._COMMAND_PERIOD_S)
+        )
         if abs(delta) <= max_step:
             return target
         return current + (max_step if delta > 0 else -max_step)
@@ -433,11 +459,13 @@ class VescDriver(Node):
                 or time.monotonic() - self._last_cmd_time > 0.5
             ):
                 return 0, 0
-            return _twist_to_erpm(
-                self._last_cmd_vel.linear.x,
-                self._last_cmd_vel.angular.z,
-                self._config,
-            )
+            linear_x = self._last_cmd_vel.linear.x
+            angular_z = self._last_cmd_vel.angular.z
+            if self._config.max_linear_vel > 0:
+                linear_x = max(-self._config.max_linear_vel, min(self._config.max_linear_vel, linear_x))
+            if self._config.max_angular_vel > 0:
+                angular_z = max(-self._config.max_angular_vel, min(self._config.max_angular_vel, angular_z))
+            return _twist_to_erpm(linear_x, angular_z, self._config)
         return 0, 0
 
     def _command_loop(self) -> None:
@@ -461,14 +489,30 @@ class VescDriver(Node):
 
         master_erpm = self._ramp_erpm(None, master_target)
         slave_erpm = self._ramp_erpm(self._config.slave_can_id, slave_target)
+
+        # Stop threshold: coast with zero current instead of PID hold at low RPM
+        stop_erpm = self._config.stop_rpm * self._config.pole_pairs
+        if stop_erpm > 0:
+            if abs(master_target) <= stop_erpm and abs(master_erpm) <= stop_erpm:
+                master_erpm = 0
+            if abs(slave_target) <= stop_erpm and abs(slave_erpm) <= stop_erpm:
+                slave_erpm = 0
+
         self._commanded_erpm[None] = master_erpm
         self._commanded_erpm[self._config.slave_can_id] = slave_erpm
 
-        self._send(bytes([COMM_SET_RPM]) + struct.pack(">i", master_erpm))
-        self._send(
-            bytes([COMM_SET_RPM]) + struct.pack(">i", slave_erpm),
-            can_id=self._config.slave_can_id,
-        )
+        zero_current = bytes([COMM_SET_CURRENT]) + struct.pack(">i", 0)
+        if master_erpm == 0:
+            self._send(zero_current)
+        else:
+            self._send(bytes([COMM_SET_RPM]) + struct.pack(">i", master_erpm))
+        if slave_erpm == 0:
+            self._send(zero_current, can_id=self._config.slave_can_id)
+        else:
+            self._send(
+                bytes([COMM_SET_RPM]) + struct.pack(">i", slave_erpm),
+                can_id=self._config.slave_can_id,
+            )
 
     # ── Telemetry loop (100ms / 10Hz) ────────────────────────────────────
 
@@ -603,7 +647,11 @@ class VescDriver(Node):
             ),
             "invert_master": self._config.invert_master,
             "invert_slave": self._config.invert_slave,
-            "max_ramp_rpm_s": self._config.max_ramp_rpm_s,
+            "ramp_up_rpm_s": self._config.ramp_up_rpm_s,
+            "ramp_down_rpm_s": self._config.ramp_down_rpm_s,
+            "stop_rpm": self._config.stop_rpm,
+            "max_linear_vel": self._config.max_linear_vel,
+            "max_angular_vel": self._config.max_angular_vel,
             "errors": self._error_count,
         }
         msg = String()

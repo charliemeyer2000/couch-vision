@@ -23,7 +23,13 @@ interface PanelState {
   motorCollapsed: boolean;
   motorMode: ControlMode;
   maxRpm: number;
-  rampRpmPerSec: number;
+  stopRpm: number;
+  rampUpRpmPerSec: number;
+  rampDownRpmPerSec: number;
+  maxRpmLimit: number;
+  maxLinearLimit: number;
+  maxAngularLimit: number;
+  limitsExpanded: boolean;
 }
 
 interface TwistMsg {
@@ -318,7 +324,13 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
       motorCollapsed: s?.motorCollapsed ?? false,
       motorMode: validMode,
       maxRpm: s?.maxRpm ?? 500,
-      rampRpmPerSec: s?.rampRpmPerSec ?? 500,
+      stopRpm: s?.stopRpm ?? 50,
+      rampUpRpmPerSec: s?.rampUpRpmPerSec ?? 500,
+      rampDownRpmPerSec: s?.rampDownRpmPerSec ?? 500,
+      maxRpmLimit: s?.maxRpmLimit ?? 10000,
+      maxLinearLimit: s?.maxLinearLimit ?? 5.0,
+      maxAngularLimit: s?.maxAngularLimit ?? 5.0,
+      limitsExpanded: s?.limitsExpanded ?? false,
     };
   });
 
@@ -423,10 +435,14 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
       data: JSON.stringify({
         mode: "nav2",
         max_rpm: state.maxRpm,
-        max_ramp_rpm_s: state.rampRpmPerSec,
+        stop_rpm: state.stopRpm,
+        ramp_up_rpm_s: state.rampUpRpmPerSec,
+        ramp_down_rpm_s: state.rampDownRpmPerSec,
+        max_linear_vel: state.maxLinearVel,
+        max_angular_vel: state.maxAngularVel,
       }),
     });
-  }, [context, state.maxRpm, state.rampRpmPerSec]);
+  }, [context, state.maxRpm, state.stopRpm, state.rampUpRpmPerSec, state.rampDownRpmPerSec, state.maxLinearVel, state.maxAngularVel]);
 
   // E-stop deadman: send zeros at 10Hz while stopped
   useEffect(() => {
@@ -904,45 +920,6 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
             {/* Velocity inputs + controls — shown in gamepad and wasd modes */}
             {state.motorMode !== "nav2" && (
               <>
-                <div style={{ display: "flex", gap: "6px", marginBottom: "4px" }}>
-                  <div style={{ flex: 1 }}>
-                    <label style={labelStyle}>Max Linear (m/s)</label>
-                    <input
-                      type="number"
-                      step="0.1"
-                      min="0"
-                      max="2.0"
-                      value={state.maxLinearVel}
-                      onChange={(e) =>
-                        setState((s) => ({
-                          ...s,
-                          maxLinearVel: clamp(parseFloat(e.target.value) || 0, 0, 2.0),
-                        }))
-                      }
-                      style={inputStyle}
-                      disabled={state.eStopped}
-                    />
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    <label style={labelStyle}>Max Angular (rad/s)</label>
-                    <input
-                      type="number"
-                      step="0.1"
-                      min="0"
-                      max="2.0"
-                      value={state.maxAngularVel}
-                      onChange={(e) =>
-                        setState((s) => ({
-                          ...s,
-                          maxAngularVel: clamp(parseFloat(e.target.value) || 0, 0, 2.0),
-                        }))
-                      }
-                      style={inputStyle}
-                      disabled={state.eStopped}
-                    />
-                  </div>
-                </div>
-
                 {/* Joystick — only in WASD mode */}
                 {state.motorMode === "wasd" && (
                   <Joystick
@@ -1018,13 +995,13 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
         <VelocityBar
           label="Linear"
           value={currentLinear}
-          maxScale={VEL_BAR_MAX_LINEAR}
+          maxScale={Math.max(state.maxLinearVel, 0.1)}
           unit="m/s"
         />
         <VelocityBar
           label="Angular"
           value={currentAngular}
-          maxScale={VEL_BAR_MAX_ANGULAR}
+          maxScale={Math.max(state.maxAngularVel, 0.1)}
           unit="rad/s"
           centered
         />
@@ -1056,35 +1033,176 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
                   type="number"
                   step="50"
                   min="0"
-                  max="10000"
+                  max={state.maxRpmLimit}
                   value={state.maxRpm}
                   onChange={(e) =>
                     setState((s) => ({
                       ...s,
-                      maxRpm: clamp(parseInt(e.target.value) || 0, 0, 10000),
+                      maxRpm: clamp(parseInt(e.target.value) || 0, 0, s.maxRpmLimit),
                     }))
                   }
                   style={inputStyle}
                 />
               </div>
               <div style={{ flex: 1 }}>
-                <label style={labelStyle}>Ramp (RPM/s)</label>
+                <label style={labelStyle}>Ramp ↑ (RPM/s)</label>
                 <input
                   type="number"
                   step="50"
                   min="0"
                   max="5000"
-                  value={state.rampRpmPerSec}
+                  value={state.rampUpRpmPerSec}
                   onChange={(e) =>
                     setState((s) => ({
                       ...s,
-                      rampRpmPerSec: clamp(parseInt(e.target.value) || 0, 0, 5000),
+                      rampUpRpmPerSec: clamp(parseInt(e.target.value) || 0, 0, 5000),
+                    }))
+                  }
+                  style={inputStyle}
+                />
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={labelStyle}>Ramp ↓ (RPM/s)</label>
+                <input
+                  type="number"
+                  step="50"
+                  min="0"
+                  max="5000"
+                  value={state.rampDownRpmPerSec}
+                  onChange={(e) =>
+                    setState((s) => ({
+                      ...s,
+                      rampDownRpmPerSec: clamp(parseInt(e.target.value) || 0, 0, 5000),
                     }))
                   }
                   style={inputStyle}
                 />
               </div>
             </div>
+            <div style={{ display: "flex", gap: "6px", marginBottom: "4px" }}>
+              <div style={{ flex: 1 }}>
+                <label style={labelStyle}>Stop RPM</label>
+                <input
+                  type="number"
+                  step="10"
+                  min="0"
+                  max="500"
+                  value={state.stopRpm}
+                  onChange={(e) =>
+                    setState((s) => ({
+                      ...s,
+                      stopRpm: clamp(parseInt(e.target.value) || 0, 0, 500),
+                    }))
+                  }
+                  style={inputStyle}
+                />
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={labelStyle}>Max Linear (m/s)</label>
+                <input
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  max={state.maxLinearLimit}
+                  value={state.maxLinearVel}
+                  onChange={(e) =>
+                    setState((s) => ({
+                      ...s,
+                      maxLinearVel: clamp(parseFloat(e.target.value) || 0, 0, s.maxLinearLimit),
+                    }))
+                  }
+                  style={inputStyle}
+                />
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: "6px", marginBottom: "6px" }}>
+              <div style={{ flex: 1 }}>
+                <label style={labelStyle}>Max Angular (rad/s)</label>
+                <input
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  max={state.maxAngularLimit}
+                  value={state.maxAngularVel}
+                  onChange={(e) =>
+                    setState((s) => ({
+                      ...s,
+                      maxAngularVel: clamp(parseFloat(e.target.value) || 0, 0, s.maxAngularLimit),
+                    }))
+                  }
+                  style={inputStyle}
+                />
+              </div>
+              <div style={{ flex: 1 }} />
+            </div>
+
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                cursor: "pointer",
+                marginBottom: state.limitsExpanded ? "4px" : "6px",
+              }}
+              onClick={() => setState((s) => ({ ...s, limitsExpanded: !s.limitsExpanded }))}
+            >
+              <span style={{ fontSize: "10px", color: "#666" }}>Limits</span>
+              <span style={{ fontSize: "9px", color: "#666" }}>
+                {state.limitsExpanded ? "\u25bc" : "\u25b6"}
+              </span>
+            </div>
+            {state.limitsExpanded && (
+              <div style={{ display: "flex", gap: "6px", marginBottom: "6px" }}>
+                <div style={{ flex: 1 }}>
+                  <label style={labelStyle}>RPM</label>
+                  <input
+                    type="number"
+                    step="500"
+                    min="0"
+                    value={state.maxRpmLimit}
+                    onChange={(e) =>
+                      setState((s) => ({
+                        ...s,
+                        maxRpmLimit: Math.max(0, parseInt(e.target.value) || 0),
+                      }))
+                    }
+                    style={inputStyle}
+                  />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label style={labelStyle}>Linear (m/s)</label>
+                  <input
+                    type="number"
+                    step="1.0"
+                    min="0"
+                    value={state.maxLinearLimit}
+                    onChange={(e) =>
+                      setState((s) => ({
+                        ...s,
+                        maxLinearLimit: Math.max(0, parseFloat(e.target.value) || 0),
+                      }))
+                    }
+                    style={inputStyle}
+                  />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label style={labelStyle}>Angular (rad/s)</label>
+                  <input
+                    type="number"
+                    step="1.0"
+                    min="0"
+                    value={state.maxAngularLimit}
+                    onChange={(e) =>
+                      setState((s) => ({
+                        ...s,
+                        maxAngularLimit: Math.max(0, parseFloat(e.target.value) || 0),
+                      }))
+                    }
+                    style={inputStyle}
+                  />
+                </div>
+              </div>
+            )}
 
             {/* Motor telemetry */}
             {motorStatus && (
