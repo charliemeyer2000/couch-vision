@@ -30,6 +30,9 @@ interface PanelState {
   maxLinearLimit: number;
   maxAngularLimit: number;
   limitsExpanded: boolean;
+  pfLinearSpeed: number;
+  pfLookahead: number;
+  pfGoalTolerance: number;
 }
 
 interface TwistMsg {
@@ -344,6 +347,9 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
       maxLinearLimit: s?.maxLinearLimit ?? 5.0,
       maxAngularLimit: s?.maxAngularLimit ?? 5.0,
       limitsExpanded: s?.limitsExpanded ?? false,
+      pfLinearSpeed: s?.pfLinearSpeed ?? 0.3,
+      pfLookahead: s?.pfLookahead ?? 1.5,
+      pfGoalTolerance: s?.pfGoalTolerance ?? 0.5,
     };
   });
 
@@ -379,11 +385,13 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
     context.advertise?.("/e_stop", "std_msgs/Bool");
     context.advertise?.("/motor/config", "std_msgs/String");
     context.advertise?.("/teleop/status", "std_msgs/String");
+    context.advertise?.("/nav/path_follower/config", "std_msgs/String");
     return () => {
       context.unadvertise?.("/cmd_vel");
       context.unadvertise?.("/e_stop");
       context.unadvertise?.("/motor/config");
       context.unadvertise?.("/teleop/status");
+      context.unadvertise?.("/nav/path_follower/config");
     };
   }, [context]);
 
@@ -465,6 +473,18 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
       }),
     });
   }, [context, state.maxRpm, state.stopRpm, state.rampUpRpmPerSec, state.rampDownRpmPerSec, state.maxLinearVel, state.maxAngularVel]);
+
+  // Publish path follower config
+  useEffect(() => {
+    context.publish?.("/nav/path_follower/config", {
+      data: JSON.stringify({
+        linear_speed: state.pfLinearSpeed,
+        lookahead: state.pfLookahead,
+        goal_tolerance: state.pfGoalTolerance,
+        max_angular_vel: state.maxAngularVel,
+      }),
+    });
+  }, [context, state.pfLinearSpeed, state.pfLookahead, state.pfGoalTolerance, state.maxAngularVel]);
 
   // E-stop deadman: send zeros at 10Hz while stopped
   useEffect(() => {
@@ -956,16 +976,64 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
                     {pathFollowerStatus.dist_to_goal != null && (
                       <div>Goal: {pathFollowerStatus.dist_to_goal.toFixed(1)}m</div>
                     )}
-                    <div>
+                    <div style={{ marginBottom: "6px" }}>
                       Path: {pathFollowerStatus.path_points} pts ·{" "}
                       Pose: {pathFollowerStatus.has_pose ? "OK" : "NO"}
                     </div>
                   </>
                 ) : (
-                  <div style={{ textAlign: "center", color: "#555" }}>
+                  <div style={{ textAlign: "center", color: "#555", marginBottom: "6px" }}>
                     Path follower not connected
                   </div>
                 )}
+                {/* Path follower tuning */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "4px" }}>
+                  <div>
+                    <label style={labelStyle}>Speed (m/s)</label>
+                    <input
+                      type="number"
+                      style={inputStyle}
+                      value={state.pfLinearSpeed}
+                      step={0.05}
+                      min={0.05}
+                      max={state.maxLinearLimit}
+                      onChange={(e) => {
+                        const v = clamp(parseFloat(e.target.value) || 0.05, 0.05, state.maxLinearLimit);
+                        setState((s) => ({ ...s, pfLinearSpeed: v }));
+                      }}
+                    />
+                  </div>
+                  <div>
+                    <label style={labelStyle}>Lookahead (m)</label>
+                    <input
+                      type="number"
+                      style={inputStyle}
+                      value={state.pfLookahead}
+                      step={0.1}
+                      min={0.3}
+                      max={10}
+                      onChange={(e) => {
+                        const v = clamp(parseFloat(e.target.value) || 0.3, 0.3, 10);
+                        setState((s) => ({ ...s, pfLookahead: v }));
+                      }}
+                    />
+                  </div>
+                  <div>
+                    <label style={labelStyle}>Goal tol (m)</label>
+                    <input
+                      type="number"
+                      style={inputStyle}
+                      value={state.pfGoalTolerance}
+                      step={0.1}
+                      min={0.1}
+                      max={5}
+                      onChange={(e) => {
+                        const v = clamp(parseFloat(e.target.value) || 0.1, 0.1, 5);
+                        setState((s) => ({ ...s, pfGoalTolerance: v }));
+                      }}
+                    />
+                  </div>
+                </div>
               </div>
             )}
 
