@@ -24,15 +24,18 @@ NAV2_PID=$!
 # costmap plugins before lifecycle_manager tries to configure it)
 sleep 10
 
-# Run our planner node.
 # Source the venv but keep ROS2 system packages on PYTHONPATH.
-echo "Starting Nav2 planner..."
+echo "Starting Nav2 planner + path follower..."
 if [ -f /perception/.venv/bin/activate ]; then
     source /perception/.venv/bin/activate
 elif [ -f /opt/venv/bin/activate ]; then
     source /opt/venv/bin/activate
 fi
 export PYTHONPATH="/perception/src:${PYTHONPATH}"
+
+# Start path follower in background (converts planned paths → cmd_vel)
+python -m couch_perception.path_follower &
+PATH_FOLLOWER_PID=$!
 
 if [ -n "$LIVE_MODE" ]; then
     python -m couch_perception.nav2_planner \
@@ -45,4 +48,5 @@ else
 fi
 
 # Cleanup
+kill $PATH_FOLLOWER_PID 2>/dev/null || true
 kill $NAV2_PID 2>/dev/null || true

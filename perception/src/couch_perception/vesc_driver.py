@@ -204,8 +204,9 @@ def _twist_to_erpm(
     max_erpm = cfg.max_rpm * cfg.pole_pairs
 
     def to_erpm(v: float) -> int:
-        mech_rpm = v / (2.0 * math.pi * cfg.wheel_radius) * 60.0
-        return max(-max_erpm, min(max_erpm, int(mech_rpm * cfg.pole_pairs)))
+        wheel_rpm = v / (2.0 * math.pi * cfg.wheel_radius) * 60.0
+        motor_erpm = int(wheel_rpm * cfg.gear_ratio * cfg.pole_pairs)
+        return max(-max_erpm, min(max_erpm, motor_erpm))
 
     left_erpm = to_erpm(v_left)
     right_erpm = to_erpm(v_right)
@@ -219,7 +220,8 @@ def _twist_to_erpm(
 
 def _tachometer_to_distance(tach_delta: int, cfg: VescConfig) -> float:
     """Hall sensor counts → meters. 6 transitions per electrical revolution."""
-    wheel_revs = tach_delta / (cfg.pole_pairs * 6.0)
+    motor_revs = tach_delta / (cfg.pole_pairs * 6.0)
+    wheel_revs = motor_revs / cfg.gear_ratio
     return wheel_revs * 2.0 * math.pi * cfg.wheel_radius
 
 

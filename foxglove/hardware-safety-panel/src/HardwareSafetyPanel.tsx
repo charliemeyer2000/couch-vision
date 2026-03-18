@@ -5,9 +5,9 @@ import { createRoot } from "react-dom/client";
 const PUBLISH_RATE_MS = 100;
 const HEARTBEAT_RATE_MS = 500;
 const DEFAULT_MAX_LINEAR = 0.5;
-const DEFAULT_MAX_ANGULAR = 0.5;
+const DEFAULT_MAX_ANGULAR = 2.0;
 const VEL_BAR_MAX_LINEAR = 2.0;
-const VEL_BAR_MAX_ANGULAR = 2.0;
+const VEL_BAR_MAX_ANGULAR = 4.0;
 const GAMEPAD_DEADZONE = 0.15;
 
 type ControlMode = "gamepad" | "wasd" | "nav2";
@@ -46,6 +46,19 @@ interface NavStatus {
   ekf_initialized: boolean;
   route_points: number;
   e_stopped?: boolean;
+}
+
+interface PathFollowerStatus {
+  active: boolean;
+  nav2_mode: boolean;
+  has_path: boolean;
+  has_pose: boolean;
+  goal_reached: boolean;
+  e_stopped: boolean;
+  path_points: number;
+  dist_to_goal?: number;
+  linear_speed: number;
+  max_angular_vel: number;
 }
 
 interface MotorStatus {
@@ -347,6 +360,7 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
   const [thermalState, setThermalState] = useState<number | null>(null);
   const [navStatus, setNavStatus] = useState<NavStatus | null>(null);
   const [motorStatus, setMotorStatus] = useState<MotorStatus | null>(null);
+  const [pathFollowerStatus, setPathFollowerStatus] = useState<PathFollowerStatus | null>(null);
   const [renderDone, setRenderDone] = useState<(() => void) | undefined>();
   const [gamepadConnected, setGamepadConnected] = useState(false);
 
@@ -411,6 +425,13 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
             } catch {
               /* ignore */
             }
+          } else if (ev.topic === "/nav/path_follower/status") {
+            try {
+              const data = JSON.parse((ev.message as { data: string }).data) as PathFollowerStatus;
+              setPathFollowerStatus(data);
+            } catch {
+              /* ignore */
+            }
           }
         }
       }
@@ -422,6 +443,7 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
       { topic: "/iphone/thermal" },
       { topic: "/nav/status" },
       { topic: "/motor/status" },
+      { topic: "/nav/path_follower/status" },
     ]);
   }, [context]);
 
@@ -903,17 +925,47 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
               </div>
             )}
 
-            {/* Nav2 mode: teleop disabled message */}
+            {/* Nav2 mode: path follower status */}
             {state.motorMode === "nav2" && (
               <div
                 style={{
                   padding: "8px",
-                  textAlign: "center",
                   fontSize: "11px",
-                  color: "#555",
+                  color: "#999",
                 }}
               >
-                Teleop disabled — Nav2 controls active
+                {pathFollowerStatus ? (
+                  <>
+                    <div
+                      style={{
+                        fontWeight: "bold",
+                        color: pathFollowerStatus.active
+                          ? "#22c55e"
+                          : pathFollowerStatus.goal_reached
+                            ? "#3b82f6"
+                            : "#f59e0b",
+                        marginBottom: "4px",
+                      }}
+                    >
+                      {pathFollowerStatus.active
+                        ? "Following path"
+                        : pathFollowerStatus.goal_reached
+                          ? "Goal reached"
+                          : "Waiting for path"}
+                    </div>
+                    {pathFollowerStatus.dist_to_goal != null && (
+                      <div>Goal: {pathFollowerStatus.dist_to_goal.toFixed(1)}m</div>
+                    )}
+                    <div>
+                      Path: {pathFollowerStatus.path_points} pts ·{" "}
+                      Pose: {pathFollowerStatus.has_pose ? "OK" : "NO"}
+                    </div>
+                  </>
+                ) : (
+                  <div style={{ textAlign: "center", color: "#555" }}>
+                    Path follower not connected
+                  </div>
+                )}
               </div>
             )}
 
