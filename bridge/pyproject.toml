@@ -7,8 +7,6 @@ requires-python = ">=3.10"
 # This project uses --system-site-packages to access them.
 # Only add pure-Python pip dependencies here if needed.
 dependencies = [
-    "numpy>=1.24",
-    "opencv-python-headless>=4.10",
     "psutil>=5.9",
     "pyyaml>=6.0.3",
 ]

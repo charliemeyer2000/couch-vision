@@ -103,6 +103,9 @@ def _create_nodes(context: LaunchContext):
     )
 
     # --- Foxglove bridge (always runs) ---
+    # topic_whitelist: only advertise topics Foxglove panels actually need.
+    # Excludes raw sensor data (camera/depth/lidar/IMU) that would saturate
+    # the single WebSocket and cause head-of-line blocking for cmd_vel/e_stop.
     nodes.append(
         Node(
             package="foxglove_bridge",
@@ -112,8 +115,29 @@ def _create_nodes(context: LaunchContext):
             parameters=[
                 {
                     "port": 8765,
-                    "send_buffer_limit": 10000000,
-                    "num_threads": 2,
+                    "send_buffer_limit": 50000000,
+                    "num_threads": 4,
+                    "topic_whitelist": [
+                        "/cmd_vel",
+                        "/e_stop",
+                        "/motor/.*",
+                        "/teleop/.*",
+                        "/nav/.*",
+                        "/perception/.*",
+                        "/costmap/.*",
+                        "/global_costmap/.*",
+                        "/wheel_odom",
+                        "/tf",
+                        "/tf_static",
+                        "/robot_description",
+                        "/rosout",
+                        ".*/battery",
+                        ".*/thermal",
+                        ".*/gps/fix",
+                        ".*/gps/velocity",
+                        ".*/heading",
+                        "/couch/.*",
+                    ],
                 }
             ],
         )

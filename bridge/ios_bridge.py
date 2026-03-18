@@ -18,8 +18,6 @@ import threading
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
-import cv2
-import numpy as np
 import rclpy
 from geometry_msgs.msg import TransformStamped, TwistStamped, Vector3Stamped
 from nav_msgs.msg import Odometry
@@ -388,38 +386,6 @@ class IOSBridge(Node):  # type: ignore[misc]
             return
 
         publisher.publish(msg)
-
-        if msg_type == CompressedImage:
-            self._publish_decompressed(topic, msg)
-
-    def _publish_decompressed(self, compressed_topic: str, msg: CompressedImage) -> None:
-        """Decompress JPEG and publish as raw Image."""
-        raw_topic = compressed_topic.replace("/image/compressed", "/image")
-        if raw_topic not in self._topic_publishers:
-            self._topic_publishers[raw_topic] = self.create_publisher(
-                Image, raw_topic, self._sensor_qos
-            )
-
-        buf = np.frombuffer(bytes(msg.data), dtype=np.uint8)
-        bgr = cv2.imdecode(buf, cv2.IMREAD_COLOR)
-        if bgr is None:
-            return
-
-        # Downscale to max 640px wide so rviz can keep up
-        h, w = bgr.shape[:2]
-        max_w = 640
-        if w > max_w:
-            scale = max_w / w
-            bgr = cv2.resize(bgr, (max_w, int(h * scale)), interpolation=cv2.INTER_AREA)
-
-        raw = Image()
-        raw.header = msg.header
-        raw.height, raw.width = bgr.shape[:2]
-        raw.encoding = "bgr8"
-        raw.is_bigendian = 0
-        raw.step = raw.width * 3
-        raw.data = bgr.tobytes()
-        self._topic_publishers[raw_topic].publish(raw)
 
     # -- CDR helpers --
 
