@@ -1275,9 +1275,7 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
           unit="rad/s"
           centered
         />
-        {coastFactor > 0.01 && (
-          <VelocityBar label="Coast" value={coastFactor} maxScale={1.0} unit="" />
-        )}
+        <VelocityBar label="Coast" value={coastFactor} maxScale={1.0} unit="" />
       </div>
 
       {/* Motor Config */}
