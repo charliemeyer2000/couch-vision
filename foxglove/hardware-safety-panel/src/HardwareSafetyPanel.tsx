@@ -802,9 +802,9 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
         rt = gp.axes.length > 5 ? (gp.axes[5]! + 1) / 2 : 0;
       }
       const newCoast = Math.max(lt, rt);
-      setCoastFactor(newCoast);
-      if (newCoast !== prevCoastRef.current) {
+      if (Math.abs(newCoast - prevCoastRef.current) > 0.01) {
         prevCoastRef.current = newCoast;
+        setCoastFactor(newCoast);
         publishMotorConfig(newCoast);
       }
 

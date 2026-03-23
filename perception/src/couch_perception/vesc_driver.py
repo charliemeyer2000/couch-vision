@@ -273,6 +273,20 @@ class VescDriver(Node):
         """Motor IDs to control: None=master, can_id=slave."""
         return [None, self._config.slave_can_id]
 
+    @staticmethod
+    def _vesc_cmd(cmd: int, value: int = 0) -> bytes:
+        return bytes([cmd]) + struct.pack(">i", value)
+
+    def _stop_cmd(self) -> bytes:
+        """Build stop command: handbrake if brake_current > 0, else coast."""
+        if self._config.brake_current > 0.0:
+            return self._vesc_cmd(COMM_SET_HANDBRAKE, int(self._config.brake_current * 1000.0))
+        return self._vesc_cmd(COMM_SET_CURRENT, 0)
+
+    def _send_both(self, cmd: bytes) -> None:
+        self._send(cmd)
+        self._send(cmd, can_id=self._config.slave_can_id)
+
     # ── Serial I/O ────────────────────────────────────────────────────────
 
     def _connect(self) -> None:
@@ -371,12 +385,7 @@ class VescDriver(Node):
             self._e_stopped = msg.data
             self.get_logger().info(f"E-STOP {'ENGAGED' if msg.data else 'RELEASED'}")
             if msg.data:
-                for mid in self._motor_ids:
-                    if self._config.brake_current > 0.0:
-                        cmd = bytes([COMM_SET_HANDBRAKE]) + struct.pack(">i", int(self._config.brake_current * 1000.0))
-                    else:
-                        cmd = bytes([COMM_SET_CURRENT]) + struct.pack(">i", 0)
-                    self._send(cmd, can_id=mid)
+                self._send_both(self._stop_cmd())
 
     def _on_config(self, msg: String) -> None:
         try:
@@ -485,15 +494,9 @@ class VescDriver(Node):
             return
 
         if self._e_stopped:
-            # Bypass ramp — immediate zero current for safety
             self._commanded_erpm[None] = 0
             self._commanded_erpm[self._config.slave_can_id] = 0
-            if self._config.brake_current > 0.0:
-                stop_cmd = bytes([COMM_SET_HANDBRAKE]) + struct.pack(">i", int(self._config.brake_current * 1000.0))
-            else:
-                stop_cmd = bytes([COMM_SET_CURRENT]) + struct.pack(">i", 0)
-            self._send(stop_cmd)
-            self._send(stop_cmd, can_id=self._config.slave_can_id)
+            self._send_both(self._stop_cmd())
             return
 
         # When both targets are zero, brake or coast depending on coast_factor.
@@ -504,19 +507,14 @@ class VescDriver(Node):
             cf = self._config.coast_factor
 
             if cf >= 1.0:
-                # Full coast — zero current, no resistance
-                coast_cmd = bytes([COMM_SET_CURRENT]) + struct.pack(">i", 0)
-                self._send(coast_cmd)
-                self._send(coast_cmd, can_id=self._config.slave_can_id)
+                self._send_both(self._vesc_cmd(COMM_SET_CURRENT, 0))
                 return
 
             if cf > 0.0:
-                # Proportional braking via COMM_SET_CURRENT_BRAKE
+                # Proportional braking — scale from max_brake down to 0
                 max_brake = max(self._config.brake_current, 5.0)
                 effective_ma = int(max_brake * (1.0 - cf) * 1000.0)
-                brake_cmd = bytes([COMM_SET_CURRENT_BRAKE]) + struct.pack(">i", effective_ma)
-                self._send(brake_cmd)
-                self._send(brake_cmd, can_id=self._config.slave_can_id)
+                self._send_both(self._vesc_cmd(COMM_SET_CURRENT_BRAKE, effective_ma))
                 return
 
             # cf == 0.0 — normal braking (no trigger pressed)
@@ -526,12 +524,8 @@ class VescDriver(Node):
             m_actual = abs(m_telem.erpm) if m_telem else 0
             s_actual = abs(s_telem.erpm) if s_telem else 0
 
-            rpm_zero = bytes([COMM_SET_RPM]) + struct.pack(">i", 0)
-            if self._config.brake_current > 0.0:
-                stop_cmd = bytes([COMM_SET_HANDBRAKE]) + struct.pack(">i", int(self._config.brake_current * 1000.0))
-            else:
-                stop_cmd = bytes([COMM_SET_CURRENT]) + struct.pack(">i", 0)
-
+            rpm_zero = self._vesc_cmd(COMM_SET_RPM, 0)
+            stop_cmd = self._stop_cmd()
             self._send(stop_cmd if m_actual <= stop_erpm else rpm_zero)
             self._send(
                 stop_cmd if s_actual <= stop_erpm else rpm_zero,
@@ -545,9 +539,9 @@ class VescDriver(Node):
         self._commanded_erpm[None] = master_erpm
         self._commanded_erpm[self._config.slave_can_id] = slave_erpm
 
-        self._send(bytes([COMM_SET_RPM]) + struct.pack(">i", master_erpm))
+        self._send(self._vesc_cmd(COMM_SET_RPM, master_erpm))
         self._send(
-            bytes([COMM_SET_RPM]) + struct.pack(">i", slave_erpm),
+            self._vesc_cmd(COMM_SET_RPM, slave_erpm),
             can_id=self._config.slave_can_id,
         )
 
@@ -580,10 +574,10 @@ class VescDriver(Node):
             m_erpm = self._commanded_erpm.get(None, 0)
             s_erpm = self._commanded_erpm.get(slave_id, 0)
             if m_erpm != 0:
-                self._send(bytes([COMM_SET_RPM]) + struct.pack(">i", m_erpm))
+                self._send(self._vesc_cmd(COMM_SET_RPM, m_erpm))
             if s_erpm != 0:
                 self._send(
-                    bytes([COMM_SET_RPM]) + struct.pack(">i", s_erpm),
+                    self._vesc_cmd(COMM_SET_RPM, s_erpm),
                     can_id=slave_id,
                 )
 
@@ -722,12 +716,7 @@ class VescDriver(Node):
     # ── Lifecycle ─────────────────────────────────────────────────────────
 
     def shutdown(self) -> None:
-        if self._config.brake_current > 0.0:
-            stop_cmd = bytes([COMM_SET_HANDBRAKE]) + struct.pack(">i", int(self._config.brake_current * 1000.0))
-        else:
-            stop_cmd = bytes([COMM_SET_CURRENT]) + struct.pack(">i", 0)
-        self._send(stop_cmd)
-        self._send(stop_cmd, can_id=self._config.slave_can_id)
+        self._send_both(self._stop_cmd())
         with self._serial_lock:
             if self._serial is not None:
                 self._serial.close()
