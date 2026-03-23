@@ -75,6 +75,17 @@ The iOS app does NOT publish directly to ROS2. Data flows through **three layers
 - **Firmware**: v5.02, HW 60 Flipsky variant (build target `flipsky_60_mk5`)
 - Scripts in `scripts/`: `vesc_hold_test.py`, `vesc_hold_test_erpm.py`, `vesc_rpm_test.py`, `vesc_wasd_rpm_control.py`
 
+## BLE Low-Latency Teleop
+
+Bypasses the high-latency Foxglove WebSocket → Tailscale path for gamepad commands by sending cmd_vel directly over Bluetooth Low Energy.
+
+- **Architecture**: Foxglove panel → HTTP POST localhost:4200 → Mac BLE relay (`scripts/ble_relay.py`) → BLE GATT write → Jetson BLE server (`ble_bridge.py`) → ROS2 `/cmd_vel`
+- **Exclusive mode**: Panel sends cmd_vel on exactly ONE path at a time (BLE or WebSocket, never both). E-stop always goes on both paths for safety.
+- **Failover**: 3 consecutive fetch failures → automatic fallback to WebSocket. Periodic health poll recovers to BLE when relay reconnects.
+- **Jetson BLE server runs in Docker** alongside VESC driver (`docker-compose.vesc.yml`). Mounts `/var/run/dbus` for BlueZ D-Bus access. Starts automatically with `make full-stack VESC=1`.
+- **GATT service UUID**: `a1b2c3d4-e5f6-7890-abcd-ef1234567890`
+- **Jetson BT hardware**: Broadcom BCM4357 combo chip, hci0, BlueZ enabled by default on JetPack 6
+
 ## Common Learnings / Gotchas
 
 ### iOS Sensor Access
@@ -130,6 +141,11 @@ make rviz                     # launch RViz2 with project config
 make build-extension    # build all Foxglove panel extensions
 make install-extension  # install extensions into local Foxglove
 make lint-extension     # typecheck + lint + format check
+
+# BLE low-latency teleop (bypasses Tailscale for gamepad commands)
+# BLE bridge starts automatically with `make full-stack VESC=1`
+make ble-relay          # start BLE relay on Mac (localhost:4200)
+make logs-ble           # tail BLE bridge logs on Jetson
 
 # Utilities
 make ip             # show IP addresses

@@ -30,6 +30,7 @@ interface PanelState {
   pfLinearSpeed: number;
   pfLookahead: number;
   pfGoalTolerance: number;
+  bleRelayEnabled: boolean;
 }
 
 interface TwistMsg {
@@ -351,6 +352,7 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
       pfLinearSpeed: s?.pfLinearSpeed ?? 0.3,
       pfLookahead: s?.pfLookahead ?? 1.5,
       pfGoalTolerance: s?.pfGoalTolerance ?? 0.5,
+      bleRelayEnabled: s?.bleRelayEnabled ?? false,
     };
   });
 
@@ -373,6 +375,10 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
   const [gamepadConnected, setGamepadConnected] = useState(false);
   const [gamepadAxes, setGamepadAxes] = useState<number[]>([]);
   const [gamepadMapping, setGamepadMapping] = useState<string>("");
+  const [bleConnected, setBleConnected] = useState(false);
+  const bleFetchFails = useRef(0);
+
+  const BLE_RELAY_URL = "http://127.0.0.1:4200";
 
   const keysPressed = useRef(new Set<string>());
   const teleopInterval = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -383,6 +389,77 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
   useEffect(() => {
     context.saveState(state);
   }, [context, state]);
+
+  // BLE health poll — detect recovery after failover
+  useEffect(() => {
+    if (!state.bleRelayEnabled) {
+      setBleConnected(false);
+      return;
+    }
+    const checkHealth = async () => {
+      try {
+        const res = await fetch(`${BLE_RELAY_URL}/status`);
+        const data = await res.json();
+        const wasConnected = bleConnected;
+        setBleConnected(data.connected);
+        if (data.connected) bleFetchFails.current = 0;
+        if (data.connected && !wasConnected) {
+          console.log("[BLE] Relay connected — switching to BLE fast path");
+        }
+      } catch {
+        setBleConnected(false);
+      }
+    };
+    checkHealth();
+    const interval = setInterval(checkHealth, 2000);
+    return () => clearInterval(interval);
+  }, [state.bleRelayEnabled, bleConnected, BLE_RELAY_URL]);
+
+  // Exclusive-mode cmd_vel publisher
+  const bleActive = state.bleRelayEnabled && bleConnected;
+  const publishCmdVel = useCallback(
+    (twist: TwistMsg) => {
+      if (bleActive) {
+        // BLE exclusive mode — update velocity bars locally
+        setCurrentLinear(twist.linear.x);
+        setCurrentAngular(twist.angular.z);
+        fetch(`${BLE_RELAY_URL}/cmd_vel`, {
+          method: "POST",
+          body: JSON.stringify({ lx: twist.linear.x, az: twist.angular.z }),
+          headers: { "Content-Type": "application/json" },
+        })
+          .then(() => {
+            bleFetchFails.current = 0;
+          })
+          .catch(() => {
+            bleFetchFails.current += 1;
+            if (bleFetchFails.current >= 3) {
+              console.warn("[BLE] 3 consecutive failures — falling back to WS");
+              setBleConnected(false);
+            }
+          });
+      } else {
+        // WS mode — normal Foxglove publish
+        context.publish?.("/cmd_vel", twist);
+      }
+    },
+    [bleActive, context, BLE_RELAY_URL],
+  );
+
+  // E-stop: always send on both paths for safety
+  const publishEStop = useCallback(
+    (stop: boolean) => {
+      context.publish?.("/e_stop", { data: stop });
+      if (state.bleRelayEnabled) {
+        fetch(`${BLE_RELAY_URL}/e_stop`, {
+          method: "POST",
+          body: JSON.stringify({ stop }),
+          headers: { "Content-Type": "application/json" },
+        }).catch(() => {});
+      }
+    },
+    [context, state.bleRelayEnabled, BLE_RELAY_URL],
+  );
 
   useLayoutEffect(() => {
     context.advertise?.("/cmd_vel", "geometry_msgs/Twist");
@@ -498,10 +575,10 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
   useEffect(() => {
     if (!state.eStopped) return;
     const interval = setInterval(() => {
-      context.publish?.("/cmd_vel", zeroTwist());
+      publishCmdVel(zeroTwist());
     }, PUBLISH_RATE_MS);
     return () => clearInterval(interval);
-  }, [context, state.eStopped]);
+  }, [state.eStopped, publishCmdVel]);
 
   // Heartbeat: publish /teleop/status at 2Hz
   useEffect(() => {
@@ -520,22 +597,22 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
 
   const handleEStop = useCallback(() => {
     setState((s) => ({ ...s, eStopped: true }));
-    context.publish?.("/e_stop", { data: true });
-    context.publish?.("/cmd_vel", zeroTwist());
-  }, [context]);
+    publishEStop(true);
+    publishCmdVel(zeroTwist());
+  }, [publishEStop, publishCmdVel]);
 
   const handleArm = useCallback(() => {
     setState((s) => ({ ...s, eStopped: false }));
-    context.publish?.("/e_stop", { data: false });
-  }, [context]);
+    publishEStop(false);
+  }, [publishEStop]);
 
   const handleModeChange = useCallback(
     (newMode: ControlMode) => {
-      context.publish?.("/cmd_vel", zeroTwist());
+      publishCmdVel(zeroTwist());
       setActiveSource("none");
       setState((s) => ({ ...s, motorMode: newMode }));
     },
-    [context, setActiveSource],
+    [publishCmdVel, setActiveSource],
   );
 
   // WASD keyboard controls — only in WASD mode
@@ -564,7 +641,7 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
     const startPublishing = () => {
       if (teleopInterval.current) return;
       teleopInterval.current = setInterval(() => {
-        context.publish?.("/cmd_vel", computeVelocity());
+        publishCmdVel(computeVelocity());
       }, PUBLISH_RATE_MS);
     };
 
@@ -573,7 +650,7 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
         clearInterval(teleopInterval.current);
         teleopInterval.current = null;
       }
-      context.publish?.("/cmd_vel", zeroTwist());
+      publishCmdVel(zeroTwist());
     };
 
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -605,7 +682,7 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
       stopPublishing();
     };
   }, [
-    context,
+    publishCmdVel,
     state.eStopped,
     state.teleopCollapsed,
     state.motorMode,
@@ -623,14 +700,14 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
       };
       if (!joystickInterval.current) {
         joystickInterval.current = setInterval(() => {
-          context.publish?.("/cmd_vel", {
+          publishCmdVel({
             linear: { x: joystickVel.current.linear, y: 0, z: 0 },
             angular: { x: 0, y: 0, z: joystickVel.current.angular },
           });
         }, PUBLISH_RATE_MS);
       }
     },
-    [context, state.maxLinearVel, state.maxAngularVel, setActiveSource],
+    [publishCmdVel, state.maxLinearVel, state.maxAngularVel, setActiveSource],
   );
 
   const handleJoystickRelease = useCallback(() => {
@@ -639,9 +716,9 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
       joystickInterval.current = null;
     }
     joystickVel.current = { linear: 0, angular: 0 };
-    context.publish?.("/cmd_vel", zeroTwist());
+    publishCmdVel(zeroTwist());
     setActiveSource("none");
-  }, [context, setActiveSource]);
+  }, [publishCmdVel, setActiveSource]);
 
   // Gamepad connection tracking
   useEffect(() => {
@@ -720,19 +797,19 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
       const hasInput = leftY !== 0 || rightX !== 0;
       if (hasInput) {
         setActiveSource("gamepad");
-        context.publish?.("/cmd_vel", {
+        publishCmdVel({
           linear: { x: -leftY * state.maxLinearVel, y: 0, z: 0 },
           angular: { x: 0, y: 0, z: -rightX * state.maxAngularVel },
         });
       } else if (activeSourceRef.current === "gamepad") {
         setActiveSource("none");
-        context.publish?.("/cmd_vel", zeroTwist());
+        publishCmdVel(zeroTwist());
       }
     }, PUBLISH_RATE_MS);
 
     return () => clearInterval(interval);
   }, [
-    context,
+    publishCmdVel,
     state.eStopped,
     state.teleopCollapsed,
     state.motorMode,
@@ -1318,6 +1395,62 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
                 />
               </div>
               <div style={{ flex: 1 }} />
+            </div>
+
+            {/* BLE Fast Path toggle */}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: "4px 6px",
+                background: "#1a1a2e",
+                border: `1px solid ${state.bleRelayEnabled ? (bleConnected ? "#22c55e" : "#f59e0b") : "#333"}`,
+                borderRadius: "3px",
+                marginBottom: "6px",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                <div
+                  style={{
+                    width: "6px",
+                    height: "6px",
+                    borderRadius: "50%",
+                    background: !state.bleRelayEnabled
+                      ? "#555"
+                      : bleConnected
+                        ? "#22c55e"
+                        : "#f59e0b",
+                    boxShadow: state.bleRelayEnabled && bleConnected ? "0 0 3px #22c55e" : "none",
+                  }}
+                />
+                <span style={{ fontSize: "11px", color: "#e0e0e0" }}>BLE Fast Path</span>
+                {state.bleRelayEnabled && (
+                  <span
+                    style={{
+                      fontSize: "9px",
+                      color: bleConnected ? "#22c55e" : "#f59e0b",
+                    }}
+                  >
+                    {bleConnected ? "BLE" : "WS fallback"}
+                  </span>
+                )}
+              </div>
+              <button
+                onClick={() => setState((s) => ({ ...s, bleRelayEnabled: !s.bleRelayEnabled }))}
+                style={{
+                  padding: "2px 8px",
+                  fontSize: "10px",
+                  fontWeight: "bold",
+                  background: state.bleRelayEnabled ? "#166534" : "#1a1a2e",
+                  color: state.bleRelayEnabled ? "#86efac" : "#888",
+                  border: `1px solid ${state.bleRelayEnabled ? "#22c55e" : "#555"}`,
+                  borderRadius: "3px",
+                  cursor: "pointer",
+                }}
+              >
+                {state.bleRelayEnabled ? "ON" : "OFF"}
+              </button>
             </div>
 
             {/* Motor telemetry */}
