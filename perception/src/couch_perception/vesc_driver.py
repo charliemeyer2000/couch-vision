@@ -31,6 +31,8 @@ from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
 from std_msgs.msg import Bool, String
 
+from couch_perception.differential_drive import twist_to_erpm
+
 if TYPE_CHECKING:
     import serial as serial_mod
 
@@ -194,28 +196,17 @@ class VescConfig:
 def _twist_to_erpm(
     linear_x: float, angular_z: float, cfg: VescConfig
 ) -> tuple[int, int]:
-    """Differential drive: Twist → (left_erpm, right_erpm).
-
-    Returns ERPM values with inversion already applied for each motor.
-    Master = right wheel, slave = left wheel.
-    """
-    v_left = linear_x - (angular_z * cfg.wheel_separation / 2.0)
-    v_right = linear_x + (angular_z * cfg.wheel_separation / 2.0)
-    max_erpm = cfg.max_rpm * cfg.pole_pairs
-
-    def to_erpm(v: float) -> int:
-        wheel_rpm = v / (2.0 * math.pi * cfg.wheel_radius) * 60.0
-        motor_erpm = int(wheel_rpm * cfg.gear_ratio * cfg.pole_pairs)
-        return max(-max_erpm, min(max_erpm, motor_erpm))
-
-    left_erpm = to_erpm(v_left)
-    right_erpm = to_erpm(v_right)
-
-    # Apply per-motor inversion: master=right, slave=left
-    master_erpm = -right_erpm if cfg.invert_master else right_erpm
-    slave_erpm = -left_erpm if cfg.invert_slave else left_erpm
-
-    return master_erpm, slave_erpm
+    return twist_to_erpm(
+        linear_x,
+        angular_z,
+        cfg.wheel_radius,
+        cfg.wheel_separation,
+        cfg.gear_ratio,
+        cfg.pole_pairs,
+        cfg.max_rpm * cfg.pole_pairs,
+        invert_master=cfg.invert_master,
+        invert_slave=cfg.invert_slave,
+    )
 
 
 def _tachometer_to_distance(tach_delta: int, cfg: VescConfig) -> float:
