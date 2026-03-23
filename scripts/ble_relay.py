@@ -53,10 +53,18 @@ class BLEPeripheral:
         self._write_count = 0
         self._write_count_start = time.monotonic()
         self._last_latency_ms = 0.0
+        # Cached after start() to avoid per-notify lookups
+        self._cmd_vel_char: BlessGATTCharacteristic | None = None
+        self._e_stop_char: BlessGATTCharacteristic | None = None
+        self._heartbeat_char: BlessGATTCharacteristic | None = None
 
     @property
     def connected(self) -> bool:
         return self._connected
+
+    @property
+    def latency_ms(self) -> float:
+        return self._last_latency_ms
 
     @property
     def writes_per_sec(self) -> float:
@@ -73,7 +81,6 @@ class BLEPeripheral:
         return characteristic.value
 
     def _on_write(self, characteristic: BlessGATTCharacteristic, value: bytearray, **kwargs) -> None:
-        # Central (Jetson) might write back acknowledgments — log them
         logger.debug(f"Write from central: uuid={characteristic.uuid} len={len(value)}")
 
     async def start(self) -> None:
@@ -88,37 +95,27 @@ class BLEPeripheral:
             GATTCharacteristicProperties.read
             | GATTCharacteristicProperties.notify
         )
-        char_perms = (
-            GATTAttributePermissions.readable
-        )
+        char_perms = GATTAttributePermissions.readable
 
-        # CMD_VEL: notify to Jetson (primary data path)
-        await server.add_new_characteristic(
-            SERVICE_UUID, CMD_VEL_UUID, char_props, None, char_perms,
-        )
-        # E_STOP: notify to Jetson (safety-critical)
-        await server.add_new_characteristic(
-            SERVICE_UUID, E_STOP_UUID, char_props, None, char_perms,
-        )
-        # HEARTBEAT: notify, 1-byte wrapping counter
-        await server.add_new_characteristic(
-            SERVICE_UUID, HEARTBEAT_UUID, char_props, None, char_perms,
-        )
+        for uuid in (CMD_VEL_UUID, E_STOP_UUID, HEARTBEAT_UUID):
+            await server.add_new_characteristic(
+                SERVICE_UUID, uuid, char_props, None, char_perms,
+            )
 
         await server.start()
         self._server = server
+        self._cmd_vel_char = server.get_characteristic(CMD_VEL_UUID)
+        self._e_stop_char = server.get_characteristic(E_STOP_UUID)
+        self._heartbeat_char = server.get_characteristic(HEARTBEAT_UUID)
         self._connected = True
         logger.info(f"BLE peripheral '{DEVICE_NAME}' advertising service {SERVICE_UUID}")
 
     def notify_cmd_vel(self, linear_x: float, angular_z: float) -> bool:
         """Update CMD_VEL characteristic and send BLE notification."""
-        if self._server is None:
+        if self._cmd_vel_char is None:
             return False
         t0 = time.monotonic()
-        char = self._server.get_characteristic(CMD_VEL_UUID)
-        if char is None:
-            return False
-        char.value = bytearray(struct.pack("<ff", linear_x, angular_z))
+        self._cmd_vel_char.value = bytearray(struct.pack("<ff", linear_x, angular_z))
         self._server.update_value(SERVICE_UUID, CMD_VEL_UUID)
         self._last_latency_ms = (time.monotonic() - t0) * 1000
         self._write_count += 1
@@ -126,12 +123,9 @@ class BLEPeripheral:
 
     def notify_e_stop(self, stop: bool) -> bool:
         """Update E_STOP characteristic and send BLE notification."""
-        if self._server is None:
+        if self._e_stop_char is None:
             return False
-        char = self._server.get_characteristic(E_STOP_UUID)
-        if char is None:
-            return False
-        char.value = bytearray([0x01 if stop else 0x00])
+        self._e_stop_char.value = bytearray([0x01 if stop else 0x00])
         self._server.update_value(SERVICE_UUID, E_STOP_UUID)
         return True
 
@@ -140,24 +134,21 @@ class BLEPeripheral:
         seq = 0
         while True:
             await asyncio.sleep(0.5)
-            if self._server is None:
+            if self._heartbeat_char is None:
                 continue
-            char = self._server.get_characteristic(HEARTBEAT_UUID)
-            if char is not None:
-                seq = (seq + 1) % 256
-                char.value = bytearray([seq])
-                self._server.update_value(SERVICE_UUID, HEARTBEAT_UUID)
+            seq = (seq + 1) % 256
+            self._heartbeat_char.value = bytearray([seq])
+            self._server.update_value(SERVICE_UUID, HEARTBEAT_UUID)
 
 
 # -- HTTP Server ---------------------------------------------------------------
 
 
-def _cors_headers() -> dict[str, str]:
-    return {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type",
-    }
+_CORS_HEADERS = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type",
+}
 
 
 def _make_app(peripheral: BLEPeripheral) -> web.Application:
@@ -168,10 +159,10 @@ def _make_app(peripheral: BLEPeripheral) -> web.Application:
             az = float(data.get("az", 0.0))
         except (json.JSONDecodeError, ValueError, TypeError):
             return web.json_response(
-                {"error": "expected JSON {lx, az}"}, status=400, headers=_cors_headers()
+                {"error": "expected JSON {lx, az}"}, status=400, headers=_CORS_HEADERS
             )
         ok = peripheral.notify_cmd_vel(lx, az)
-        return web.json_response({"ok": ok}, headers=_cors_headers())
+        return web.json_response({"ok": ok}, headers=_CORS_HEADERS)
 
     async def handle_e_stop(request: web.Request) -> web.Response:
         try:
@@ -179,23 +170,23 @@ def _make_app(peripheral: BLEPeripheral) -> web.Application:
             stop = bool(data.get("stop", True))
         except (json.JSONDecodeError, ValueError, TypeError):
             return web.json_response(
-                {"error": "expected JSON {stop}"}, status=400, headers=_cors_headers()
+                {"error": "expected JSON {stop}"}, status=400, headers=_CORS_HEADERS
             )
         ok = peripheral.notify_e_stop(stop)
-        return web.json_response({"ok": ok}, headers=_cors_headers())
+        return web.json_response({"ok": ok}, headers=_CORS_HEADERS)
 
     async def handle_status(_request: web.Request) -> web.Response:
         return web.json_response(
             {
                 "connected": peripheral.connected,
-                "latency_ms": round(peripheral._last_latency_ms, 2),
+                "latency_ms": round(peripheral.latency_ms, 2),
                 "writes_per_sec": round(peripheral.writes_per_sec, 1),
             },
-            headers=_cors_headers(),
+            headers=_CORS_HEADERS,
         )
 
     async def handle_options(_request: web.Request) -> web.Response:
-        return web.Response(status=204, headers=_cors_headers())
+        return web.Response(status=204, headers=_CORS_HEADERS)
 
     app = web.Application()
     app.router.add_post("/cmd_vel", handle_cmd_vel)
@@ -211,8 +202,7 @@ async def _main() -> None:
     logger.info("Starting BLE peripheral server...")
     await peripheral.start()
 
-    # Start heartbeat in background
-    asyncio.create_task(peripheral.heartbeat_loop())
+    heartbeat_task = asyncio.create_task(peripheral.heartbeat_loop())
 
     app = _make_app(peripheral)
     runner = web.AppRunner(app)
@@ -228,6 +218,7 @@ async def _main() -> None:
     except asyncio.CancelledError:
         pass
     finally:
+        heartbeat_task.cancel()
         await runner.cleanup()
 
 

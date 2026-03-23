@@ -37,6 +37,7 @@ HEARTBEAT_UUID = "a1b2c3d4-e5f6-7890-abcd-ef1234567893"
 DEVICE_NAME = "CouchVision-BLE"
 SCAN_TIMEOUT_S = 10.0
 RECONNECT_DELAY_S = 2.0
+_SERVICE_UUID_LOWER = SERVICE_UUID.lower()
 
 
 # -- ROS2 Node -----------------------------------------------------------------
@@ -49,7 +50,6 @@ class BLEBridgeNode(Node):
         self._cmd_vel_pub = self.create_publisher(Twist, "/cmd_vel", qos)
         self._e_stop_pub = self.create_publisher(Bool, "/e_stop", qos)
         self._cmd_count = 0
-        self._estop_count = 0
 
     def publish_cmd_vel(self, linear_x: float, angular_z: float) -> None:
         msg = Twist()
@@ -66,46 +66,38 @@ class BLEBridgeNode(Node):
         msg = Bool()
         msg.data = stop
         self._e_stop_pub.publish(msg)
-        self._estop_count += 1
         self.get_logger().info(f"BLE e_stop: {'STOP' if stop else 'RELEASE'}")
 
 
 # -- BLE Client ----------------------------------------------------------------
 
 
-_ros_node: BLEBridgeNode | None = None
-
-
-def _on_cmd_vel(_char_handle: int, data: bytearray) -> None:
-    """Handle CMD_VEL notification from Mac BLE peripheral."""
-    if len(data) == 8 and _ros_node is not None:
-        linear_x, angular_z = struct.unpack("<ff", data)
-        _ros_node.publish_cmd_vel(linear_x, angular_z)
-
-
-def _on_e_stop(_char_handle: int, data: bytearray) -> None:
-    """Handle E_STOP notification from Mac BLE peripheral."""
-    if len(data) >= 1 and _ros_node is not None:
-        _ros_node.publish_e_stop(data[0] != 0)
-
-
-def _on_heartbeat(_char_handle: int, data: bytearray) -> None:
-    """Handle heartbeat notification — just log at debug level."""
-    logger.debug(f"Heartbeat: seq={data[0]}")
-
-
-async def _connect_and_subscribe() -> None:
+async def _connect_and_subscribe(node: BLEBridgeNode) -> None:
     """Scan for the Mac BLE peripheral, connect, and subscribe to notifications."""
+
+    def on_cmd_vel(_char_handle: int, data: bytearray) -> None:
+        if len(data) == 8:
+            linear_x, angular_z = struct.unpack("<ff", data)
+            node.publish_cmd_vel(linear_x, angular_z)
+
+    def on_e_stop(_char_handle: int, data: bytearray) -> None:
+        if len(data) >= 1:
+            node.publish_e_stop(data[0] != 0)
+
+    def on_heartbeat(_char_handle: int, data: bytearray) -> None:
+        logger.debug(f"Heartbeat: seq={data[0]}")
+
+    def _scan_filter(d, ad) -> bool:
+        return (
+            _SERVICE_UUID_LOWER in {s.lower() for s in (ad.service_uuids or [])}
+            or (d.name or "").startswith(DEVICE_NAME)
+        )
+
     while True:
         try:
             logger.info("Scanning for CouchVision BLE peripheral...")
             device = await BleakScanner.find_device_by_filter(
-                lambda d, ad: (
-                    SERVICE_UUID.lower()
-                    in [s.lower() for s in (ad.service_uuids or [])]
-                    or (d.name or "").startswith(DEVICE_NAME)
-                ),
-                timeout=SCAN_TIMEOUT_S,
+                _scan_filter, timeout=SCAN_TIMEOUT_S,
             )
             if device is None:
                 logger.warning(
@@ -117,8 +109,10 @@ async def _connect_and_subscribe() -> None:
 
             logger.info(f"Found peripheral: {device.name} ({device.address})")
 
-            async with BleakClient(device) as client:
-                # Verify the GATT service is present
+            disconnected = asyncio.Event()
+            async with BleakClient(
+                device, disconnected_callback=lambda _c: disconnected.set()
+            ) as client:
                 svcs = client.services
                 if not svcs.get_service(SERVICE_UUID):
                     logger.warning(
@@ -132,17 +126,12 @@ async def _connect_and_subscribe() -> None:
                     f"Connected to {device.name} — subscribing to notifications"
                 )
 
-                # Subscribe to all three characteristics
-                await client.start_notify(CMD_VEL_UUID, _on_cmd_vel)
-                await client.start_notify(E_STOP_UUID, _on_e_stop)
-                await client.start_notify(HEARTBEAT_UUID, _on_heartbeat)
+                await client.start_notify(CMD_VEL_UUID, on_cmd_vel)
+                await client.start_notify(E_STOP_UUID, on_e_stop)
+                await client.start_notify(HEARTBEAT_UUID, on_heartbeat)
 
                 logger.info("BLE bridge active — forwarding to ROS2")
-
-                # Stay connected until disconnect
-                while client.is_connected:
-                    await asyncio.sleep(1.0)
-
+                await disconnected.wait()
                 logger.warning("BLE peripheral disconnected")
 
         except Exception as e:
@@ -160,23 +149,20 @@ def main() -> None:
         level=logging.INFO,
         format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
     )
-    global _ros_node
-
     rclpy.init()
-    _ros_node = BLEBridgeNode()
+    node = BLEBridgeNode()
 
-    # Spin ROS2 in a background thread so the asyncio loop can run BLE
-    spin_thread = threading.Thread(target=rclpy.spin, args=(_ros_node,), daemon=True)
+    spin_thread = threading.Thread(target=rclpy.spin, args=(node,), daemon=True)
     spin_thread.start()
 
     logger.info("BLE bridge starting — ROS2 node active, scanning for Mac peripheral...")
 
     try:
-        asyncio.run(_connect_and_subscribe())
+        asyncio.run(_connect_and_subscribe(node))
     except KeyboardInterrupt:
         pass
     finally:
-        _ros_node.destroy_node()
+        node.destroy_node()
         rclpy.shutdown()
 
 
