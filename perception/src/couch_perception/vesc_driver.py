@@ -29,6 +29,7 @@ from rclpy.qos import QoSProfile
 from builtin_interfaces.msg import Time as RosTime
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
+from sensor_msgs.msg import BatteryState
 from std_msgs.msg import Bool, String
 
 from couch_perception.differential_drive import twist_to_erpm
@@ -254,6 +255,7 @@ class VescDriver(Node):
         self.create_subscription(String, "/motor/config", self._on_config, qos)
         self._odom_pub = self.create_publisher(Odometry, "/wheel_odom", qos)
         self._status_pub = self.create_publisher(String, "/motor/status", qos)
+        self._battery_pub = self.create_publisher(BatteryState, "/motor/battery", qos)
 
         self.create_timer(0.05, self._command_loop)
         self.create_timer(0.1, self._telemetry_loop)
@@ -660,6 +662,28 @@ class VescDriver(Node):
         msg = String()
         msg.data = json.dumps(status)
         self._status_pub.publish(msg)
+        self._publish_battery(m, s)
+
+    def _publish_battery(self, m: VescTelemetry, s: VescTelemetry) -> None:
+        msg = BatteryState()
+        msg.header.stamp = _stamp_from_epoch(time.time())
+        msg.header.frame_id = "base_link"
+        msg.voltage = float(m.voltage_input)
+        msg.current = float(m.current_input + s.current_input)
+        msg.temperature = float(max(m.temp_fet, s.temp_fet))
+        msg.percentage = float("nan")
+        msg.charge = float("nan")
+        msg.capacity = float("nan")
+        msg.design_capacity = float("nan")
+        msg.power_supply_status = BatteryState.POWER_SUPPLY_STATUS_DISCHARGING
+        msg.power_supply_health = BatteryState.POWER_SUPPLY_HEALTH_GOOD
+        msg.power_supply_technology = BatteryState.POWER_SUPPLY_TECHNOLOGY_UNKNOWN
+        msg.present = self._serial is not None
+        msg.location = "VESC ESC"
+        msg.serial_number = ""
+        msg.cell_voltage = []
+        msg.cell_temperature = []
+        self._battery_pub.publish(msg)
 
     # ── Lifecycle ─────────────────────────────────────────────────────────
 

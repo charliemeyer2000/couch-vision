@@ -44,6 +44,13 @@ interface BatteryStateMsg {
   percentage: number;
 }
 
+interface VescBatteryMsg {
+  voltage: number;
+  current: number;
+  temperature: number;
+  present: boolean;
+}
+
 interface NavStatus {
   route_resolved: boolean;
   ekf_initialized: boolean;
@@ -366,6 +373,7 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
   const [thermalState, setThermalState] = useState<number | null>(null);
   const [navStatus, setNavStatus] = useState<NavStatus | null>(null);
   const [motorStatus, setMotorStatus] = useState<MotorStatus | null>(null);
+  const [vescBattery, setVescBattery] = useState<VescBatteryMsg | null>(null);
   const [pathFollowerStatus, setPathFollowerStatus] = useState<PathFollowerStatus | null>(null);
   const [renderDone, setRenderDone] = useState<(() => void) | undefined>();
   const [gamepadConnected, setGamepadConnected] = useState(false);
@@ -435,6 +443,8 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
             } catch {
               /* ignore */
             }
+          } else if (ev.topic === "/motor/battery") {
+            setVescBattery(ev.message as VescBatteryMsg);
           } else if (ev.topic === "/nav/path_follower/status") {
             try {
               const data = JSON.parse((ev.message as { data: string }).data) as PathFollowerStatus;
@@ -453,6 +463,7 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
       { topic: "/iphone/thermal" },
       { topic: "/nav/status" },
       { topic: "/motor/status" },
+      { topic: "/motor/battery" },
       { topic: "/nav/path_follower/status" },
     ]);
   }, [context]);
@@ -1405,31 +1416,81 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
                   />
                 )}
                 {motorStatus.connected && (
-                  <div
-                    style={{
-                      display: "flex",
-                      gap: "8px",
-                      fontSize: "10px",
-                      fontFamily: "monospace",
-                      color: "#999",
-                      marginTop: "2px",
-                    }}
-                  >
-                    <span>
-                      FET:{" "}
-                      <span style={{ color: motorStatus.temp_fet > 80 ? "#f97316" : "#e0e0e0" }}>
-                        {motorStatus.temp_fet.toFixed(1)}C
+                  <>
+                    {vescBattery && (
+                      <div
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          padding: "4px 6px",
+                          background: "#1a1a2e",
+                          border: "1px solid #333",
+                          borderRadius: "3px",
+                          marginTop: "4px",
+                          fontFamily: "monospace",
+                          fontSize: "11px",
+                        }}
+                      >
+                        <div>
+                          <span style={{ color: "#999" }}>V </span>
+                          <span style={{ color: "#e0e0e0" }}>
+                            {vescBattery.voltage.toFixed(1)}V
+                          </span>
+                        </div>
+                        <div>
+                          <span style={{ color: "#999" }}>I </span>
+                          <span
+                            style={{
+                              color:
+                                vescBattery.current > 20
+                                  ? "#ef4444"
+                                  : vescBattery.current > 10
+                                    ? "#f59e0b"
+                                    : "#22c55e",
+                              fontWeight: "bold",
+                            }}
+                          >
+                            {vescBattery.current.toFixed(1)}A
+                          </span>
+                        </div>
+                        <div>
+                          <span style={{ color: "#999" }}>P </span>
+                          <span style={{ color: "#e0e0e0" }}>
+                            {(vescBattery.voltage * vescBattery.current).toFixed(0)}W
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: "8px",
+                        fontSize: "10px",
+                        fontFamily: "monospace",
+                        color: "#999",
+                        marginTop: "2px",
+                      }}
+                    >
+                      <span>
+                        FET:{" "}
+                        <span style={{ color: motorStatus.temp_fet > 80 ? "#f97316" : "#e0e0e0" }}>
+                          {motorStatus.temp_fet.toFixed(1)}C
+                        </span>
                       </span>
-                    </span>
-                    <span>
-                      Motor:{" "}
-                      <span style={{ color: motorStatus.temp_motor > 100 ? "#ef4444" : "#e0e0e0" }}>
-                        {motorStatus.temp_motor.toFixed(1)}C
+                      <span>
+                        Motor:{" "}
+                        <span style={{ color: motorStatus.temp_motor > 100 ? "#ef4444" : "#e0e0e0" }}>
+                          {motorStatus.temp_motor.toFixed(1)}C
+                        </span>
                       </span>
-                    </span>
-                    <span>{motorStatus.voltage_input.toFixed(1)}V</span>
-                    <span>{motorStatus.current_input.toFixed(1)}A</span>
-                  </div>
+                      {!vescBattery && (
+                        <>
+                          <span>{motorStatus.voltage_input.toFixed(1)}V</span>
+                          <span>{motorStatus.current_input.toFixed(1)}A</span>
+                        </>
+                      )}
+                    </div>
+                  </>
                 )}
                 {motorStatus.fault_code !== 0 && (
                   <div style={{ fontSize: "10px", color: "#ef4444", marginTop: "2px" }}>
@@ -1451,6 +1512,14 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
           </span>
           <span> · Thermal: </span>
           <span style={{ color: thermal.color }}>{thermal.text}</span>
+          {vescBattery && (
+            <>
+              <span> · ESC: </span>
+              <span style={{ color: "#e0e0e0" }}>
+                {vescBattery.voltage.toFixed(1)}V {vescBattery.current.toFixed(1)}A
+              </span>
+            </>
+          )}
         </div>
         <div>
           {navStatus ? (
