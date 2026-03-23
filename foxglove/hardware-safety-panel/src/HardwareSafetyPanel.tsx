@@ -352,7 +352,7 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
       pfLinearSpeed: s?.pfLinearSpeed ?? 0.3,
       pfLookahead: s?.pfLookahead ?? 1.5,
       pfGoalTolerance: s?.pfGoalTolerance ?? 0.5,
-      bleRelayEnabled: s?.bleRelayEnabled ?? false,
+      bleRelayEnabled: s?.bleRelayEnabled ?? true,
     };
   });
 
