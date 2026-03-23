@@ -340,7 +340,7 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
       motorCollapsed: s?.motorCollapsed ?? false,
       motorMode: validMode,
       maxRpm: s?.maxRpm ?? 500,
-      stopRpm: s?.stopRpm ?? 50,
+      stopRpm: s?.stopRpm ?? 300,
       rampUpRpmPerSec: s?.rampUpRpmPerSec ?? 500,
       rampDownRpmPerSec: s?.rampDownRpmPerSec ?? 500,
       maxRpmLimit: s?.maxRpmLimit ?? 10000,
@@ -369,6 +369,8 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
   const [pathFollowerStatus, setPathFollowerStatus] = useState<PathFollowerStatus | null>(null);
   const [renderDone, setRenderDone] = useState<(() => void) | undefined>();
   const [gamepadConnected, setGamepadConnected] = useState(false);
+  const [gamepadAxes, setGamepadAxes] = useState<number[]>([]);
+  const [gamepadMapping, setGamepadMapping] = useState<string>("");
 
   const keysPressed = useRef(new Set<string>());
   const teleopInterval = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -694,12 +696,19 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
       if (curr[0] && !prev[0]) handleArm();
       gamepadButtons.current = curr;
 
+      // Always capture axes for debug display
+      setGamepadAxes(Array.from(gp.axes));
+      setGamepadMapping(gp.mapping);
+
       if (!stickActive) return;
 
       const leftY = applyDeadzone(gp.axes[1] ?? 0);
+      // Standard mapping: axes[2] = right stick X
+      // Non-standard (Linux evdev): axes[3] = right stick X (axes[2] = L2 trigger)
+      const rightXIndex = gp.mapping === "standard" ? 2 : 3;
       const rightX =
-        gp.axes.length > 2
-          ? applyDeadzone(gp.axes[2]!)
+        gp.axes.length > rightXIndex
+          ? applyDeadzone(gp.axes[rightXIndex]!)
           : applyDeadzone(gp.axes[0] ?? 0);
 
       const hasInput = leftY !== 0 || rightX !== 0;
@@ -1063,25 +1072,57 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
                 </div>
 
                 {gamepadConnected && (
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      gap: "4px",
-                      marginTop: "3px",
-                    }}
-                  >
+                  <div style={{ marginTop: "3px" }}>
                     <div
                       style={{
-                        width: "6px",
-                        height: "6px",
-                        borderRadius: "50%",
-                        background: "#22c55e",
-                        boxShadow: "0 0 3px #22c55e",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        gap: "4px",
                       }}
-                    />
-                    <span style={{ fontSize: "9px", color: "#22c55e" }}>Gamepad</span>
+                    >
+                      <div
+                        style={{
+                          width: "6px",
+                          height: "6px",
+                          borderRadius: "50%",
+                          background: "#22c55e",
+                          boxShadow: "0 0 3px #22c55e",
+                        }}
+                      />
+                      <span style={{ fontSize: "9px", color: "#22c55e" }}>
+                        Gamepad ({gamepadMapping || "non-standard"})
+                      </span>
+                    </div>
+                    {gamepadAxes.length > 0 && (
+                      <div
+                        style={{
+                          fontSize: "9px",
+                          color: "#666",
+                          fontFamily: "monospace",
+                          textAlign: "center",
+                          marginTop: "2px",
+                          lineHeight: "1.4",
+                        }}
+                      >
+                        {gamepadAxes.slice(0, 6).map((v, i) => {
+                          const rightXIndex = gamepadMapping === "standard" ? 2 : 3;
+                          const isActive = i === 1 || i === rightXIndex;
+                          return (
+                            <span
+                              key={i}
+                              style={{
+                                color: isActive ? "#22c55e" : "#555",
+                                fontWeight: isActive ? "bold" : "normal",
+                              }}
+                            >
+                              {i > 0 ? " " : ""}
+                              {i}:{v.toFixed(2)}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 )}
               </>
