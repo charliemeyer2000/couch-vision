@@ -101,11 +101,12 @@ E-stop, teleop controls, motor telemetry, system status.
 **Control modes:**
 - **Gamepad** (default) — Sticks drive directly (no deadman button). Shows warning if no gamepad connected. WASD keys and mouse joystick disabled.
 - **WASD** — Keyboard WASD + mouse drag joystick + gamepad sticks all active.
-- **Nav2** — All teleop inputs disabled, Nav2 controller publishes `/cmd_vel`.
+- **Nav2** — Teleop inputs disabled. Shows path follower status (active/goal reached/waiting) and inline tuning controls for speed, lookahead, and goal tolerance.
 
 **Motor config:**
 - **Max RPM** — ERPM safety clamp sent to VESC driver.
-- **Ramp (RPM/s)** — Slew rate limit for acceleration and deceleration. Prevents torque spikes that could twist the motor out of its mounting. Default 500 RPM/s (0→max in ~1s). Set to 0 to disable. E-stop always bypasses the ramp for immediate stop.
+- **Ramp Up / Ramp Down (RPM/s)** — Separate slew rate limits for acceleration and deceleration. Prevents torque spikes. Default 500 RPM/s each. E-stop always bypasses the ramp for immediate stop.
+- **Stop RPM** — ERPM threshold below which the motor is considered stopped (used for active braking). Default 50.
 
 **E-stop sources:** Panel button, keyboard, gamepad B/Circle (arm with A/Cross). Gamepad e-stop/arm works in all modes.
 
@@ -185,7 +186,7 @@ Topic prefix is `/<device_name>/` (e.g. `/iphone_charlie/`).
 |-------|------|-----------|-------------|
 | `/cmd_vel` | `geometry_msgs/Twist` | Panel/Nav2 → VESC | Velocity commands |
 | `/e_stop` | `std_msgs/Bool` | Panel → Planner + VESC | Emergency stop (`true`=stopped) |
-| `/motor/config` | `std_msgs/String` | Panel → VESC | `{mode, max_rpm, max_ramp_rpm_s}` |
+| `/motor/config` | `std_msgs/String` | Panel → VESC | `{mode, max_rpm, stop_rpm, ramp_up_rpm_s, ramp_down_rpm_s}` |
 | `/motor/status` | `std_msgs/String` | VESC → Panel | RPM, temps, voltage, faults, ramp config |
 | `/wheel_odom` | `nav_msgs/Odometry` | VESC → ROS2 | Wheel encoder odometry |
 | `/teleop/status` | `std_msgs/String` | Panel → All | `{mode, active_source, gamepad_connected, e_stopped}` (2Hz) |
@@ -193,6 +194,8 @@ Topic prefix is `/<device_name>/` (e.g. `/iphone_charlie/`).
 | `/nav/status` | `std_msgs/String` | Planner → Panels | 1Hz JSON status |
 | `/nav/planned_path` | `nav_msgs/Path` | Planner → Foxglove | Nav2-planned path |
 | `/nav/google_maps_path` | `nav_msgs/Path` | Planner → Foxglove | Google Maps walking route |
+| `/nav/path_follower/config` | `std_msgs/String` | Panel → Follower | `{linear_speed, lookahead, goal_tolerance, max_angular_vel}` |
+| `/nav/path_follower/status` | `std_msgs/String` | Follower → Panel | Active state, path points, dist to goal |
 | `/perception/image_annotated/compressed` | `sensor_msgs/CompressedImage` | Planner → Foxglove | Camera with detection overlays |
 
 ## Project Structure
@@ -211,6 +214,7 @@ perception/               # Python perception + planning (uv project)
 ├── configs/              # Pipeline presets (default, fast, accurate)
 ├── src/couch_perception/
 │   ├── vesc_driver.py    # VESC motor driver (ROS2 node)
+│   ├── path_follower.py  # Pure pursuit path follower (ROS2 node)
 │   ├── nav2_planner.py   # Nav2 + EKF + perception orchestrator
 │   ├── perception_pipeline.py
 │   ├── yolov8_detector.py
