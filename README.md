@@ -188,6 +188,7 @@ Topic prefix is `/<device_name>/` (e.g. `/iphone_charlie/`).
 | `/e_stop` | `std_msgs/Bool` | Panel → Planner + VESC | Emergency stop (`true`=stopped) |
 | `/motor/config` | `std_msgs/String` | Panel → VESC | `{mode, max_rpm, stop_rpm, ramp_up_rpm_s, ramp_down_rpm_s}` |
 | `/motor/status` | `std_msgs/String` | VESC → Panel | RPM, temps, voltage, faults, ramp config |
+| `/motor/battery` | `sensor_msgs/BatteryState` | VESC → Panel | Combined ESC voltage, current, FET temperature |
 | `/wheel_odom` | `nav_msgs/Odometry` | VESC → ROS2 | Wheel encoder odometry |
 | `/teleop/status` | `std_msgs/String` | Panel → All | `{mode, active_source, gamepad_connected, e_stopped}` (2Hz) |
 | `/nav/set_destination` | `std_msgs/String` | Nav Panel → Planner | JSON destination command |
