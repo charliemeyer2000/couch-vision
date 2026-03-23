@@ -652,14 +652,15 @@ class Nav2Planner:
             reliability=ReliabilityPolicy.RELIABLE,
         )
         qos = QoSProfile(depth=5)
+        image_qos = QoSProfile(depth=1)
 
         self._costmap_pub = node.create_publisher(OccupancyGrid, "/costmap/occupancy_grid", qos_reliable)
         self._path_pub = node.create_publisher(Path, "/nav/planned_path", qos)
         self._gmaps_path_pub = node.create_publisher(Path, "/nav/google_maps_path", qos)
         self._goal_marker_pub = node.create_publisher(Marker, "/nav/goal_marker", qos)
         self._ego_marker_pub = node.create_publisher(Marker, "/nav/ego_marker", qos)
-        self._costmap_img_pub = node.create_publisher(CompressedImage, "/nav/costmap_image/compressed", qos)
-        self._annotated_img_pub = node.create_publisher(CompressedImage, "/perception/image_annotated/compressed", qos)
+        self._costmap_img_pub = node.create_publisher(CompressedImage, "/nav/costmap_image/compressed", image_qos)
+        self._annotated_img_pub = node.create_publisher(CompressedImage, "/perception/image_annotated/compressed", image_qos)
         self._pc_drivable_pub = node.create_publisher(PointCloud2, "/perception/pointcloud/drivable", qos)
         self._pc_lanes_pub = node.create_publisher(PointCloud2, "/perception/pointcloud/lanes", qos)
         self._pc_det_pub = node.create_publisher(PointCloud2, "/perception/pointcloud/detections", qos)
@@ -682,9 +683,9 @@ class Nav2Planner:
         )
 
         if republish_sensors:
-            self._camera_pub = node.create_publisher(CompressedImage, "/camera/image/compressed", qos)
-            self._camera_info_pub = node.create_publisher(CameraInfo, "/camera/camera_info", qos)
-            self._depth_pub = node.create_publisher(Image, "/camera/depth/image", qos)
+            self._camera_pub = node.create_publisher(CompressedImage, "/camera/image/compressed", image_qos)
+            self._camera_info_pub = node.create_publisher(CameraInfo, "/camera/camera_info", image_qos)
+            self._depth_pub = node.create_publisher(Image, "/camera/depth/image", image_qos)
             self._odom_pub = node.create_publisher(Odometry, "/odom", qos)
             self._imu_pub = node.create_publisher(Imu, "/imu", qos)
             self._gps_pub = node.create_publisher(NavSatFix, "/gps/fix", qos)
@@ -702,6 +703,7 @@ class Nav2Planner:
         self._plan_goal_handle = None
         self._plan_result_future = None
         self._latest_path: Path | None = None
+        self._last_visualization_publish = 0.0
 
         # Localization tracking indices/state (GPS position + phone heading)
         self._gps_idx = 0
@@ -1161,8 +1163,9 @@ class Nav2Planner:
         self._poll_planning_result(frame.timestamp)
         self._submit_planning_goal(goal_x, goal_y, frame.timestamp)
 
-        # Throttled image overlays — every 3rd frame
-        if self._frame_num % 3 == 0:
+        # Throttled image overlays — at most 1 Hz
+        now = time.monotonic()
+        if now - self._last_visualization_publish >= 1.0:
             self._costmap_img_pub.publish(
                 _path_to_costmap_image(grid, self._latest_path, goal_x, goal_y)
             )
@@ -1179,6 +1182,7 @@ class Nav2Planner:
                     frame.image, result.yolop_result, result.detections, path_pixels,
                 )
             )
+            self._last_visualization_publish = now
 
         self._frame_num += 1
         dt = time.perf_counter() - t0

@@ -66,6 +66,7 @@ class PerceptionNode(Node):  # type: ignore[misc]
 
         self._frame_count = 0
         self._last_log_time = time.monotonic()
+        self._last_overlay_publish = 0.0
         self.get_logger().info(
             f"Perception node ready — subscribing to {input_topic}"
         )
@@ -117,12 +118,15 @@ class PerceptionNode(Node):  # type: ignore[misc]
             overlay = cv2.addWeighted(overlay, 1.0, da_color, 0.3, 0)
             overlay[yolop_result.lane_mask == 1] = (255, 100, 0)
 
-        _, jpeg = cv2.imencode(".jpg", overlay, [cv2.IMWRITE_JPEG_QUALITY, 70])
-        out = CompressedImage()
-        out.header = msg.header
-        out.format = "jpeg"
-        out.data = jpeg.tobytes()
-        self._overlay_pub.publish(out)
+        now = time.monotonic()
+        if now - self._last_overlay_publish >= 1.0:
+            _, jpeg = cv2.imencode(".jpg", overlay, [cv2.IMWRITE_JPEG_QUALITY, 70])
+            out = CompressedImage()
+            out.header = msg.header
+            out.format = "jpeg"
+            out.data = jpeg.tobytes()
+            self._overlay_pub.publish(out)
+            self._last_overlay_publish = now
 
         self._frame_count += 1
         now = time.monotonic()
