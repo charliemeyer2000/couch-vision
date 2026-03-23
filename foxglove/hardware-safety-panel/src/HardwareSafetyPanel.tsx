@@ -26,6 +26,7 @@ interface PanelState {
   stopRpm: number;
   rampUpRpmPerSec: number;
   rampDownRpmPerSec: number;
+  brakeCurrent: number;
   maxRpmLimit: number;
   maxLinearLimit: number;
   maxAngularLimit: number;
@@ -350,6 +351,7 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
       stopRpm: s?.stopRpm ?? 50,
       rampUpRpmPerSec: s?.rampUpRpmPerSec ?? 500,
       rampDownRpmPerSec: s?.rampDownRpmPerSec ?? 500,
+      brakeCurrent: s?.brakeCurrent ?? 0.0,
       maxRpmLimit: s?.maxRpmLimit ?? 10000,
       maxLinearLimit: s?.maxLinearLimit ?? 5.0,
       maxAngularLimit: s?.maxAngularLimit ?? 5.0,
@@ -481,11 +483,12 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
         stop_rpm: state.stopRpm,
         ramp_up_rpm_s: state.rampUpRpmPerSec,
         ramp_down_rpm_s: state.rampDownRpmPerSec,
+        brake_current: state.brakeCurrent,
         max_linear_vel: state.maxLinearVel,
         max_angular_vel: state.maxAngularVel,
       }),
     });
-  }, [context, state.maxRpm, state.stopRpm, state.rampUpRpmPerSec, state.rampDownRpmPerSec, state.maxLinearVel, state.maxAngularVel]);
+  }, [context, state.maxRpm, state.stopRpm, state.rampUpRpmPerSec, state.rampDownRpmPerSec, state.brakeCurrent, state.maxLinearVel, state.maxAngularVel]);
 
   // Publish path follower config
   useEffect(() => {
@@ -1281,6 +1284,23 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
                     setState((s) => ({
                       ...s,
                       maxLinearVel: clamp(parseFloat(e.target.value) || 0, 0, s.maxLinearLimit),
+                    }))
+                  }
+                  style={inputStyle}
+                />
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={labelStyle}>Brake Current (A)</label>
+                <input
+                  type="number"
+                  step="1.0"
+                  min="0"
+                  max="100.0"
+                  value={state.brakeCurrent || 0}
+                  onChange={(e) =>
+                    setState((s) => ({
+                      ...s,
+                      brakeCurrent: clamp(parseFloat(e.target.value) || 0, 0, 100),
                     }))
                   }
                   style={inputStyle}

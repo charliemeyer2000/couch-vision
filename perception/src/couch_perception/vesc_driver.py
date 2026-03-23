@@ -85,6 +85,7 @@ COMM_GET_VALUES = 4
 COMM_SET_CURRENT = 6
 COMM_SET_CURRENT_BRAKE = 7
 COMM_SET_RPM = 8
+COMM_SET_HANDBRAKE = 10
 COMM_FORWARD_CAN = 34
 
 FAULT_NAMES = {
@@ -190,8 +191,8 @@ class VescConfig:
     invert_slave: bool = False
     ramp_up_rpm_s: int = 500  # acceleration rate, RPM/s (0 = no limit)
     ramp_down_rpm_s: int = 500  # deceleration rate, RPM/s (0 = no limit)
-    stop_rpm: int = 50  # below this ERPM, release brake (must be very low)
-    brake_current_ma: int = 5000  # braking current in mA (5A default)
+    brake_current: float = 0.0  # handbrake hold current (A)
+    stop_rpm: int = 0  # below this RPM, coast instead of PID hold (0 = disabled)
     max_linear_vel: float = 0.0  # clamp cmd_vel linear.x (0 = no limit)
     max_angular_vel: float = 0.0  # clamp cmd_vel angular.z (0 = no limit)
 
@@ -370,10 +371,11 @@ class VescDriver(Node):
             self.get_logger().info(f"E-STOP {'ENGAGED' if msg.data else 'RELEASED'}")
             if msg.data:
                 for mid in self._motor_ids:
-                    self._send(
-                        bytes([COMM_SET_CURRENT]) + struct.pack(">i", 0),
-                        can_id=mid,
-                    )
+                    if self._config.brake_current > 0.0:
+                        cmd = bytes([COMM_SET_HANDBRAKE]) + struct.pack(">i", int(self._config.brake_current * 1000.0))
+                    else:
+                        cmd = bytes([COMM_SET_CURRENT]) + struct.pack(">i", 0)
+                    self._send(cmd, can_id=mid)
 
     def _on_config(self, msg: String) -> None:
         try:
@@ -404,6 +406,8 @@ class VescDriver(Node):
             self._config.ramp_up_rpm_s = max(0, int(data["ramp_up_rpm_s"]))
         if "ramp_down_rpm_s" in data:
             self._config.ramp_down_rpm_s = max(0, int(data["ramp_down_rpm_s"]))
+        if "brake_current" in data:
+            self._config.brake_current = max(0.0, float(data["brake_current"]))
         if "stop_rpm" in data:
             self._config.stop_rpm = max(0, int(data["stop_rpm"]))
         if "brake_current_ma" in data:
@@ -481,9 +485,12 @@ class VescDriver(Node):
             # Bypass ramp — immediate zero current for safety
             self._commanded_erpm[None] = 0
             self._commanded_erpm[self._config.slave_can_id] = 0
-            zero_current = bytes([COMM_SET_CURRENT]) + struct.pack(">i", 0)
-            self._send(zero_current)
-            self._send(zero_current, can_id=self._config.slave_can_id)
+            if self._config.brake_current > 0.0:
+                stop_cmd = bytes([COMM_SET_HANDBRAKE]) + struct.pack(">i", int(self._config.brake_current * 1000.0))
+            else:
+                stop_cmd = bytes([COMM_SET_CURRENT]) + struct.pack(">i", 0)
+            self._send(stop_cmd)
+            self._send(stop_cmd, can_id=self._config.slave_can_id)
             return
 
         # When both targets are zero, actively brake using COMM_SET_CURRENT_BRAKE.
@@ -499,14 +506,15 @@ class VescDriver(Node):
             m_actual = abs(m_telem.erpm) if m_telem else 0
             s_actual = abs(s_telem.erpm) if s_telem else 0
 
-            brake = bytes([COMM_SET_CURRENT_BRAKE]) + struct.pack(
-                ">i", self._config.brake_current_ma
-            )
-            zero_current = bytes([COMM_SET_CURRENT]) + struct.pack(">i", 0)
+            rpm_zero = bytes([COMM_SET_RPM]) + struct.pack(">i", 0)
+            if self._config.brake_current > 0.0:
+                stop_cmd = bytes([COMM_SET_HANDBRAKE]) + struct.pack(">i", int(self._config.brake_current * 1000.0))
+            else:
+                stop_cmd = bytes([COMM_SET_CURRENT]) + struct.pack(">i", 0)
 
-            self._send(zero_current if m_actual <= stop_erpm else brake)
+            self._send(stop_cmd if m_actual <= stop_erpm else rpm_zero)
             self._send(
-                zero_current if s_actual <= stop_erpm else brake,
+                stop_cmd if s_actual <= stop_erpm else rpm_zero,
                 can_id=self._config.slave_can_id,
             )
             return
@@ -658,6 +666,7 @@ class VescDriver(Node):
             "invert_slave": self._config.invert_slave,
             "ramp_up_rpm_s": self._config.ramp_up_rpm_s,
             "ramp_down_rpm_s": self._config.ramp_down_rpm_s,
+            "brake_current": self._config.brake_current,
             "stop_rpm": self._config.stop_rpm,
             "max_linear_vel": self._config.max_linear_vel,
             "max_angular_vel": self._config.max_angular_vel,
@@ -692,9 +701,12 @@ class VescDriver(Node):
     # ── Lifecycle ─────────────────────────────────────────────────────────
 
     def shutdown(self) -> None:
-        zero_current = bytes([COMM_SET_CURRENT]) + struct.pack(">i", 0)
-        self._send(zero_current)
-        self._send(zero_current, can_id=self._config.slave_can_id)
+        if self._config.brake_current > 0.0:
+            stop_cmd = bytes([COMM_SET_HANDBRAKE]) + struct.pack(">i", int(self._config.brake_current * 1000.0))
+        else:
+            stop_cmd = bytes([COMM_SET_CURRENT]) + struct.pack(">i", 0)
+        self._send(stop_cmd)
+        self._send(stop_cmd, can_id=self._config.slave_can_id)
         with self._serial_lock:
             if self._serial is not None:
                 self._serial.close()
