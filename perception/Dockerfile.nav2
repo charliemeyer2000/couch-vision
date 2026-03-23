@@ -44,7 +44,7 @@ RUN if [ "$DOCKER_ARCH" = "arm64" ]; then \
         ros-jazzy-rtabmap-ros \
         ros-jazzy-rtabmap \
         ros-jazzy-image-transport-plugins \
-        python3-numpy git \
+        python3-numpy git bluez \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=docker.io/astral/uv:latest /uv /uvx /usr/local/bin/
