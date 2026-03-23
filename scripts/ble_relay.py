@@ -41,6 +41,7 @@ SERVICE_UUID = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
 CMD_VEL_UUID = "a1b2c3d4-e5f6-7890-abcd-ef1234567891"
 E_STOP_UUID = "a1b2c3d4-e5f6-7890-abcd-ef1234567892"
 HEARTBEAT_UUID = "a1b2c3d4-e5f6-7890-abcd-ef1234567893"
+PONG_UUID = "a1b2c3d4-e5f6-7890-abcd-ef1234567894"
 
 DEVICE_NAME = "CouchVision-BLE"
 HTTP_PORT = 4200
@@ -53,6 +54,8 @@ class BLEPeripheral:
         self._write_count = 0
         self._write_count_start = time.monotonic()
         self._last_latency_ms = 0.0
+        self._rtt_ms = 0.0
+        self._ping_sent: dict[int, float] = {}  # seq → monotonic timestamp
         # Cached after start() to avoid per-notify lookups
         self._cmd_vel_char: BlessGATTCharacteristic | None = None
         self._e_stop_char: BlessGATTCharacteristic | None = None
@@ -65,6 +68,10 @@ class BLEPeripheral:
     @property
     def latency_ms(self) -> float:
         return self._last_latency_ms
+
+    @property
+    def rtt_ms(self) -> float:
+        return self._rtt_ms
 
     @property
     def writes_per_sec(self) -> float:
@@ -81,6 +88,13 @@ class BLEPeripheral:
         return characteristic.value
 
     def _on_write(self, characteristic: BlessGATTCharacteristic, value: bytearray, **kwargs) -> None:
+        if characteristic.uuid.lower() == PONG_UUID.lower() and len(value) >= 1:
+            seq = value[0]
+            sent_at = self._ping_sent.pop(seq, None)
+            if sent_at is not None:
+                self._rtt_ms = (time.monotonic() - sent_at) * 1000
+                logger.debug(f"Pong seq={seq} RTT={self._rtt_ms:.1f}ms")
+            return
         logger.debug(f"Write from central: uuid={characteristic.uuid} len={len(value)}")
 
     async def start(self) -> None:
@@ -91,16 +105,29 @@ class BLEPeripheral:
 
         await server.add_new_service(SERVICE_UUID)
 
-        char_props = (
+        notify_props = (
             GATTCharacteristicProperties.read
             | GATTCharacteristicProperties.notify
         )
-        char_perms = GATTAttributePermissions.readable
+        notify_perms = GATTAttributePermissions.readable
 
         for uuid in (CMD_VEL_UUID, E_STOP_UUID, HEARTBEAT_UUID):
             await server.add_new_characteristic(
-                SERVICE_UUID, uuid, char_props, None, char_perms,
+                SERVICE_UUID, uuid, notify_props, None, notify_perms,
             )
+
+        # PONG: writable by central (Jetson echoes heartbeat seq back)
+        pong_props = (
+            GATTCharacteristicProperties.write
+            | GATTCharacteristicProperties.write_without_response
+        )
+        pong_perms = (
+            GATTAttributePermissions.readable
+            | GATTAttributePermissions.writeable
+        )
+        await server.add_new_characteristic(
+            SERVICE_UUID, PONG_UUID, pong_props, None, pong_perms,
+        )
 
         await server.start()
         self._server = server
@@ -130,13 +157,18 @@ class BLEPeripheral:
         return True
 
     async def heartbeat_loop(self) -> None:
-        """Send heartbeat notifications every 500ms."""
+        """Send heartbeat notifications every 500ms. Also serves as ping for RTT."""
         seq = 0
         while True:
             await asyncio.sleep(0.5)
             if self._heartbeat_char is None:
                 continue
             seq = (seq + 1) % 256
+            self._ping_sent[seq] = time.monotonic()
+            # Evict old entries (missed pongs)
+            if len(self._ping_sent) > 10:
+                oldest = min(self._ping_sent, key=self._ping_sent.get)
+                del self._ping_sent[oldest]
             self._heartbeat_char.value = bytearray([seq])
             self._server.update_value(SERVICE_UUID, HEARTBEAT_UUID)
 
@@ -180,6 +212,7 @@ def _make_app(peripheral: BLEPeripheral) -> web.Application:
             {
                 "connected": peripheral.connected,
                 "latency_ms": round(peripheral.latency_ms, 2),
+                "rtt_ms": round(peripheral.rtt_ms, 1),
                 "writes_per_sec": round(peripheral.writes_per_sec, 1),
             },
             headers=_CORS_HEADERS,

@@ -376,6 +376,7 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
   const [gamepadAxes, setGamepadAxes] = useState<number[]>([]);
   const [gamepadMapping, setGamepadMapping] = useState<string>("");
   const [bleConnected, setBleConnected] = useState(false);
+  const [bleRttMs, setBleRttMs] = useState(0);
   const bleFetchFails = useRef(0);
   const [coastFactor, setCoastFactor] = useState(0.0);
   const prevCoastRef = useRef(0.0);
@@ -404,6 +405,7 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
         const data = await res.json();
         const wasConnected = bleConnected;
         setBleConnected(data.connected);
+        if (data.rtt_ms != null) setBleRttMs(data.rtt_ms);
         if (data.connected) bleFetchFails.current = 0;
         if (data.connected && !wasConnected) {
           console.log("[BLE] Relay connected — switching to BLE fast path");
@@ -1459,7 +1461,7 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
                       color: bleConnected ? "#22c55e" : "#f59e0b",
                     }}
                   >
-                    {bleConnected ? "BLE" : "WS fallback"}
+                    {bleConnected ? `BLE ${bleRttMs > 0 ? `${bleRttMs.toFixed(0)}ms` : ""}` : "WS fallback"}
                   </span>
                 )}
               </div>

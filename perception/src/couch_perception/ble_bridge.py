@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import struct
+import subprocess
 import threading
 
 import rclpy
@@ -33,10 +34,13 @@ SERVICE_UUID = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
 CMD_VEL_UUID = "a1b2c3d4-e5f6-7890-abcd-ef1234567891"
 E_STOP_UUID = "a1b2c3d4-e5f6-7890-abcd-ef1234567892"
 HEARTBEAT_UUID = "a1b2c3d4-e5f6-7890-abcd-ef1234567893"
+PONG_UUID = "a1b2c3d4-e5f6-7890-abcd-ef1234567894"
 
 DEVICE_NAME = "CouchVision-BLE"
 SCAN_TIMEOUT_S = 10.0
 RECONNECT_DELAY_S = 2.0
+# 12 * 1.25ms = 15ms connection interval (default ~30ms is too slow)
+BLE_CONN_INTERVAL = 12
 _SERVICE_UUID_LOWER = SERVICE_UUID.lower()
 
 
@@ -84,8 +88,11 @@ async def _connect_and_subscribe(node: BLEBridgeNode) -> None:
         if len(data) >= 1:
             node.publish_e_stop(data[0] != 0)
 
+    pong_queue: asyncio.Queue[bytes] = asyncio.Queue()
+
     def on_heartbeat(_char_handle: int, data: bytearray) -> None:
         logger.debug(f"Heartbeat: seq={data[0]}")
+        pong_queue.put_nowait(bytes(data))
 
     def _scan_filter(d, ad) -> bool:
         return (
@@ -126,12 +133,53 @@ async def _connect_and_subscribe(node: BLEBridgeNode) -> None:
                     f"Connected to {device.name} — subscribing to notifications"
                 )
 
+                # Request faster connection interval (15ms vs default ~30ms).
+                # Requires host network mode for hcitool to see HCI connections.
+                try:
+                    r = subprocess.run(
+                        ["hcitool", "con"],
+                        capture_output=True, text=True, timeout=5,
+                    )
+                    handle = None
+                    for line in r.stdout.splitlines():
+                        if device.address.upper() in line.upper():
+                            parts = line.split()
+                            for i, part in enumerate(parts):
+                                if part == "handle" and i + 1 < len(parts):
+                                    handle = int(parts[i + 1])
+                                    break
+                    if handle is not None:
+                        subprocess.run(
+                            ["hcitool", "lecup", "--handle", str(handle),
+                             "--min", str(BLE_CONN_INTERVAL),
+                             "--max", str(BLE_CONN_INTERVAL),
+                             "--latency", "0", "--timeout", "200"],
+                            capture_output=True, timeout=5,
+                        )
+                        logger.info(f"Set {BLE_CONN_INTERVAL * 1.25:.1f}ms connection interval (handle={handle})")
+                    else:
+                        logger.warning("Could not find HCI handle — is network_mode: host set?")
+                except Exception as e:
+                    logger.warning(f"Could not set connection interval: {e}")
+
                 await client.start_notify(CMD_VEL_UUID, on_cmd_vel)
                 await client.start_notify(E_STOP_UUID, on_e_stop)
                 await client.start_notify(HEARTBEAT_UUID, on_heartbeat)
 
+                async def pong_writer() -> None:
+                    while not disconnected.is_set():
+                        try:
+                            data = await asyncio.wait_for(pong_queue.get(), timeout=1.0)
+                            await client.write_gatt_char(PONG_UUID, data, response=False)
+                        except asyncio.TimeoutError:
+                            continue
+                        except Exception:
+                            break
+
+                pong_task = asyncio.create_task(pong_writer())
                 logger.info("BLE bridge active — forwarding to ROS2")
                 await disconnected.wait()
+                pong_task.cancel()
                 logger.warning("BLE peripheral disconnected")
 
         except Exception as e:
