@@ -353,7 +353,7 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
       rampDownRpmPerSec: s?.rampDownRpmPerSec ?? 500,
       brakeCurrent: s?.brakeCurrent ?? 0.0,
       maxRpmLimit: s?.maxRpmLimit ?? 10000,
-      maxLinearLimit: s?.maxLinearLimit ?? 5.0,
+      maxLinearLimit: s?.maxLinearLimit ?? 10.0,
       maxAngularLimit: s?.maxAngularLimit ?? 5.0,
       limitsExpanded: s?.limitsExpanded ?? false,
       pfLinearSpeed: s?.pfLinearSpeed ?? 0.3,
