@@ -27,10 +27,6 @@ interface PanelState {
   rampUpRpmPerSec: number;
   rampDownRpmPerSec: number;
   brakeCurrent: number;
-  maxRpmLimit: number;
-  maxLinearLimit: number;
-  maxAngularLimit: number;
-  limitsExpanded: boolean;
   pfLinearSpeed: number;
   pfLookahead: number;
   pfGoalTolerance: number;
@@ -352,10 +348,6 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
       rampUpRpmPerSec: s?.rampUpRpmPerSec ?? 500,
       rampDownRpmPerSec: s?.rampDownRpmPerSec ?? 500,
       brakeCurrent: s?.brakeCurrent ?? 0.0,
-      maxRpmLimit: s?.maxRpmLimit ?? 10000,
-      maxLinearLimit: s?.maxLinearLimit ?? 10.0,
-      maxAngularLimit: s?.maxAngularLimit ?? 5.0,
-      limitsExpanded: s?.limitsExpanded ?? false,
       pfLinearSpeed: s?.pfLinearSpeed ?? 0.3,
       pfLookahead: s?.pfLookahead ?? 1.5,
       pfGoalTolerance: s?.pfGoalTolerance ?? 0.5,
@@ -1019,9 +1011,9 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
                       value={state.pfLinearSpeed}
                       step={0.05}
                       min={0.05}
-                      max={state.maxLinearLimit}
+                      onFocus={(e) => e.target.select()}
                       onChange={(e) => {
-                        const v = clamp(parseFloat(e.target.value) || 0.05, 0.05, state.maxLinearLimit);
+                        const v = Math.max(0.05, parseFloat(e.target.value) || 0.05);
                         setState((s) => ({ ...s, pfLinearSpeed: v }));
                       }}
                     />
@@ -1034,9 +1026,9 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
                       value={state.pfLookahead}
                       step={0.1}
                       min={0.3}
-                      max={10}
+                      onFocus={(e) => e.target.select()}
                       onChange={(e) => {
-                        const v = clamp(parseFloat(e.target.value) || 0.3, 0.3, 10);
+                        const v = Math.max(0.3, parseFloat(e.target.value) || 0.3);
                         setState((s) => ({ ...s, pfLookahead: v }));
                       }}
                     />
@@ -1049,9 +1041,9 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
                       value={state.pfGoalTolerance}
                       step={0.1}
                       min={0.1}
-                      max={5}
+                      onFocus={(e) => e.target.select()}
                       onChange={(e) => {
-                        const v = clamp(parseFloat(e.target.value) || 0.1, 0.1, 5);
+                        const v = Math.max(0.1, parseFloat(e.target.value) || 0.1);
                         setState((s) => ({ ...s, pfGoalTolerance: v }));
                       }}
                     />
@@ -1208,12 +1200,12 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
                   type="number"
                   step="50"
                   min="0"
-                  max={state.maxRpmLimit}
                   value={state.maxRpm}
+                  onFocus={(e) => e.target.select()}
                   onChange={(e) =>
                     setState((s) => ({
                       ...s,
-                      maxRpm: clamp(parseInt(e.target.value) || 0, 0, s.maxRpmLimit),
+                      maxRpm: Math.max(0, parseInt(e.target.value) || 0),
                     }))
                   }
                   style={inputStyle}
@@ -1225,12 +1217,12 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
                   type="number"
                   step="50"
                   min="0"
-                  max="5000"
                   value={state.rampUpRpmPerSec}
+                  onFocus={(e) => e.target.select()}
                   onChange={(e) =>
                     setState((s) => ({
                       ...s,
-                      rampUpRpmPerSec: clamp(parseInt(e.target.value) || 0, 0, 5000),
+                      rampUpRpmPerSec: Math.max(0, parseInt(e.target.value) || 0),
                     }))
                   }
                   style={inputStyle}
@@ -1242,12 +1234,12 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
                   type="number"
                   step="50"
                   min="0"
-                  max="5000"
                   value={state.rampDownRpmPerSec}
+                  onFocus={(e) => e.target.select()}
                   onChange={(e) =>
                     setState((s) => ({
                       ...s,
-                      rampDownRpmPerSec: clamp(parseInt(e.target.value) || 0, 0, 5000),
+                      rampDownRpmPerSec: Math.max(0, parseInt(e.target.value) || 0),
                     }))
                   }
                   style={inputStyle}
@@ -1261,12 +1253,12 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
                   type="number"
                   step="10"
                   min="0"
-                  max="500"
                   value={state.stopRpm}
+                  onFocus={(e) => e.target.select()}
                   onChange={(e) =>
                     setState((s) => ({
                       ...s,
-                      stopRpm: clamp(parseInt(e.target.value) || 0, 0, 500),
+                      stopRpm: Math.max(0, parseInt(e.target.value) || 0),
                     }))
                   }
                   style={inputStyle}
@@ -1278,12 +1270,12 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
                   type="number"
                   step="0.1"
                   min="0"
-                  max={state.maxLinearLimit}
                   value={state.maxLinearVel}
+                  onFocus={(e) => e.target.select()}
                   onChange={(e) =>
                     setState((s) => ({
                       ...s,
-                      maxLinearVel: clamp(parseFloat(e.target.value) || 0, 0, s.maxLinearLimit),
+                      maxLinearVel: Math.max(0, parseFloat(e.target.value) || 0),
                     }))
                   }
                   style={inputStyle}
@@ -1295,12 +1287,12 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
                   type="number"
                   step="1.0"
                   min="0"
-                  max="100.0"
                   value={state.brakeCurrent || 0}
+                  onFocus={(e) => e.target.select()}
                   onChange={(e) =>
                     setState((s) => ({
                       ...s,
-                      brakeCurrent: clamp(parseFloat(e.target.value) || 0, 0, 100),
+                      brakeCurrent: Math.max(0, parseFloat(e.target.value) || 0),
                     }))
                   }
                   style={inputStyle}
@@ -1314,12 +1306,12 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
                   type="number"
                   step="0.1"
                   min="0"
-                  max={state.maxAngularLimit}
                   value={state.maxAngularVel}
+                  onFocus={(e) => e.target.select()}
                   onChange={(e) =>
                     setState((s) => ({
                       ...s,
-                      maxAngularVel: clamp(parseFloat(e.target.value) || 0, 0, s.maxAngularLimit),
+                      maxAngularVel: Math.max(0, parseFloat(e.target.value) || 0),
                     }))
                   }
                   style={inputStyle}
@@ -1327,74 +1319,6 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
               </div>
               <div style={{ flex: 1 }} />
             </div>
-
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                cursor: "pointer",
-                marginBottom: state.limitsExpanded ? "4px" : "6px",
-              }}
-              onClick={() => setState((s) => ({ ...s, limitsExpanded: !s.limitsExpanded }))}
-            >
-              <span style={{ fontSize: "10px", color: "#666" }}>Limits</span>
-              <span style={{ fontSize: "9px", color: "#666" }}>
-                {state.limitsExpanded ? "\u25bc" : "\u25b6"}
-              </span>
-            </div>
-            {state.limitsExpanded && (
-              <div style={{ display: "flex", gap: "6px", marginBottom: "6px" }}>
-                <div style={{ flex: 1 }}>
-                  <label style={labelStyle}>RPM</label>
-                  <input
-                    type="number"
-                    step="500"
-                    min="0"
-                    value={state.maxRpmLimit}
-                    onChange={(e) =>
-                      setState((s) => ({
-                        ...s,
-                        maxRpmLimit: Math.max(0, parseInt(e.target.value) || 0),
-                      }))
-                    }
-                    style={inputStyle}
-                  />
-                </div>
-                <div style={{ flex: 1 }}>
-                  <label style={labelStyle}>Linear (m/s)</label>
-                  <input
-                    type="number"
-                    step="1.0"
-                    min="0"
-                    value={state.maxLinearLimit}
-                    onChange={(e) =>
-                      setState((s) => ({
-                        ...s,
-                        maxLinearLimit: Math.max(0, parseFloat(e.target.value) || 0),
-                      }))
-                    }
-                    style={inputStyle}
-                  />
-                </div>
-                <div style={{ flex: 1 }}>
-                  <label style={labelStyle}>Angular (rad/s)</label>
-                  <input
-                    type="number"
-                    step="1.0"
-                    min="0"
-                    value={state.maxAngularLimit}
-                    onChange={(e) =>
-                      setState((s) => ({
-                        ...s,
-                        maxAngularLimit: Math.max(0, parseFloat(e.target.value) || 0),
-                      }))
-                    }
-                    style={inputStyle}
-                  />
-                </div>
-              </div>
-            )}
 
             {/* Motor telemetry */}
             {motorStatus && (
