@@ -1,13 +1,14 @@
-"""BLE GATT server bridge — receives teleop commands over Bluetooth Low Energy.
+"""BLE client bridge — connects to the Mac BLE peripheral and publishes to ROS2.
 
-Runs natively on the Jetson (not in Docker) so it has direct BlueZ D-Bus
-access.  Publishes received cmd_vel and e_stop to ROS2 via CycloneDDS,
-which the VESC driver container sees (network_mode=host in live mode).
+The Mac runs a BLE GATT server (bless on macOS). This script runs on the Jetson
+as a BLE central (bleak) and subscribes to notifications for cmd_vel and e_stop.
 
-GATT service layout:
-  CMD_VEL   (write-no-response)  8 bytes: 2x float32 LE (linear_x, angular_z)
-  E_STOP    (write)              1 byte:  0x00=release, 0x01=stop
-  HEARTBEAT (notify)             1 byte:  wrapping counter, 500ms interval
+When a notification arrives, it publishes the corresponding ROS2 message.
+
+GATT service layout (on the Mac peripheral):
+  CMD_VEL   (notify)  8 bytes: 2x float32 LE (linear_x, angular_z)
+  E_STOP    (notify)  1 byte:  0x00=release, 0x01=stop
+  HEARTBEAT (notify)  1 byte:  wrapping counter, 500ms interval
 """
 
 from __future__ import annotations
@@ -16,7 +17,6 @@ import asyncio
 import logging
 import struct
 import threading
-from typing import Any
 
 import rclpy
 from rclpy.node import Node
@@ -24,26 +24,22 @@ from rclpy.qos import QoSProfile
 from geometry_msgs.msg import Twist
 from std_msgs.msg import Bool
 
-from bless import (
-    BlessGATTCharacteristic,
-    BlessServer,
-    GATTAttributePermissions,
-    GATTCharacteristicProperties,
-)
+from bleak import BleakClient, BleakScanner
 
 logger = logging.getLogger(__name__)
 
-# ── GATT UUIDs ───────────────────────────────────────────────────────────────
-
+# Must match ble_relay.py on Mac
 SERVICE_UUID = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
 CMD_VEL_UUID = "a1b2c3d4-e5f6-7890-abcd-ef1234567891"
 E_STOP_UUID = "a1b2c3d4-e5f6-7890-abcd-ef1234567892"
 HEARTBEAT_UUID = "a1b2c3d4-e5f6-7890-abcd-ef1234567893"
 
 DEVICE_NAME = "CouchVision-BLE"
+SCAN_TIMEOUT_S = 10.0
+RECONNECT_DELAY_S = 2.0
 
 
-# ── ROS2 Node ────────────────────────────────────────────────────────────────
+# -- ROS2 Node -----------------------------------------------------------------
 
 
 class BLEBridgeNode(Node):
@@ -74,79 +70,89 @@ class BLEBridgeNode(Node):
         self.get_logger().info(f"BLE e_stop: {'STOP' if stop else 'RELEASE'}")
 
 
-# ── BLE GATT Server ──────────────────────────────────────────────────────────
+# -- BLE Client ----------------------------------------------------------------
 
 
 _ros_node: BLEBridgeNode | None = None
 
 
-def _on_write(characteristic: BlessGATTCharacteristic, value: Any, **kwargs: Any) -> None:
-    """Handle BLE GATT write requests."""
-    uuid = str(characteristic.uuid).lower()
-    data = bytes(value) if not isinstance(value, bytes) else value
-
-    if uuid == CMD_VEL_UUID and len(data) == 8 and _ros_node is not None:
+def _on_cmd_vel(_char_handle: int, data: bytearray) -> None:
+    """Handle CMD_VEL notification from Mac BLE peripheral."""
+    if len(data) == 8 and _ros_node is not None:
         linear_x, angular_z = struct.unpack("<ff", data)
         _ros_node.publish_cmd_vel(linear_x, angular_z)
-    elif uuid == E_STOP_UUID and len(data) >= 1 and _ros_node is not None:
+
+
+def _on_e_stop(_char_handle: int, data: bytearray) -> None:
+    """Handle E_STOP notification from Mac BLE peripheral."""
+    if len(data) >= 1 and _ros_node is not None:
         _ros_node.publish_e_stop(data[0] != 0)
-    else:
-        logger.warning(f"Unknown write: uuid={uuid} len={len(data)}")
 
 
-async def _run_ble_server() -> None:
-    """Start the BLE GATT server and send heartbeat notifications."""
-    gatt = {
-        SERVICE_UUID: {
-            CMD_VEL_UUID: {
-                "Properties": (
-                    GATTCharacteristicProperties.write
-                    | GATTCharacteristicProperties.write_without_response
+def _on_heartbeat(_char_handle: int, data: bytearray) -> None:
+    """Handle heartbeat notification — just log at debug level."""
+    logger.debug(f"Heartbeat: seq={data[0]}")
+
+
+async def _connect_and_subscribe() -> None:
+    """Scan for the Mac BLE peripheral, connect, and subscribe to notifications."""
+    while True:
+        try:
+            logger.info("Scanning for CouchVision BLE peripheral...")
+            device = await BleakScanner.find_device_by_filter(
+                lambda d, ad: (
+                    SERVICE_UUID.lower()
+                    in [s.lower() for s in (ad.service_uuids or [])]
+                    or (d.name or "").startswith(DEVICE_NAME)
                 ),
-                "Permissions": GATTAttributePermissions.writeable,
-                "Value": bytearray(8),
-            },
-            E_STOP_UUID: {
-                "Properties": GATTCharacteristicProperties.write,
-                "Permissions": GATTAttributePermissions.writeable,
-                "Value": bytearray(1),
-            },
-            HEARTBEAT_UUID: {
-                "Properties": (
-                    GATTCharacteristicProperties.read
-                    | GATTCharacteristicProperties.notify
-                ),
-                "Permissions": GATTAttributePermissions.readable,
-                "Value": bytearray(1),
-            },
-        },
-    }
+                timeout=SCAN_TIMEOUT_S,
+            )
+            if device is None:
+                logger.warning(
+                    f"No device found (looked for UUID {SERVICE_UUID} or name "
+                    f"'{DEVICE_NAME}*'), retrying in {RECONNECT_DELAY_S}s..."
+                )
+                await asyncio.sleep(RECONNECT_DELAY_S)
+                continue
 
-    server = BlessServer(name=DEVICE_NAME)
-    server.write_request_func = _on_write
+            logger.info(f"Found peripheral: {device.name} ({device.address})")
 
-    await server.add_gatt(gatt)
-    await server.start()
+            async with BleakClient(device) as client:
+                # Verify the GATT service is present
+                svcs = client.services
+                if not svcs.get_service(SERVICE_UUID):
+                    logger.warning(
+                        f"Device {device.name} connected but missing service "
+                        f"{SERVICE_UUID}, retrying..."
+                    )
+                    await asyncio.sleep(RECONNECT_DELAY_S)
+                    continue
 
-    logger.info(f"BLE GATT server '{DEVICE_NAME}' advertising service {SERVICE_UUID}")
+                logger.info(
+                    f"Connected to {device.name} — subscribing to notifications"
+                )
 
-    heartbeat_seq = 0
-    try:
-        while True:
-            await asyncio.sleep(0.5)
-            heartbeat_seq = (heartbeat_seq + 1) % 256
-            char = server.get_characteristic(HEARTBEAT_UUID)
-            if char is not None:
-                char.value = bytearray([heartbeat_seq])
-                server.update_value(SERVICE_UUID, HEARTBEAT_UUID)
-    except asyncio.CancelledError:
-        pass
-    finally:
-        await server.stop()
-        logger.info("BLE GATT server stopped")
+                # Subscribe to all three characteristics
+                await client.start_notify(CMD_VEL_UUID, _on_cmd_vel)
+                await client.start_notify(E_STOP_UUID, _on_e_stop)
+                await client.start_notify(HEARTBEAT_UUID, _on_heartbeat)
+
+                logger.info("BLE bridge active — forwarding to ROS2")
+
+                # Stay connected until disconnect
+                while client.is_connected:
+                    await asyncio.sleep(1.0)
+
+                logger.warning("BLE peripheral disconnected")
+
+        except Exception as e:
+            logger.error(f"BLE connection error: {e}")
+
+        logger.info(f"Reconnecting in {RECONNECT_DELAY_S}s...")
+        await asyncio.sleep(RECONNECT_DELAY_S)
 
 
-# ── Entry point ──────────────────────────────────────────────────────────────
+# -- Entry point ---------------------------------------------------------------
 
 
 def main() -> None:
@@ -163,10 +169,10 @@ def main() -> None:
     spin_thread = threading.Thread(target=rclpy.spin, args=(_ros_node,), daemon=True)
     spin_thread.start()
 
-    logger.info("BLE bridge starting — ROS2 node active, launching GATT server...")
+    logger.info("BLE bridge starting — ROS2 node active, scanning for Mac peripheral...")
 
     try:
-        asyncio.run(_run_ble_server())
+        asyncio.run(_connect_and_subscribe())
     except KeyboardInterrupt:
         pass
     finally:

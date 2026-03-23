@@ -1,14 +1,20 @@
 # /// script
 # requires-python = ">=3.10"
-# dependencies = ["bleak>=0.21", "aiohttp>=3.9"]
+# dependencies = ["bless>=0.2.6", "aiohttp>=3.9"]
 # ///
-"""Mac-side BLE relay — HTTP server that forwards commands to Jetson via BLE.
+"""Mac-side BLE server — advertises a GATT service and relays commands to Jetson.
+
+The Mac runs as BLE peripheral (bless works natively on macOS via CoreBluetooth).
+The Jetson connects as BLE central (bleak) and subscribes to notifications.
+
+Foxglove panel POSTs gamepad data to localhost:4200 → this process updates the
+GATT characteristic → BLE notification → Jetson receives and publishes to ROS2.
 
 Run with:  uv run scripts/ble_relay.py
 
 Endpoints:
-  POST /cmd_vel   {"lx": float, "az": float}  → BLE GATT write (8 bytes)
-  POST /e_stop    {"stop": bool}               → BLE GATT write (1 byte)
+  POST /cmd_vel   {"lx": float, "az": float}  → BLE notification (8 bytes)
+  POST /e_stop    {"stop": bool}               → BLE notification (1 byte)
   GET  /status    → {"connected": bool, "latency_ms": float, "writes_per_sec": float}
 """
 
@@ -21,7 +27,12 @@ import struct
 import time
 
 from aiohttp import web
-from bleak import BleakClient, BleakScanner
+from bless import (
+    BlessGATTCharacteristic,
+    BlessServer,
+    GATTAttributePermissions,
+    GATTCharacteristicProperties,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -31,24 +42,21 @@ CMD_VEL_UUID = "a1b2c3d4-e5f6-7890-abcd-ef1234567891"
 E_STOP_UUID = "a1b2c3d4-e5f6-7890-abcd-ef1234567892"
 HEARTBEAT_UUID = "a1b2c3d4-e5f6-7890-abcd-ef1234567893"
 
+DEVICE_NAME = "CouchVision-BLE"
 HTTP_PORT = 4200
-SCAN_TIMEOUT_S = 10.0
-RECONNECT_DELAY_S = 2.0
 
 
-class BLERelay:
+class BLEPeripheral:
     def __init__(self) -> None:
-        self._client: BleakClient | None = None
+        self._server: BlessServer | None = None
         self._connected = False
-        self._lock = asyncio.Lock()
         self._write_count = 0
         self._write_count_start = time.monotonic()
         self._last_latency_ms = 0.0
-        self._reconnect_task: asyncio.Task | None = None
 
     @property
     def connected(self) -> bool:
-        return self._connected and self._client is not None and self._client.is_connected
+        return self._connected
 
     @property
     def writes_per_sec(self) -> float:
@@ -56,93 +64,92 @@ class BLERelay:
         if elapsed < 1.0:
             return 0.0
         rate = self._write_count / elapsed
-        # Reset counter periodically to get recent rate
         if elapsed > 10.0:
             self._write_count = 0
             self._write_count_start = time.monotonic()
         return rate
 
-    async def connect(self) -> None:
-        """Scan for and connect to the Jetson BLE GATT server."""
-        while True:
-            try:
-                logger.info(f"Scanning for BLE device with service {SERVICE_UUID}...")
-                device = await BleakScanner.find_device_by_filter(
-                    lambda d, ad: SERVICE_UUID.lower()
-                    in [s.lower() for s in (ad.service_uuids or [])],
-                    timeout=SCAN_TIMEOUT_S,
-                )
-                if device is None:
-                    logger.warning(
-                        f"No device found advertising {SERVICE_UUID}, retrying in {RECONNECT_DELAY_S}s..."
-                    )
-                    await asyncio.sleep(RECONNECT_DELAY_S)
-                    continue
+    def _on_read(self, characteristic: BlessGATTCharacteristic, **kwargs) -> bytearray:
+        return characteristic.value
 
-                logger.info(f"Found device: {device.name} ({device.address})")
-                client = BleakClient(
-                    device,
-                    disconnected_callback=self._on_disconnect,
-                )
-                await client.connect()
-                self._client = client
-                self._connected = True
-                logger.info(f"Connected to {device.name}")
+    def _on_write(self, characteristic: BlessGATTCharacteristic, value: bytearray, **kwargs) -> None:
+        # Central (Jetson) might write back acknowledgments — log them
+        logger.debug(f"Write from central: uuid={characteristic.uuid} len={len(value)}")
 
-                # Subscribe to heartbeat notifications
-                await client.start_notify(HEARTBEAT_UUID, self._on_heartbeat)
-                return
+    async def start(self) -> None:
+        """Start the BLE GATT server and advertise."""
+        server = BlessServer(name=DEVICE_NAME)
+        server.read_request_func = self._on_read
+        server.write_request_func = self._on_write
 
-            except Exception as e:
-                logger.error(f"Connection failed: {e}, retrying in {RECONNECT_DELAY_S}s...")
-                await asyncio.sleep(RECONNECT_DELAY_S)
+        await server.add_new_service(SERVICE_UUID)
 
-    def _on_disconnect(self, client: BleakClient) -> None:
-        logger.warning("BLE disconnected")
-        self._connected = False
-        # Schedule reconnect
-        if self._reconnect_task is None or self._reconnect_task.done():
-            self._reconnect_task = asyncio.get_event_loop().create_task(self._reconnect())
+        char_props = (
+            GATTCharacteristicProperties.read
+            | GATTCharacteristicProperties.notify
+        )
+        char_perms = (
+            GATTAttributePermissions.readable
+        )
 
-    async def _reconnect(self) -> None:
-        await asyncio.sleep(RECONNECT_DELAY_S)
-        logger.info("Attempting BLE reconnect...")
-        await self.connect()
+        # CMD_VEL: notify to Jetson (primary data path)
+        await server.add_new_characteristic(
+            SERVICE_UUID, CMD_VEL_UUID, char_props, None, char_perms,
+        )
+        # E_STOP: notify to Jetson (safety-critical)
+        await server.add_new_characteristic(
+            SERVICE_UUID, E_STOP_UUID, char_props, None, char_perms,
+        )
+        # HEARTBEAT: notify, 1-byte wrapping counter
+        await server.add_new_characteristic(
+            SERVICE_UUID, HEARTBEAT_UUID, char_props, None, char_perms,
+        )
 
-    def _on_heartbeat(self, _char: int, data: bytearray) -> None:
-        logger.debug(f"Heartbeat: seq={data[0]}")
+        await server.start()
+        self._server = server
+        self._connected = True
+        logger.info(f"BLE peripheral '{DEVICE_NAME}' advertising service {SERVICE_UUID}")
 
-    async def write_cmd_vel(self, linear_x: float, angular_z: float) -> bool:
-        """Write cmd_vel to BLE characteristic. Returns True on success."""
-        if not self.connected or self._client is None:
+    def notify_cmd_vel(self, linear_x: float, angular_z: float) -> bool:
+        """Update CMD_VEL characteristic and send BLE notification."""
+        if self._server is None:
             return False
-        payload = struct.pack("<ff", linear_x, angular_z)
         t0 = time.monotonic()
-        try:
-            async with self._lock:
-                await self._client.write_gatt_char(CMD_VEL_UUID, payload, response=False)
-            self._last_latency_ms = (time.monotonic() - t0) * 1000
-            self._write_count += 1
-            return True
-        except Exception as e:
-            logger.error(f"BLE write cmd_vel failed: {e}")
+        char = self._server.get_characteristic(CMD_VEL_UUID)
+        if char is None:
             return False
+        char.value = bytearray(struct.pack("<ff", linear_x, angular_z))
+        self._server.update_value(SERVICE_UUID, CMD_VEL_UUID)
+        self._last_latency_ms = (time.monotonic() - t0) * 1000
+        self._write_count += 1
+        return True
 
-    async def write_e_stop(self, stop: bool) -> bool:
-        """Write e_stop to BLE characteristic. Uses write-with-response for safety."""
-        if not self.connected or self._client is None:
+    def notify_e_stop(self, stop: bool) -> bool:
+        """Update E_STOP characteristic and send BLE notification."""
+        if self._server is None:
             return False
-        payload = bytes([0x01 if stop else 0x00])
-        try:
-            async with self._lock:
-                await self._client.write_gatt_char(E_STOP_UUID, payload, response=True)
-            return True
-        except Exception as e:
-            logger.error(f"BLE write e_stop failed: {e}")
+        char = self._server.get_characteristic(E_STOP_UUID)
+        if char is None:
             return False
+        char.value = bytearray([0x01 if stop else 0x00])
+        self._server.update_value(SERVICE_UUID, E_STOP_UUID)
+        return True
+
+    async def heartbeat_loop(self) -> None:
+        """Send heartbeat notifications every 500ms."""
+        seq = 0
+        while True:
+            await asyncio.sleep(0.5)
+            if self._server is None:
+                continue
+            char = self._server.get_characteristic(HEARTBEAT_UUID)
+            if char is not None:
+                seq = (seq + 1) % 256
+                char.value = bytearray([seq])
+                self._server.update_value(SERVICE_UUID, HEARTBEAT_UUID)
 
 
-# ── HTTP Server ──────────────────────────────────────────────────────────────
+# -- HTTP Server ---------------------------------------------------------------
 
 
 def _cors_headers() -> dict[str, str]:
@@ -153,7 +160,7 @@ def _cors_headers() -> dict[str, str]:
     }
 
 
-def _make_app(relay: BLERelay) -> web.Application:
+def _make_app(peripheral: BLEPeripheral) -> web.Application:
     async def handle_cmd_vel(request: web.Request) -> web.Response:
         try:
             data = await request.json()
@@ -163,7 +170,7 @@ def _make_app(relay: BLERelay) -> web.Application:
             return web.json_response(
                 {"error": "expected JSON {lx, az}"}, status=400, headers=_cors_headers()
             )
-        ok = await relay.write_cmd_vel(lx, az)
+        ok = peripheral.notify_cmd_vel(lx, az)
         return web.json_response({"ok": ok}, headers=_cors_headers())
 
     async def handle_e_stop(request: web.Request) -> web.Response:
@@ -174,15 +181,15 @@ def _make_app(relay: BLERelay) -> web.Application:
             return web.json_response(
                 {"error": "expected JSON {stop}"}, status=400, headers=_cors_headers()
             )
-        ok = await relay.write_e_stop(stop)
+        ok = peripheral.notify_e_stop(stop)
         return web.json_response({"ok": ok}, headers=_cors_headers())
 
     async def handle_status(_request: web.Request) -> web.Response:
         return web.json_response(
             {
-                "connected": relay.connected,
-                "latency_ms": round(relay._last_latency_ms, 2),
-                "writes_per_sec": round(relay.writes_per_sec, 1),
+                "connected": peripheral.connected,
+                "latency_ms": round(peripheral._last_latency_ms, 2),
+                "writes_per_sec": round(peripheral.writes_per_sec, 1),
             },
             headers=_cors_headers(),
         )
@@ -194,18 +201,20 @@ def _make_app(relay: BLERelay) -> web.Application:
     app.router.add_post("/cmd_vel", handle_cmd_vel)
     app.router.add_post("/e_stop", handle_e_stop)
     app.router.add_get("/status", handle_status)
-    # CORS preflight
     app.router.add_route("OPTIONS", "/cmd_vel", handle_options)
     app.router.add_route("OPTIONS", "/e_stop", handle_options)
     return app
 
 
 async def _main() -> None:
-    relay = BLERelay()
-    logger.info("Starting BLE relay — scanning for Jetson...")
-    await relay.connect()
+    peripheral = BLEPeripheral()
+    logger.info("Starting BLE peripheral server...")
+    await peripheral.start()
 
-    app = _make_app(relay)
+    # Start heartbeat in background
+    asyncio.create_task(peripheral.heartbeat_loop())
+
+    app = _make_app(peripheral)
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, "127.0.0.1", HTTP_PORT)
@@ -213,7 +222,6 @@ async def _main() -> None:
     logger.info(f"HTTP server listening on http://127.0.0.1:{HTTP_PORT}")
     logger.info("Endpoints: POST /cmd_vel, POST /e_stop, GET /status")
 
-    # Run forever
     try:
         while True:
             await asyncio.sleep(3600)
@@ -231,7 +239,7 @@ def main() -> None:
     try:
         asyncio.run(_main())
     except KeyboardInterrupt:
-        logger.info("BLE relay shutting down")
+        logger.info("BLE peripheral shutting down")
 
 
 if __name__ == "__main__":

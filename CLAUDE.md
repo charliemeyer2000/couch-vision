@@ -79,12 +79,12 @@ The iOS app does NOT publish directly to ROS2. Data flows through **three layers
 
 Bypasses the high-latency Foxglove WebSocket → Tailscale path for gamepad commands by sending cmd_vel directly over Bluetooth Low Energy.
 
-- **Architecture**: Foxglove panel → HTTP POST localhost:4200 → Mac BLE relay (`scripts/ble_relay.py`) → BLE GATT write → Jetson BLE server (`ble_bridge.py`) → ROS2 `/cmd_vel`
+- **Architecture**: Foxglove panel → HTTP POST localhost:4200 → Mac BLE peripheral (`scripts/ble_relay.py`, bless) → BLE notify → Jetson BLE client (`ble_bridge.py`, bleak) → ROS2 `/cmd_vel`
+- **Key insight**: Mac runs the BLE server (bless works natively on macOS via CoreBluetooth). Jetson runs as BLE client (bleak). This avoids BlueZ D-Bus advertising issues on the Jetson's Realtek adapter.
 - **Exclusive mode**: Panel sends cmd_vel on exactly ONE path at a time (BLE or WebSocket, never both). E-stop always goes on both paths for safety.
 - **Failover**: 3 consecutive fetch failures → automatic fallback to WebSocket. Periodic health poll recovers to BLE when relay reconnects.
-- **Jetson BLE server runs in Docker** alongside VESC driver (`docker-compose.vesc.yml`). Mounts `/var/run/dbus` for BlueZ D-Bus access. Starts automatically with `make full-stack VESC=1`.
+- **Jetson BLE client runs in Docker** alongside VESC driver (`docker-compose.vesc.yml`). Mounts `/var/run/dbus` for BlueZ D-Bus access. Starts automatically with `make full-stack VESC=1`.
 - **GATT service UUID**: `a1b2c3d4-e5f6-7890-abcd-ef1234567890`
-- **Jetson BT hardware**: Broadcom BCM4357 combo chip, hci0, BlueZ enabled by default on JetPack 6
 
 ## Common Learnings / Gotchas
 
