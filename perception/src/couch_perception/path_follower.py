@@ -171,10 +171,11 @@ class PathFollower(Node):
 
         twist = Twist()
 
-        # Lookahead point is behind us — rotate in place toward it
+        # Lookahead point is behind us — rotate toward it with reduced forward speed
         if local_x < 0:
             turn_dir = 1.0 if local_y >= 0 else -1.0
-            twist.angular.z = turn_dir * min(self._max_angular_vel, self._max_angular_vel * 0.6)
+            twist.angular.z = turn_dir * self._max_angular_vel * 0.6
+            twist.linear.x = self._linear_speed * 0.2  # creep forward while turning
             self._cmd_vel_pub.publish(twist)
             return
 
