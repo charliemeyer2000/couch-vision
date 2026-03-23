@@ -15,7 +15,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import struct
-import sys
 import threading
 from typing import Any
 
@@ -27,7 +26,6 @@ from std_msgs.msg import Bool
 
 from bless import (
     BlessGATTCharacteristic,
-    BlessGATTRequest,
     BlessServer,
     GATTAttributePermissions,
     GATTCharacteristicProperties,
