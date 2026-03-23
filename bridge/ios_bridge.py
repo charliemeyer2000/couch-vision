@@ -132,7 +132,7 @@ class IOSBridge(Node):  # type: ignore[misc]
         self._sensor_qos = QoSProfile(
             reliability=ReliabilityPolicy.BEST_EFFORT,
             history=HistoryPolicy.KEEP_LAST,
-            depth=10,
+            depth=1,
         )
         self._reliable_qos = QoSProfile(
             reliability=ReliabilityPolicy.RELIABLE,

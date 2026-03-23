@@ -240,7 +240,7 @@ endif
 
 bag:
 	@mkdir -p bags
-	@$(ROS2_SETUP) && ros2 bag record -a -o bags/$$(date +%Y-%m-%d_%H-%M-%S)
+	@$(ROS2_SETUP) && ros2 bag record -a -s mcap -o bags/$$(date +%Y-%m-%d_%H-%M-%S)
 
 lint:
 	pre-commit run --all-files
