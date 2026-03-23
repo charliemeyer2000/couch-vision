@@ -106,7 +106,7 @@ E-stop, teleop controls, motor telemetry, system status.
 **Motor config:**
 - **Max RPM** — ERPM safety clamp sent to VESC driver.
 - **Ramp Up / Ramp Down (RPM/s)** — Separate slew rate limits for acceleration and deceleration. Prevents torque spikes. Default 500 RPM/s each. E-stop always bypasses the ramp for immediate stop.
-- **Stop RPM** — ERPM threshold below which the motor is considered stopped (used for active braking). Default 300.
+- **Stop RPM** — ERPM threshold below which brake is released (motor considered stopped). Default 50. Braking uses COMM_SET_CURRENT_BRAKE (5A) which avoids VESC PID oscillation.
 
 **E-stop sources:** Panel button, keyboard, gamepad B/Circle (arm with A/Cross). Gamepad e-stop/arm works in all modes.
 

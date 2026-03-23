@@ -347,7 +347,7 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
       motorCollapsed: s?.motorCollapsed ?? false,
       motorMode: validMode,
       maxRpm: s?.maxRpm ?? 500,
-      stopRpm: s?.stopRpm ?? 300,
+      stopRpm: s?.stopRpm ?? 50,
       rampUpRpmPerSec: s?.rampUpRpmPerSec ?? 500,
       rampDownRpmPerSec: s?.rampDownRpmPerSec ?? 500,
       maxRpmLimit: s?.maxRpmLimit ?? 10000,

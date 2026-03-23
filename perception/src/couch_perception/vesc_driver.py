@@ -83,6 +83,7 @@ def _find_vesc_port() -> str | None:
 
 COMM_GET_VALUES = 4
 COMM_SET_CURRENT = 6
+COMM_SET_CURRENT_BRAKE = 7
 COMM_SET_RPM = 8
 COMM_FORWARD_CAN = 34
 
@@ -189,7 +190,8 @@ class VescConfig:
     invert_slave: bool = False
     ramp_up_rpm_s: int = 500  # acceleration rate, RPM/s (0 = no limit)
     ramp_down_rpm_s: int = 500  # deceleration rate, RPM/s (0 = no limit)
-    stop_rpm: int = 0  # below this RPM, coast instead of PID hold (0 = disabled)
+    stop_rpm: int = 50  # below this ERPM, release brake (must be very low)
+    brake_current_ma: int = 5000  # braking current in mA (5A default)
     max_linear_vel: float = 0.0  # clamp cmd_vel linear.x (0 = no limit)
     max_angular_vel: float = 0.0  # clamp cmd_vel angular.z (0 = no limit)
 
@@ -404,6 +406,8 @@ class VescDriver(Node):
             self._config.ramp_down_rpm_s = max(0, int(data["ramp_down_rpm_s"]))
         if "stop_rpm" in data:
             self._config.stop_rpm = max(0, int(data["stop_rpm"]))
+        if "brake_current_ma" in data:
+            self._config.brake_current_ma = max(0, min(30000, int(data["brake_current_ma"])))
         if "max_linear_vel" in data:
             self._config.max_linear_vel = max(0.0, float(data["max_linear_vel"]))
         if "max_angular_vel" in data:
@@ -482,12 +486,10 @@ class VescDriver(Node):
             self._send(zero_current, can_id=self._config.slave_can_id)
             return
 
-        # When both targets are zero, skip ramp and actively brake.
-        # Use COMM_SET_RPM(0) for active PID braking (the PID drives current
-        # to fight rotation — unlike COMM_SET_CURRENT_BRAKE which depends on
-        # back-EMF and is ineffective at low speeds).  Once actual RPM drops
-        # below stop_rpm, switch to COMM_SET_CURRENT(0) to avoid the VESC's
-        # zero-RPM PID oscillation problem.
+        # When both targets are zero, actively brake using COMM_SET_CURRENT_BRAKE.
+        # This applies opposing current without PID (avoids the zero-RPM PID
+        # oscillation problem with COMM_SET_RPM(0)).  Once actual ERPM drops
+        # below stop_rpm, release to COMM_SET_CURRENT(0).
         if master_target == 0 and slave_target == 0:
             self._commanded_erpm[None] = 0
             self._commanded_erpm[self._config.slave_can_id] = 0
@@ -497,12 +499,14 @@ class VescDriver(Node):
             m_actual = abs(m_telem.erpm) if m_telem else 0
             s_actual = abs(s_telem.erpm) if s_telem else 0
 
-            rpm_zero = bytes([COMM_SET_RPM]) + struct.pack(">i", 0)
+            brake = bytes([COMM_SET_CURRENT_BRAKE]) + struct.pack(
+                ">i", self._config.brake_current_ma
+            )
             zero_current = bytes([COMM_SET_CURRENT]) + struct.pack(">i", 0)
 
-            self._send(zero_current if m_actual <= stop_erpm else rpm_zero)
+            self._send(zero_current if m_actual <= stop_erpm else brake)
             self._send(
-                zero_current if s_actual <= stop_erpm else rpm_zero,
+                zero_current if s_actual <= stop_erpm else brake,
                 can_id=self._config.slave_can_id,
             )
             return
