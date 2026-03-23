@@ -33,6 +33,7 @@ services:
       - /dev:/dev
       - /var/run/dbus:/var/run/dbus
       - ./src:/perception/src:ro
+      - ./entrypoint_ble.sh:/entrypoint_ble.sh:ro
       - ../cyclonedds.xml:/perception/cyclonedds.xml:ro
     environment:
       - PYTHONUNBUFFERED=1
