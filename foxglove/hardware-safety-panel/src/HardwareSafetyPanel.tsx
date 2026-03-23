@@ -377,6 +377,8 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
   const [gamepadMapping, setGamepadMapping] = useState<string>("");
   const [bleConnected, setBleConnected] = useState(false);
   const bleFetchFails = useRef(0);
+  const [coastFactor, setCoastFactor] = useState(0.0);
+  const prevCoastRef = useRef(0.0);
 
   const BLE_RELAY_URL = "http://127.0.0.1:4200";
 
@@ -544,20 +546,27 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
   }, [renderDone]);
 
   // Publish motor config — always mode: "nav2", no target_rpm
+  const publishMotorConfig = useCallback(
+    (cf?: number) => {
+      context.publish?.("/motor/config", {
+        data: JSON.stringify({
+          mode: "nav2",
+          max_rpm: state.maxRpm,
+          stop_rpm: state.stopRpm,
+          ramp_up_rpm_s: state.rampUpRpmPerSec,
+          ramp_down_rpm_s: state.rampDownRpmPerSec,
+          brake_current: state.brakeCurrent,
+          max_linear_vel: state.maxLinearVel,
+          max_angular_vel: state.maxAngularVel,
+          coast_factor: cf ?? prevCoastRef.current,
+        }),
+      });
+    },
+    [context, state.maxRpm, state.stopRpm, state.rampUpRpmPerSec, state.rampDownRpmPerSec, state.brakeCurrent, state.maxLinearVel, state.maxAngularVel],
+  );
   useEffect(() => {
-    context.publish?.("/motor/config", {
-      data: JSON.stringify({
-        mode: "nav2",
-        max_rpm: state.maxRpm,
-        stop_rpm: state.stopRpm,
-        ramp_up_rpm_s: state.rampUpRpmPerSec,
-        ramp_down_rpm_s: state.rampDownRpmPerSec,
-        brake_current: state.brakeCurrent,
-        max_linear_vel: state.maxLinearVel,
-        max_angular_vel: state.maxAngularVel,
-      }),
-    });
-  }, [context, state.maxRpm, state.stopRpm, state.rampUpRpmPerSec, state.rampDownRpmPerSec, state.brakeCurrent, state.maxLinearVel, state.maxAngularVel]);
+    publishMotorConfig();
+  }, [publishMotorConfig]);
 
   // Publish path follower config
   useEffect(() => {
@@ -783,6 +792,22 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
       setGamepadAxes(Array.from(gp.axes));
       setGamepadMapping(gp.mapping);
 
+      // Coast trigger — read LT/RT, take max (either trigger activates coast)
+      let lt: number, rt: number;
+      if (gp.mapping === "standard") {
+        lt = gp.buttons[6]?.value ?? 0;
+        rt = gp.buttons[7]?.value ?? 0;
+      } else {
+        lt = gp.axes.length > 2 ? (gp.axes[2]! + 1) / 2 : 0;
+        rt = gp.axes.length > 5 ? (gp.axes[5]! + 1) / 2 : 0;
+      }
+      const newCoast = Math.max(lt, rt);
+      setCoastFactor(newCoast);
+      if (newCoast !== prevCoastRef.current) {
+        prevCoastRef.current = newCoast;
+        publishMotorConfig(newCoast);
+      }
+
       if (!stickActive) return;
 
       const leftY = applyDeadzone(gp.axes[1] ?? 0);
@@ -810,6 +835,7 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
     return () => clearInterval(interval);
   }, [
     publishCmdVel,
+    publishMotorConfig,
     state.eStopped,
     state.teleopCollapsed,
     state.motorMode,
@@ -1249,6 +1275,9 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
           unit="rad/s"
           centered
         />
+        {coastFactor > 0.01 && (
+          <VelocityBar label="Coast" value={coastFactor} maxScale={1.0} unit="" />
+        )}
       </div>
 
       {/* Motor Config */}

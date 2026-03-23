@@ -195,6 +195,7 @@ class VescConfig:
     stop_rpm: int = 0  # below this RPM, coast instead of PID hold (0 = disabled)
     max_linear_vel: float = 0.0  # clamp cmd_vel linear.x (0 = no limit)
     max_angular_vel: float = 0.0  # clamp cmd_vel angular.z (0 = no limit)
+    coast_factor: float = 0.0  # 0.0 = full brake, 1.0 = full coast (gamepad trigger)
 
 
 def _twist_to_erpm(
@@ -416,6 +417,8 @@ class VescDriver(Node):
             self._config.max_linear_vel = max(0.0, float(data["max_linear_vel"]))
         if "max_angular_vel" in data:
             self._config.max_angular_vel = max(0.0, float(data["max_angular_vel"]))
+        if "coast_factor" in data:
+            self._config.coast_factor = max(0.0, min(1.0, float(data["coast_factor"])))
 
     # ── Command loop (50ms / 20Hz) ───────────────────────────────────────
 
@@ -493,13 +496,30 @@ class VescDriver(Node):
             self._send(stop_cmd, can_id=self._config.slave_can_id)
             return
 
-        # When both targets are zero, actively brake using COMM_SET_CURRENT_BRAKE.
-        # This applies opposing current without PID (avoids the zero-RPM PID
-        # oscillation problem with COMM_SET_RPM(0)).  Once actual ERPM drops
-        # below stop_rpm, release to COMM_SET_CURRENT(0).
+        # When both targets are zero, brake or coast depending on coast_factor.
+        # coast_factor is set by the gamepad trigger (0.0 = full brake, 1.0 = coast).
         if master_target == 0 and slave_target == 0:
             self._commanded_erpm[None] = 0
             self._commanded_erpm[self._config.slave_can_id] = 0
+            cf = self._config.coast_factor
+
+            if cf >= 1.0:
+                # Full coast — zero current, no resistance
+                coast_cmd = bytes([COMM_SET_CURRENT]) + struct.pack(">i", 0)
+                self._send(coast_cmd)
+                self._send(coast_cmd, can_id=self._config.slave_can_id)
+                return
+
+            if cf > 0.0:
+                # Proportional braking via COMM_SET_CURRENT_BRAKE
+                max_brake = max(self._config.brake_current, 5.0)
+                effective_ma = int(max_brake * (1.0 - cf) * 1000.0)
+                brake_cmd = bytes([COMM_SET_CURRENT_BRAKE]) + struct.pack(">i", effective_ma)
+                self._send(brake_cmd)
+                self._send(brake_cmd, can_id=self._config.slave_can_id)
+                return
+
+            # cf == 0.0 — normal braking (no trigger pressed)
             stop_erpm = self._config.stop_rpm * self._config.pole_pairs
             m_telem = self._latest_telemetry.get(None)
             s_telem = self._latest_telemetry.get(self._config.slave_can_id)
@@ -670,6 +690,7 @@ class VescDriver(Node):
             "stop_rpm": self._config.stop_rpm,
             "max_linear_vel": self._config.max_linear_vel,
             "max_angular_vel": self._config.max_angular_vel,
+            "coast_factor": self._config.coast_factor,
             "errors": self._error_count,
         }
         msg = String()
