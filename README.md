@@ -14,6 +14,8 @@ iOS app that streams iPhone sensor data to ROS2 over TCP, with perception, Nav2 
 | ROS2 Bridge | ✅ (dev) | ✅ (deploy) |
 | Perception + Nav2 | ✅ (CPU) | ✅ (TensorRT) |
 | VESC Motor Driver | ❌ | ✅ (requires /dev/ttyACM0) |
+| BLE Relay (teleop) | ✅ (requires Bluetooth) | ❌ |
+| BLE Bridge (teleop) | ❌ | ✅ (requires Bluetooth) |
 | Foxglove Viewer | ✅ | ❌ (headless) |
 
 **macOS** is for iOS development (Xcode + Swift) and visualization (Foxglove app).
@@ -53,6 +55,7 @@ Monitor logs in separate terminals:
 make logs-bridge    # iOS bridge
 make logs-nav2      # Nav2 + perception
 make logs-vesc      # VESC motor driver (only with VESC=1)
+make logs-ble       # BLE bridge (only with VESC=1)
 make logs           # all services interleaved
 make stop           # bring everything down
 ```
@@ -106,7 +109,7 @@ E-stop, teleop controls, motor telemetry, system status.
 **Motor config:**
 - **Max RPM** — ERPM safety clamp sent to VESC driver.
 - **Ramp Up / Ramp Down (RPM/s)** — Separate slew rate limits for acceleration and deceleration. Prevents torque spikes. Default 500 RPM/s each. E-stop always bypasses the ramp for immediate stop.
-- **Stop RPM** — ERPM threshold below which the motor is considered stopped (used for active braking). Default 50.
+- **Stop RPM** — ERPM threshold below which brake is released (motor considered stopped). Default 50. Braking uses COMM_SET_CURRENT_BRAKE (5A) which avoids VESC PID oscillation.
 
 **E-stop sources:** Panel button, keyboard, gamepad B/Circle (arm with A/Cross). Gamepad e-stop/arm works in all modes.
 
@@ -131,6 +134,67 @@ make lint-extension     # typecheck + lint + format check
 - **Scripts:** `scripts/vesc_*.py` — standalone motor testing (WASD, hold tests, RPM tests)
 
 See [CLAUDE.md](CLAUDE.md) for detailed VESC configuration, known firmware bugs, and tuning notes.
+
+## BLE Low-Latency Teleop
+
+Gamepad commands normally flow through the Foxglove WebSocket connection over Tailscale VPN, adding 20-100ms of network latency. The BLE bridge bypasses the network entirely, sending commands directly over Bluetooth Low Energy for ~15ms latency.
+
+### How it works
+
+```
+Foxglove Panel → HTTP POST localhost:4200 → Mac BLE Relay (bless)
+                                                    ↓ BLE notify (~15ms)
+                                            Jetson BLE Bridge (bleak)
+                                                    ↓ ROS2 /cmd_vel
+                                                VESC Driver → Motors
+```
+
+The Mac runs as BLE **peripheral** (server) and the Jetson runs as BLE **central** (client). This direction is intentional — `bless` works natively on macOS via CoreBluetooth, while BLE advertising on the Jetson's Realtek USB adapter has BlueZ D-Bus issues.
+
+### Running
+
+**1. Start the full stack on the Jetson** (includes BLE bridge automatically):
+
+```bash
+ssh jetson-nano
+cd ~/couch-vision
+make full-stack VESC=1
+```
+
+The `ble-bridge` container starts alongside the VESC driver. It automatically scans for the Mac's BLE peripheral and connects when found.
+
+**2. Start the BLE relay on your Mac:**
+
+```bash
+make ble-relay
+```
+
+This advertises a BLE GATT service and starts an HTTP server on `localhost:4200`. The Jetson discovers and connects within a few seconds.
+
+**3. Enable BLE in the Foxglove panel:**
+
+Toggle "BLE Fast Path" in the Hardware Safety Panel's motor config section. When enabled, gamepad commands route through BLE instead of WebSocket.
+
+### Monitoring
+
+```bash
+# On Jetson — check BLE bridge is connected
+make logs-ble
+
+# From Mac — check relay status
+curl localhost:4200/status
+# → {"connected": true, "latency_ms": 0.12, "writes_per_sec": 9.8}
+```
+
+### Failover
+
+The Foxglove panel automatically falls back to WebSocket if the BLE relay becomes unreachable (3 consecutive failures, ~300ms). It recovers back to BLE when the relay reconnects (checked every 2s). E-stop always sends on **both** paths regardless of mode.
+
+### Prerequisites
+
+- Mac must have Bluetooth enabled
+- Jetson needs a Bluetooth adapter (built-in Realtek USB on Orin Nano works). BlueZ must be running (`sudo systemctl enable --now bluetooth`)
+- The `entrypoint_ble.sh` script automatically sets the Jetson's adapter to LE-only mode on container start
 
 ## Perception Stack
 
@@ -188,6 +252,7 @@ Topic prefix is `/<device_name>/` (e.g. `/iphone_charlie/`).
 | `/e_stop` | `std_msgs/Bool` | Panel → Planner + VESC | Emergency stop (`true`=stopped) |
 | `/motor/config` | `std_msgs/String` | Panel → VESC | `{mode, max_rpm, stop_rpm, ramp_up_rpm_s, ramp_down_rpm_s}` |
 | `/motor/status` | `std_msgs/String` | VESC → Panel | RPM, temps, voltage, faults, ramp config |
+| `/motor/battery` | `sensor_msgs/BatteryState` | VESC → Panel | Combined ESC voltage, current, FET temperature |
 | `/wheel_odom` | `nav_msgs/Odometry` | VESC → ROS2 | Wheel encoder odometry |
 | `/teleop/status` | `std_msgs/String` | Panel → All | `{mode, active_source, gamepad_connected, e_stopped}` (2Hz) |
 | `/nav/set_destination` | `std_msgs/String` | Nav Panel → Planner | JSON destination command |
@@ -214,6 +279,7 @@ perception/               # Python perception + planning (uv project)
 ├── configs/              # Pipeline presets (default, fast, accurate)
 ├── src/couch_perception/
 │   ├── vesc_driver.py    # VESC motor driver (ROS2 node)
+│   ├── ble_bridge.py     # Jetson BLE client → ROS2 (bleak)
 │   ├── path_follower.py  # Pure pursuit path follower (ROS2 node)
 │   ├── nav2_planner.py   # Nav2 + EKF + perception orchestrator
 │   ├── perception_pipeline.py
@@ -229,7 +295,8 @@ foxglove/                 # Foxglove config + panel extensions
 ├── couch_layout.json     # Default panel layout
 ├── nav-control-panel/    # Navigation destination + map
 └── hardware-safety-panel/ # E-stop, teleop, motor config
-scripts/                  # Setup + VESC test scripts
+scripts/                  # Setup, VESC test scripts, BLE relay
+├── ble_relay.py          # Mac BLE peripheral + HTTP relay (bless)
 urdf/                     # Robot description (iphone_sensor.urdf)
 infra/                    # Terraform (S3 bag storage)
 bags/                     # Recorded MCAP bag files
@@ -246,7 +313,11 @@ make logs                           # tail all container logs
 make logs-bridge                    # tail bridge logs
 make logs-nav2                      # tail Nav2 logs
 make logs-vesc                      # tail VESC driver logs
+make logs-ble                       # tail BLE bridge logs
 make stop                           # stop Docker stack
+
+# BLE teleop (low-latency gamepad over Bluetooth)
+make ble-relay                      # start Mac BLE relay (localhost:4200)
 
 # Bridge (standalone, no Docker, run on Mac)
 make bridge                         # start TCP bridge (PORT=7447)

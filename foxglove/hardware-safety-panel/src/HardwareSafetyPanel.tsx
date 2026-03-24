@@ -26,13 +26,11 @@ interface PanelState {
   stopRpm: number;
   rampUpRpmPerSec: number;
   rampDownRpmPerSec: number;
-  maxRpmLimit: number;
-  maxLinearLimit: number;
-  maxAngularLimit: number;
-  limitsExpanded: boolean;
+  brakeCurrent: number;
   pfLinearSpeed: number;
   pfLookahead: number;
   pfGoalTolerance: number;
+  bleRelayEnabled: boolean;
 }
 
 interface TwistMsg {
@@ -42,6 +40,13 @@ interface TwistMsg {
 
 interface BatteryStateMsg {
   percentage: number;
+}
+
+interface VescBatteryMsg {
+  voltage: number;
+  current: number;
+  temperature: number;
+  present: boolean;
 }
 
 interface NavStatus {
@@ -343,13 +348,11 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
       stopRpm: s?.stopRpm ?? 50,
       rampUpRpmPerSec: s?.rampUpRpmPerSec ?? 500,
       rampDownRpmPerSec: s?.rampDownRpmPerSec ?? 500,
-      maxRpmLimit: s?.maxRpmLimit ?? 10000,
-      maxLinearLimit: s?.maxLinearLimit ?? 5.0,
-      maxAngularLimit: s?.maxAngularLimit ?? 5.0,
-      limitsExpanded: s?.limitsExpanded ?? false,
+      brakeCurrent: s?.brakeCurrent ?? 0.0,
       pfLinearSpeed: s?.pfLinearSpeed ?? 0.3,
       pfLookahead: s?.pfLookahead ?? 1.5,
       pfGoalTolerance: s?.pfGoalTolerance ?? 0.5,
+      bleRelayEnabled: s?.bleRelayEnabled ?? true,
     };
   });
 
@@ -366,9 +369,19 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
   const [thermalState, setThermalState] = useState<number | null>(null);
   const [navStatus, setNavStatus] = useState<NavStatus | null>(null);
   const [motorStatus, setMotorStatus] = useState<MotorStatus | null>(null);
+  const [vescBattery, setVescBattery] = useState<VescBatteryMsg | null>(null);
   const [pathFollowerStatus, setPathFollowerStatus] = useState<PathFollowerStatus | null>(null);
   const [renderDone, setRenderDone] = useState<(() => void) | undefined>();
   const [gamepadConnected, setGamepadConnected] = useState(false);
+  const [gamepadAxes, setGamepadAxes] = useState<number[]>([]);
+  const [gamepadMapping, setGamepadMapping] = useState<string>("");
+  const [bleConnected, setBleConnected] = useState(false);
+  const [bleRttMs, setBleRttMs] = useState(0);
+  const bleFetchFails = useRef(0);
+  const [coastFactor, setCoastFactor] = useState(0.0);
+  const prevCoastRef = useRef(0.0);
+
+  const BLE_RELAY_URL = "http://127.0.0.1:4200";
 
   const keysPressed = useRef(new Set<string>());
   const teleopInterval = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -379,6 +392,78 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
   useEffect(() => {
     context.saveState(state);
   }, [context, state]);
+
+  // BLE health poll — detect recovery after failover
+  useEffect(() => {
+    if (!state.bleRelayEnabled) {
+      setBleConnected(false);
+      return;
+    }
+    const checkHealth = async () => {
+      try {
+        const res = await fetch(`${BLE_RELAY_URL}/status`);
+        const data = await res.json();
+        const wasConnected = bleConnected;
+        setBleConnected(data.connected);
+        if (data.rtt_ms != null) setBleRttMs(data.rtt_ms);
+        if (data.connected) bleFetchFails.current = 0;
+        if (data.connected && !wasConnected) {
+          console.log("[BLE] Relay connected — switching to BLE fast path");
+        }
+      } catch {
+        setBleConnected(false);
+      }
+    };
+    checkHealth();
+    const interval = setInterval(checkHealth, 2000);
+    return () => clearInterval(interval);
+  }, [state.bleRelayEnabled, bleConnected, BLE_RELAY_URL]);
+
+  // Exclusive-mode cmd_vel publisher
+  const bleActive = state.bleRelayEnabled && bleConnected;
+  const publishCmdVel = useCallback(
+    (twist: TwistMsg) => {
+      if (bleActive) {
+        // BLE exclusive mode — update velocity bars locally
+        setCurrentLinear(twist.linear.x);
+        setCurrentAngular(twist.angular.z);
+        fetch(`${BLE_RELAY_URL}/cmd_vel`, {
+          method: "POST",
+          body: JSON.stringify({ lx: twist.linear.x, az: twist.angular.z }),
+          headers: { "Content-Type": "application/json" },
+        })
+          .then(() => {
+            bleFetchFails.current = 0;
+          })
+          .catch(() => {
+            bleFetchFails.current += 1;
+            if (bleFetchFails.current >= 3) {
+              console.warn("[BLE] 3 consecutive failures — falling back to WS");
+              setBleConnected(false);
+            }
+          });
+      } else {
+        // WS mode — normal Foxglove publish
+        context.publish?.("/cmd_vel", twist);
+      }
+    },
+    [bleActive, context, BLE_RELAY_URL],
+  );
+
+  // E-stop: always send on both paths for safety
+  const publishEStop = useCallback(
+    (stop: boolean) => {
+      context.publish?.("/e_stop", { data: stop });
+      if (state.bleRelayEnabled) {
+        fetch(`${BLE_RELAY_URL}/e_stop`, {
+          method: "POST",
+          body: JSON.stringify({ stop }),
+          headers: { "Content-Type": "application/json" },
+        }).catch(() => {});
+      }
+    },
+    [context, state.bleRelayEnabled, BLE_RELAY_URL],
+  );
 
   useLayoutEffect(() => {
     context.advertise?.("/cmd_vel", "geometry_msgs/Twist");
@@ -433,6 +518,8 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
             } catch {
               /* ignore */
             }
+          } else if (ev.topic === "/motor/battery") {
+            setVescBattery(ev.message as VescBatteryMsg);
           } else if (ev.topic === "/nav/path_follower/status") {
             try {
               const data = JSON.parse((ev.message as { data: string }).data) as PathFollowerStatus;
@@ -451,6 +538,7 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
       { topic: "/iphone/thermal" },
       { topic: "/nav/status" },
       { topic: "/motor/status" },
+      { topic: "/motor/battery" },
       { topic: "/nav/path_follower/status" },
     ]);
   }, [context]);
@@ -460,19 +548,27 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
   }, [renderDone]);
 
   // Publish motor config — always mode: "nav2", no target_rpm
+  const publishMotorConfig = useCallback(
+    (cf?: number) => {
+      context.publish?.("/motor/config", {
+        data: JSON.stringify({
+          mode: "nav2",
+          max_rpm: state.maxRpm,
+          stop_rpm: state.stopRpm,
+          ramp_up_rpm_s: state.rampUpRpmPerSec,
+          ramp_down_rpm_s: state.rampDownRpmPerSec,
+          brake_current: state.brakeCurrent,
+          max_linear_vel: state.maxLinearVel,
+          max_angular_vel: state.maxAngularVel,
+          coast_factor: cf ?? prevCoastRef.current,
+        }),
+      });
+    },
+    [context, state.maxRpm, state.stopRpm, state.rampUpRpmPerSec, state.rampDownRpmPerSec, state.brakeCurrent, state.maxLinearVel, state.maxAngularVel],
+  );
   useEffect(() => {
-    context.publish?.("/motor/config", {
-      data: JSON.stringify({
-        mode: "nav2",
-        max_rpm: state.maxRpm,
-        stop_rpm: state.stopRpm,
-        ramp_up_rpm_s: state.rampUpRpmPerSec,
-        ramp_down_rpm_s: state.rampDownRpmPerSec,
-        max_linear_vel: state.maxLinearVel,
-        max_angular_vel: state.maxAngularVel,
-      }),
-    });
-  }, [context, state.maxRpm, state.stopRpm, state.rampUpRpmPerSec, state.rampDownRpmPerSec, state.maxLinearVel, state.maxAngularVel]);
+    publishMotorConfig();
+  }, [publishMotorConfig]);
 
   // Publish path follower config
   useEffect(() => {
@@ -490,10 +586,10 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
   useEffect(() => {
     if (!state.eStopped) return;
     const interval = setInterval(() => {
-      context.publish?.("/cmd_vel", zeroTwist());
+      publishCmdVel(zeroTwist());
     }, PUBLISH_RATE_MS);
     return () => clearInterval(interval);
-  }, [context, state.eStopped]);
+  }, [state.eStopped, publishCmdVel]);
 
   // Heartbeat: publish /teleop/status at 2Hz
   useEffect(() => {
@@ -512,22 +608,22 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
 
   const handleEStop = useCallback(() => {
     setState((s) => ({ ...s, eStopped: true }));
-    context.publish?.("/e_stop", { data: true });
-    context.publish?.("/cmd_vel", zeroTwist());
-  }, [context]);
+    publishEStop(true);
+    publishCmdVel(zeroTwist());
+  }, [publishEStop, publishCmdVel]);
 
   const handleArm = useCallback(() => {
     setState((s) => ({ ...s, eStopped: false }));
-    context.publish?.("/e_stop", { data: false });
-  }, [context]);
+    publishEStop(false);
+  }, [publishEStop]);
 
   const handleModeChange = useCallback(
     (newMode: ControlMode) => {
-      context.publish?.("/cmd_vel", zeroTwist());
+      publishCmdVel(zeroTwist());
       setActiveSource("none");
       setState((s) => ({ ...s, motorMode: newMode }));
     },
-    [context, setActiveSource],
+    [publishCmdVel, setActiveSource],
   );
 
   // WASD keyboard controls — only in WASD mode
@@ -556,7 +652,7 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
     const startPublishing = () => {
       if (teleopInterval.current) return;
       teleopInterval.current = setInterval(() => {
-        context.publish?.("/cmd_vel", computeVelocity());
+        publishCmdVel(computeVelocity());
       }, PUBLISH_RATE_MS);
     };
 
@@ -565,7 +661,7 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
         clearInterval(teleopInterval.current);
         teleopInterval.current = null;
       }
-      context.publish?.("/cmd_vel", zeroTwist());
+      publishCmdVel(zeroTwist());
     };
 
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -597,7 +693,7 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
       stopPublishing();
     };
   }, [
-    context,
+    publishCmdVel,
     state.eStopped,
     state.teleopCollapsed,
     state.motorMode,
@@ -615,14 +711,14 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
       };
       if (!joystickInterval.current) {
         joystickInterval.current = setInterval(() => {
-          context.publish?.("/cmd_vel", {
+          publishCmdVel({
             linear: { x: joystickVel.current.linear, y: 0, z: 0 },
             angular: { x: 0, y: 0, z: joystickVel.current.angular },
           });
         }, PUBLISH_RATE_MS);
       }
     },
-    [context, state.maxLinearVel, state.maxAngularVel, setActiveSource],
+    [publishCmdVel, state.maxLinearVel, state.maxAngularVel, setActiveSource],
   );
 
   const handleJoystickRelease = useCallback(() => {
@@ -631,9 +727,9 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
       joystickInterval.current = null;
     }
     joystickVel.current = { linear: 0, angular: 0 };
-    context.publish?.("/cmd_vel", zeroTwist());
+    publishCmdVel(zeroTwist());
     setActiveSource("none");
-  }, [context, setActiveSource]);
+  }, [publishCmdVel, setActiveSource]);
 
   // Gamepad connection tracking
   useEffect(() => {
@@ -694,30 +790,54 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
       if (curr[0] && !prev[0]) handleArm();
       gamepadButtons.current = curr;
 
+      // Always capture axes for debug display
+      setGamepadAxes(Array.from(gp.axes));
+      setGamepadMapping(gp.mapping);
+
+      // Coast trigger — read LT/RT, take max (either trigger activates coast)
+      let lt: number, rt: number;
+      if (gp.mapping === "standard") {
+        lt = gp.buttons[6]?.value ?? 0;
+        rt = gp.buttons[7]?.value ?? 0;
+      } else {
+        lt = gp.axes.length > 2 ? (gp.axes[2]! + 1) / 2 : 0;
+        rt = gp.axes.length > 5 ? (gp.axes[5]! + 1) / 2 : 0;
+      }
+      const newCoast = Math.max(lt, rt);
+      if (Math.abs(newCoast - prevCoastRef.current) > 0.01) {
+        prevCoastRef.current = newCoast;
+        setCoastFactor(newCoast);
+        publishMotorConfig(newCoast);
+      }
+
       if (!stickActive) return;
 
       const leftY = applyDeadzone(gp.axes[1] ?? 0);
+      // Standard mapping: axes[2] = right stick X
+      // Non-standard (Linux evdev): axes[3] = right stick X (axes[2] = L2 trigger)
+      const rightXIndex = gp.mapping === "standard" ? 2 : 3;
       const rightX =
-        gp.axes.length > 2
-          ? applyDeadzone(gp.axes[2]!)
+        gp.axes.length > rightXIndex
+          ? applyDeadzone(gp.axes[rightXIndex]!)
           : applyDeadzone(gp.axes[0] ?? 0);
 
       const hasInput = leftY !== 0 || rightX !== 0;
       if (hasInput) {
         setActiveSource("gamepad");
-        context.publish?.("/cmd_vel", {
+        publishCmdVel({
           linear: { x: -leftY * state.maxLinearVel, y: 0, z: 0 },
           angular: { x: 0, y: 0, z: -rightX * state.maxAngularVel },
         });
       } else if (activeSourceRef.current === "gamepad") {
         setActiveSource("none");
-        context.publish?.("/cmd_vel", zeroTwist());
+        publishCmdVel(zeroTwist());
       }
     }, PUBLISH_RATE_MS);
 
     return () => clearInterval(interval);
   }, [
-    context,
+    publishCmdVel,
+    publishMotorConfig,
     state.eStopped,
     state.teleopCollapsed,
     state.motorMode,
@@ -996,9 +1116,9 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
                       value={state.pfLinearSpeed}
                       step={0.05}
                       min={0.05}
-                      max={state.maxLinearLimit}
+                      onFocus={(e) => e.target.select()}
                       onChange={(e) => {
-                        const v = clamp(parseFloat(e.target.value) || 0.05, 0.05, state.maxLinearLimit);
+                        const v = Math.max(0.05, parseFloat(e.target.value) || 0.05);
                         setState((s) => ({ ...s, pfLinearSpeed: v }));
                       }}
                     />
@@ -1011,9 +1131,9 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
                       value={state.pfLookahead}
                       step={0.1}
                       min={0.3}
-                      max={10}
+                      onFocus={(e) => e.target.select()}
                       onChange={(e) => {
-                        const v = clamp(parseFloat(e.target.value) || 0.3, 0.3, 10);
+                        const v = Math.max(0.3, parseFloat(e.target.value) || 0.3);
                         setState((s) => ({ ...s, pfLookahead: v }));
                       }}
                     />
@@ -1026,9 +1146,9 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
                       value={state.pfGoalTolerance}
                       step={0.1}
                       min={0.1}
-                      max={5}
+                      onFocus={(e) => e.target.select()}
                       onChange={(e) => {
-                        const v = clamp(parseFloat(e.target.value) || 0.1, 0.1, 5);
+                        const v = Math.max(0.1, parseFloat(e.target.value) || 0.1);
                         setState((s) => ({ ...s, pfGoalTolerance: v }));
                       }}
                     />
@@ -1063,25 +1183,57 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
                 </div>
 
                 {gamepadConnected && (
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      gap: "4px",
-                      marginTop: "3px",
-                    }}
-                  >
+                  <div style={{ marginTop: "3px" }}>
                     <div
                       style={{
-                        width: "6px",
-                        height: "6px",
-                        borderRadius: "50%",
-                        background: "#22c55e",
-                        boxShadow: "0 0 3px #22c55e",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        gap: "4px",
                       }}
-                    />
-                    <span style={{ fontSize: "9px", color: "#22c55e" }}>Gamepad</span>
+                    >
+                      <div
+                        style={{
+                          width: "6px",
+                          height: "6px",
+                          borderRadius: "50%",
+                          background: "#22c55e",
+                          boxShadow: "0 0 3px #22c55e",
+                        }}
+                      />
+                      <span style={{ fontSize: "9px", color: "#22c55e" }}>
+                        Gamepad ({gamepadMapping || "non-standard"})
+                      </span>
+                    </div>
+                    {gamepadAxes.length > 0 && (
+                      <div
+                        style={{
+                          fontSize: "9px",
+                          color: "#666",
+                          fontFamily: "monospace",
+                          textAlign: "center",
+                          marginTop: "2px",
+                          lineHeight: "1.4",
+                        }}
+                      >
+                        {gamepadAxes.slice(0, 6).map((v, i) => {
+                          const rightXIndex = gamepadMapping === "standard" ? 2 : 3;
+                          const isActive = i === 1 || i === rightXIndex;
+                          return (
+                            <span
+                              key={i}
+                              style={{
+                                color: isActive ? "#22c55e" : "#555",
+                                fontWeight: isActive ? "bold" : "normal",
+                              }}
+                            >
+                              {i > 0 ? " " : ""}
+                              {i}:{v.toFixed(2)}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 )}
               </>
@@ -1125,6 +1277,7 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
           unit="rad/s"
           centered
         />
+        <VelocityBar label="Coast" value={coastFactor} maxScale={1.0} unit="" />
       </div>
 
       {/* Motor Config */}
@@ -1153,12 +1306,12 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
                   type="number"
                   step="50"
                   min="0"
-                  max={state.maxRpmLimit}
                   value={state.maxRpm}
+                  onFocus={(e) => e.target.select()}
                   onChange={(e) =>
                     setState((s) => ({
                       ...s,
-                      maxRpm: clamp(parseInt(e.target.value) || 0, 0, s.maxRpmLimit),
+                      maxRpm: Math.max(0, parseInt(e.target.value) || 0),
                     }))
                   }
                   style={inputStyle}
@@ -1170,12 +1323,12 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
                   type="number"
                   step="50"
                   min="0"
-                  max="5000"
                   value={state.rampUpRpmPerSec}
+                  onFocus={(e) => e.target.select()}
                   onChange={(e) =>
                     setState((s) => ({
                       ...s,
-                      rampUpRpmPerSec: clamp(parseInt(e.target.value) || 0, 0, 5000),
+                      rampUpRpmPerSec: Math.max(0, parseInt(e.target.value) || 0),
                     }))
                   }
                   style={inputStyle}
@@ -1187,12 +1340,12 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
                   type="number"
                   step="50"
                   min="0"
-                  max="5000"
                   value={state.rampDownRpmPerSec}
+                  onFocus={(e) => e.target.select()}
                   onChange={(e) =>
                     setState((s) => ({
                       ...s,
-                      rampDownRpmPerSec: clamp(parseInt(e.target.value) || 0, 0, 5000),
+                      rampDownRpmPerSec: Math.max(0, parseInt(e.target.value) || 0),
                     }))
                   }
                   style={inputStyle}
@@ -1206,12 +1359,12 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
                   type="number"
                   step="10"
                   min="0"
-                  max="500"
                   value={state.stopRpm}
+                  onFocus={(e) => e.target.select()}
                   onChange={(e) =>
                     setState((s) => ({
                       ...s,
-                      stopRpm: clamp(parseInt(e.target.value) || 0, 0, 500),
+                      stopRpm: Math.max(0, parseInt(e.target.value) || 0),
                     }))
                   }
                   style={inputStyle}
@@ -1223,12 +1376,29 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
                   type="number"
                   step="0.1"
                   min="0"
-                  max={state.maxLinearLimit}
                   value={state.maxLinearVel}
+                  onFocus={(e) => e.target.select()}
                   onChange={(e) =>
                     setState((s) => ({
                       ...s,
-                      maxLinearVel: clamp(parseFloat(e.target.value) || 0, 0, s.maxLinearLimit),
+                      maxLinearVel: Math.max(0, parseFloat(e.target.value) || 0),
+                    }))
+                  }
+                  style={inputStyle}
+                />
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={labelStyle}>Brake Current (A)</label>
+                <input
+                  type="number"
+                  step="1.0"
+                  min="0"
+                  value={state.brakeCurrent || 0}
+                  onFocus={(e) => e.target.select()}
+                  onChange={(e) =>
+                    setState((s) => ({
+                      ...s,
+                      brakeCurrent: Math.max(0, parseFloat(e.target.value) || 0),
                     }))
                   }
                   style={inputStyle}
@@ -1242,12 +1412,12 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
                   type="number"
                   step="0.1"
                   min="0"
-                  max={state.maxAngularLimit}
                   value={state.maxAngularVel}
+                  onFocus={(e) => e.target.select()}
                   onChange={(e) =>
                     setState((s) => ({
                       ...s,
-                      maxAngularVel: clamp(parseFloat(e.target.value) || 0, 0, s.maxAngularLimit),
+                      maxAngularVel: Math.max(0, parseFloat(e.target.value) || 0),
                     }))
                   }
                   style={inputStyle}
@@ -1256,73 +1426,61 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
               <div style={{ flex: 1 }} />
             </div>
 
+            {/* BLE Fast Path toggle */}
             <div
               style={{
                 display: "flex",
-                justifyContent: "space-between",
                 alignItems: "center",
-                cursor: "pointer",
-                marginBottom: state.limitsExpanded ? "4px" : "6px",
+                justifyContent: "space-between",
+                padding: "4px 6px",
+                background: "#1a1a2e",
+                border: `1px solid ${state.bleRelayEnabled ? (bleConnected ? "#22c55e" : "#f59e0b") : "#333"}`,
+                borderRadius: "3px",
+                marginBottom: "6px",
               }}
-              onClick={() => setState((s) => ({ ...s, limitsExpanded: !s.limitsExpanded }))}
             >
-              <span style={{ fontSize: "10px", color: "#666" }}>Limits</span>
-              <span style={{ fontSize: "9px", color: "#666" }}>
-                {state.limitsExpanded ? "\u25bc" : "\u25b6"}
-              </span>
-            </div>
-            {state.limitsExpanded && (
-              <div style={{ display: "flex", gap: "6px", marginBottom: "6px" }}>
-                <div style={{ flex: 1 }}>
-                  <label style={labelStyle}>RPM</label>
-                  <input
-                    type="number"
-                    step="500"
-                    min="0"
-                    value={state.maxRpmLimit}
-                    onChange={(e) =>
-                      setState((s) => ({
-                        ...s,
-                        maxRpmLimit: Math.max(0, parseInt(e.target.value) || 0),
-                      }))
-                    }
-                    style={inputStyle}
-                  />
-                </div>
-                <div style={{ flex: 1 }}>
-                  <label style={labelStyle}>Linear (m/s)</label>
-                  <input
-                    type="number"
-                    step="1.0"
-                    min="0"
-                    value={state.maxLinearLimit}
-                    onChange={(e) =>
-                      setState((s) => ({
-                        ...s,
-                        maxLinearLimit: Math.max(0, parseFloat(e.target.value) || 0),
-                      }))
-                    }
-                    style={inputStyle}
-                  />
-                </div>
-                <div style={{ flex: 1 }}>
-                  <label style={labelStyle}>Angular (rad/s)</label>
-                  <input
-                    type="number"
-                    step="1.0"
-                    min="0"
-                    value={state.maxAngularLimit}
-                    onChange={(e) =>
-                      setState((s) => ({
-                        ...s,
-                        maxAngularLimit: Math.max(0, parseFloat(e.target.value) || 0),
-                      }))
-                    }
-                    style={inputStyle}
-                  />
-                </div>
+              <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                <div
+                  style={{
+                    width: "6px",
+                    height: "6px",
+                    borderRadius: "50%",
+                    background: !state.bleRelayEnabled
+                      ? "#555"
+                      : bleConnected
+                        ? "#22c55e"
+                        : "#f59e0b",
+                    boxShadow: state.bleRelayEnabled && bleConnected ? "0 0 3px #22c55e" : "none",
+                  }}
+                />
+                <span style={{ fontSize: "11px", color: "#e0e0e0" }}>BLE Fast Path</span>
+                {state.bleRelayEnabled && (
+                  <span
+                    style={{
+                      fontSize: "9px",
+                      color: bleConnected ? "#22c55e" : "#f59e0b",
+                    }}
+                  >
+                    {bleConnected ? `BLE ${bleRttMs > 0 ? `${bleRttMs.toFixed(0)}ms` : ""}` : "WS fallback"}
+                  </span>
+                )}
               </div>
-            )}
+              <button
+                onClick={() => setState((s) => ({ ...s, bleRelayEnabled: !s.bleRelayEnabled }))}
+                style={{
+                  padding: "2px 8px",
+                  fontSize: "10px",
+                  fontWeight: "bold",
+                  background: state.bleRelayEnabled ? "#166534" : "#1a1a2e",
+                  color: state.bleRelayEnabled ? "#86efac" : "#888",
+                  border: `1px solid ${state.bleRelayEnabled ? "#22c55e" : "#555"}`,
+                  borderRadius: "3px",
+                  cursor: "pointer",
+                }}
+              >
+                {state.bleRelayEnabled ? "ON" : "OFF"}
+              </button>
+            </div>
 
             {/* Motor telemetry */}
             {motorStatus && (
@@ -1364,31 +1522,81 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
                   />
                 )}
                 {motorStatus.connected && (
-                  <div
-                    style={{
-                      display: "flex",
-                      gap: "8px",
-                      fontSize: "10px",
-                      fontFamily: "monospace",
-                      color: "#999",
-                      marginTop: "2px",
-                    }}
-                  >
-                    <span>
-                      FET:{" "}
-                      <span style={{ color: motorStatus.temp_fet > 80 ? "#f97316" : "#e0e0e0" }}>
-                        {motorStatus.temp_fet.toFixed(1)}C
+                  <>
+                    {vescBattery && (
+                      <div
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          padding: "4px 6px",
+                          background: "#1a1a2e",
+                          border: "1px solid #333",
+                          borderRadius: "3px",
+                          marginTop: "4px",
+                          fontFamily: "monospace",
+                          fontSize: "11px",
+                        }}
+                      >
+                        <div>
+                          <span style={{ color: "#999" }}>V </span>
+                          <span style={{ color: "#e0e0e0" }}>
+                            {vescBattery.voltage.toFixed(1)}V
+                          </span>
+                        </div>
+                        <div>
+                          <span style={{ color: "#999" }}>I </span>
+                          <span
+                            style={{
+                              color:
+                                vescBattery.current > 20
+                                  ? "#ef4444"
+                                  : vescBattery.current > 10
+                                    ? "#f59e0b"
+                                    : "#22c55e",
+                              fontWeight: "bold",
+                            }}
+                          >
+                            {vescBattery.current.toFixed(1)}A
+                          </span>
+                        </div>
+                        <div>
+                          <span style={{ color: "#999" }}>P </span>
+                          <span style={{ color: "#e0e0e0" }}>
+                            {(vescBattery.voltage * vescBattery.current).toFixed(0)}W
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: "8px",
+                        fontSize: "10px",
+                        fontFamily: "monospace",
+                        color: "#999",
+                        marginTop: "2px",
+                      }}
+                    >
+                      <span>
+                        FET:{" "}
+                        <span style={{ color: motorStatus.temp_fet > 80 ? "#f97316" : "#e0e0e0" }}>
+                          {motorStatus.temp_fet.toFixed(1)}C
+                        </span>
                       </span>
-                    </span>
-                    <span>
-                      Motor:{" "}
-                      <span style={{ color: motorStatus.temp_motor > 100 ? "#ef4444" : "#e0e0e0" }}>
-                        {motorStatus.temp_motor.toFixed(1)}C
+                      <span>
+                        Motor:{" "}
+                        <span style={{ color: motorStatus.temp_motor > 100 ? "#ef4444" : "#e0e0e0" }}>
+                          {motorStatus.temp_motor.toFixed(1)}C
+                        </span>
                       </span>
-                    </span>
-                    <span>{motorStatus.voltage_input.toFixed(1)}V</span>
-                    <span>{motorStatus.current_input.toFixed(1)}A</span>
-                  </div>
+                      {!vescBattery && (
+                        <>
+                          <span>{motorStatus.voltage_input.toFixed(1)}V</span>
+                          <span>{motorStatus.current_input.toFixed(1)}A</span>
+                        </>
+                      )}
+                    </div>
+                  </>
                 )}
                 {motorStatus.fault_code !== 0 && (
                   <div style={{ fontSize: "10px", color: "#ef4444", marginTop: "2px" }}>
@@ -1410,6 +1618,14 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
           </span>
           <span> · Thermal: </span>
           <span style={{ color: thermal.color }}>{thermal.text}</span>
+          {vescBattery && (
+            <>
+              <span> · ESC: </span>
+              <span style={{ color: "#e0e0e0" }}>
+                {vescBattery.voltage.toFixed(1)}V {vescBattery.current.toFixed(1)}A
+              </span>
+            </>
+          )}
         </div>
         <div>
           {navStatus ? (

@@ -44,7 +44,7 @@ RUN if [ "$DOCKER_ARCH" = "arm64" ]; then \
         ros-jazzy-rtabmap-ros \
         ros-jazzy-rtabmap \
         ros-jazzy-image-transport-plugins \
-        python3-numpy git \
+        python3-numpy git bluez \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=docker.io/astral/uv:latest /uv /uvx /usr/local/bin/
@@ -78,7 +78,8 @@ COPY config/ config/
 COPY launch/ launch/
 COPY entrypoint_nav2.sh /entrypoint_nav2.sh
 COPY entrypoint_vesc.sh /entrypoint_vesc.sh
-RUN chmod +x /entrypoint_nav2.sh /entrypoint_vesc.sh
+COPY entrypoint_ble.sh /entrypoint_ble.sh
+RUN chmod +x /entrypoint_nav2.sh /entrypoint_vesc.sh /entrypoint_ble.sh
 
 ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 

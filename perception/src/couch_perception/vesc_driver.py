@@ -29,7 +29,10 @@ from rclpy.qos import QoSProfile
 from builtin_interfaces.msg import Time as RosTime
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
+from sensor_msgs.msg import BatteryState
 from std_msgs.msg import Bool, String
+
+from couch_perception.differential_drive import twist_to_erpm
 
 if TYPE_CHECKING:
     import serial as serial_mod
@@ -80,7 +83,9 @@ def _find_vesc_port() -> str | None:
 
 COMM_GET_VALUES = 4
 COMM_SET_CURRENT = 6
+COMM_SET_CURRENT_BRAKE = 7
 COMM_SET_RPM = 8
+COMM_SET_HANDBRAKE = 10
 COMM_FORWARD_CAN = 34
 
 FAULT_NAMES = {
@@ -186,36 +191,27 @@ class VescConfig:
     invert_slave: bool = False
     ramp_up_rpm_s: int = 500  # acceleration rate, RPM/s (0 = no limit)
     ramp_down_rpm_s: int = 500  # deceleration rate, RPM/s (0 = no limit)
+    brake_current: float = 0.0  # handbrake hold current (A)
     stop_rpm: int = 0  # below this RPM, coast instead of PID hold (0 = disabled)
     max_linear_vel: float = 0.0  # clamp cmd_vel linear.x (0 = no limit)
     max_angular_vel: float = 0.0  # clamp cmd_vel angular.z (0 = no limit)
+    coast_factor: float = 0.0  # 0.0 = full brake, 1.0 = full coast (gamepad trigger)
 
 
 def _twist_to_erpm(
     linear_x: float, angular_z: float, cfg: VescConfig
 ) -> tuple[int, int]:
-    """Differential drive: Twist → (left_erpm, right_erpm).
-
-    Returns ERPM values with inversion already applied for each motor.
-    Master = right wheel, slave = left wheel.
-    """
-    v_left = linear_x - (angular_z * cfg.wheel_separation / 2.0)
-    v_right = linear_x + (angular_z * cfg.wheel_separation / 2.0)
-    max_erpm = cfg.max_rpm * cfg.pole_pairs
-
-    def to_erpm(v: float) -> int:
-        wheel_rpm = v / (2.0 * math.pi * cfg.wheel_radius) * 60.0
-        motor_erpm = int(wheel_rpm * cfg.gear_ratio * cfg.pole_pairs)
-        return max(-max_erpm, min(max_erpm, motor_erpm))
-
-    left_erpm = to_erpm(v_left)
-    right_erpm = to_erpm(v_right)
-
-    # Apply per-motor inversion: master=right, slave=left
-    master_erpm = -right_erpm if cfg.invert_master else right_erpm
-    slave_erpm = -left_erpm if cfg.invert_slave else left_erpm
-
-    return master_erpm, slave_erpm
+    return twist_to_erpm(
+        linear_x,
+        angular_z,
+        cfg.wheel_radius,
+        cfg.wheel_separation,
+        cfg.gear_ratio,
+        cfg.pole_pairs,
+        cfg.max_rpm * cfg.pole_pairs,
+        invert_master=cfg.invert_master,
+        invert_slave=cfg.invert_slave,
+    )
 
 
 def _tachometer_to_distance(tach_delta: int, cfg: VescConfig) -> float:
@@ -263,6 +259,7 @@ class VescDriver(Node):
         self.create_subscription(String, "/motor/config", self._on_config, qos)
         self._odom_pub = self.create_publisher(Odometry, "/wheel_odom", qos)
         self._status_pub = self.create_publisher(String, "/motor/status", qos)
+        self._battery_pub = self.create_publisher(BatteryState, "/motor/battery", qos)
 
         self.create_timer(0.05, self._command_loop)
         self.create_timer(0.1, self._telemetry_loop)
@@ -275,6 +272,20 @@ class VescDriver(Node):
     def _motor_ids(self) -> list[int | None]:
         """Motor IDs to control: None=master, can_id=slave."""
         return [None, self._config.slave_can_id]
+
+    @staticmethod
+    def _vesc_cmd(cmd: int, value: int = 0) -> bytes:
+        return bytes([cmd]) + struct.pack(">i", value)
+
+    def _stop_cmd(self) -> bytes:
+        """Build stop command: handbrake if brake_current > 0, else coast."""
+        if self._config.brake_current > 0.0:
+            return self._vesc_cmd(COMM_SET_HANDBRAKE, int(self._config.brake_current * 1000.0))
+        return self._vesc_cmd(COMM_SET_CURRENT, 0)
+
+    def _send_both(self, cmd: bytes) -> None:
+        self._send(cmd)
+        self._send(cmd, can_id=self._config.slave_can_id)
 
     # ── Serial I/O ────────────────────────────────────────────────────────
 
@@ -374,11 +385,7 @@ class VescDriver(Node):
             self._e_stopped = msg.data
             self.get_logger().info(f"E-STOP {'ENGAGED' if msg.data else 'RELEASED'}")
             if msg.data:
-                for mid in self._motor_ids:
-                    self._send(
-                        bytes([COMM_SET_CURRENT]) + struct.pack(">i", 0),
-                        can_id=mid,
-                    )
+                self._send_both(self._stop_cmd())
 
     def _on_config(self, msg: String) -> None:
         try:
@@ -409,12 +416,18 @@ class VescDriver(Node):
             self._config.ramp_up_rpm_s = max(0, int(data["ramp_up_rpm_s"]))
         if "ramp_down_rpm_s" in data:
             self._config.ramp_down_rpm_s = max(0, int(data["ramp_down_rpm_s"]))
+        if "brake_current" in data:
+            self._config.brake_current = max(0.0, float(data["brake_current"]))
         if "stop_rpm" in data:
             self._config.stop_rpm = max(0, int(data["stop_rpm"]))
+        if "brake_current_ma" in data:
+            self._config.brake_current_ma = max(0, min(30000, int(data["brake_current_ma"])))
         if "max_linear_vel" in data:
             self._config.max_linear_vel = max(0.0, float(data["max_linear_vel"]))
         if "max_angular_vel" in data:
             self._config.max_angular_vel = max(0.0, float(data["max_angular_vel"]))
+        if "coast_factor" in data:
+            self._config.coast_factor = max(0.0, min(1.0, float(data["coast_factor"])))
 
     # ── Command loop (50ms / 20Hz) ───────────────────────────────────────
 
@@ -481,35 +494,41 @@ class VescDriver(Node):
             return
 
         if self._e_stopped:
-            # Bypass ramp — immediate zero current for safety
             self._commanded_erpm[None] = 0
             self._commanded_erpm[self._config.slave_can_id] = 0
-            zero_current = bytes([COMM_SET_CURRENT]) + struct.pack(">i", 0)
-            self._send(zero_current)
-            self._send(zero_current, can_id=self._config.slave_can_id)
+            self._send_both(self._stop_cmd())
             return
 
-        # When both targets are zero, skip ramp and actively brake.
-        # Use COMM_SET_RPM(0) for active PID braking (the PID drives current
-        # to fight rotation — unlike COMM_SET_CURRENT_BRAKE which depends on
-        # back-EMF and is ineffective at low speeds).  Once actual RPM drops
-        # below stop_rpm, switch to COMM_SET_CURRENT(0) to avoid the VESC's
-        # zero-RPM PID oscillation problem.
+        # When both targets are zero, brake or coast depending on coast_factor.
+        # coast_factor is set by the gamepad trigger (0.0 = full brake, 1.0 = coast).
         if master_target == 0 and slave_target == 0:
             self._commanded_erpm[None] = 0
             self._commanded_erpm[self._config.slave_can_id] = 0
+            cf = self._config.coast_factor
+
+            if cf >= 1.0:
+                self._send_both(self._vesc_cmd(COMM_SET_CURRENT, 0))
+                return
+
+            if cf > 0.0:
+                # Proportional braking — scale from max_brake down to 0
+                max_brake = max(self._config.brake_current, 5.0)
+                effective_ma = int(max_brake * (1.0 - cf) * 1000.0)
+                self._send_both(self._vesc_cmd(COMM_SET_CURRENT_BRAKE, effective_ma))
+                return
+
+            # cf == 0.0 — normal braking (no trigger pressed)
             stop_erpm = self._config.stop_rpm * self._config.pole_pairs
             m_telem = self._latest_telemetry.get(None)
             s_telem = self._latest_telemetry.get(self._config.slave_can_id)
             m_actual = abs(m_telem.erpm) if m_telem else 0
             s_actual = abs(s_telem.erpm) if s_telem else 0
 
-            rpm_zero = bytes([COMM_SET_RPM]) + struct.pack(">i", 0)
-            zero_current = bytes([COMM_SET_CURRENT]) + struct.pack(">i", 0)
-
-            self._send(zero_current if m_actual <= stop_erpm else rpm_zero)
+            rpm_zero = self._vesc_cmd(COMM_SET_RPM, 0)
+            stop_cmd = self._stop_cmd()
+            self._send(stop_cmd if m_actual <= stop_erpm else rpm_zero)
             self._send(
-                zero_current if s_actual <= stop_erpm else rpm_zero,
+                stop_cmd if s_actual <= stop_erpm else rpm_zero,
                 can_id=self._config.slave_can_id,
             )
             return
@@ -520,9 +539,9 @@ class VescDriver(Node):
         self._commanded_erpm[None] = master_erpm
         self._commanded_erpm[self._config.slave_can_id] = slave_erpm
 
-        self._send(bytes([COMM_SET_RPM]) + struct.pack(">i", master_erpm))
+        self._send(self._vesc_cmd(COMM_SET_RPM, master_erpm))
         self._send(
-            bytes([COMM_SET_RPM]) + struct.pack(">i", slave_erpm),
+            self._vesc_cmd(COMM_SET_RPM, slave_erpm),
             can_id=self._config.slave_can_id,
         )
 
@@ -555,10 +574,10 @@ class VescDriver(Node):
             m_erpm = self._commanded_erpm.get(None, 0)
             s_erpm = self._commanded_erpm.get(slave_id, 0)
             if m_erpm != 0:
-                self._send(bytes([COMM_SET_RPM]) + struct.pack(">i", m_erpm))
+                self._send(self._vesc_cmd(COMM_SET_RPM, m_erpm))
             if s_erpm != 0:
                 self._send(
-                    bytes([COMM_SET_RPM]) + struct.pack(">i", s_erpm),
+                    self._vesc_cmd(COMM_SET_RPM, s_erpm),
                     can_id=slave_id,
                 )
 
@@ -661,21 +680,43 @@ class VescDriver(Node):
             "invert_slave": self._config.invert_slave,
             "ramp_up_rpm_s": self._config.ramp_up_rpm_s,
             "ramp_down_rpm_s": self._config.ramp_down_rpm_s,
+            "brake_current": self._config.brake_current,
             "stop_rpm": self._config.stop_rpm,
             "max_linear_vel": self._config.max_linear_vel,
             "max_angular_vel": self._config.max_angular_vel,
+            "coast_factor": self._config.coast_factor,
             "errors": self._error_count,
         }
         msg = String()
         msg.data = json.dumps(status)
         self._status_pub.publish(msg)
+        self._publish_battery(m, s)
+
+    def _publish_battery(self, m: VescTelemetry, s: VescTelemetry) -> None:
+        msg = BatteryState()
+        msg.header.stamp = _stamp_from_epoch(time.time())
+        msg.header.frame_id = "base_link"
+        msg.voltage = float(m.voltage_input)
+        msg.current = float(m.current_input + s.current_input)
+        msg.temperature = float(max(m.temp_fet, s.temp_fet))
+        msg.percentage = float("nan")
+        msg.charge = float("nan")
+        msg.capacity = float("nan")
+        msg.design_capacity = float("nan")
+        msg.power_supply_status = BatteryState.POWER_SUPPLY_STATUS_DISCHARGING
+        msg.power_supply_health = BatteryState.POWER_SUPPLY_HEALTH_GOOD
+        msg.power_supply_technology = BatteryState.POWER_SUPPLY_TECHNOLOGY_UNKNOWN
+        msg.present = self._serial is not None
+        msg.location = "VESC ESC"
+        msg.serial_number = ""
+        msg.cell_voltage = []
+        msg.cell_temperature = []
+        self._battery_pub.publish(msg)
 
     # ── Lifecycle ─────────────────────────────────────────────────────────
 
     def shutdown(self) -> None:
-        zero_current = bytes([COMM_SET_CURRENT]) + struct.pack(">i", 0)
-        self._send(zero_current)
-        self._send(zero_current, can_id=self._config.slave_can_id)
+        self._send_both(self._stop_cmd())
         with self._serial_lock:
             if self._serial is not None:
                 self._serial.close()

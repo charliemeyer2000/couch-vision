@@ -26,7 +26,8 @@ PERC_PYTHON := $(if $(filter aarch64,$(UNAME_M)),python3.10,python3.12)
 .PHONY: help setup xcode bridge topics hz echo bag \
         full-stack test lint clean \
         build-extension install-extension lint-extension \
-        logs logs-bridge logs-nav2 logs-vesc stop
+        logs logs-bridge logs-nav2 logs-vesc logs-ble stop \
+        ble-relay
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # HELP
@@ -51,6 +52,7 @@ help:
 	@echo "  make logs-bridge              Tail iOS bridge logs"
 	@echo "  make logs-nav2                Tail Nav2 + perception logs"
 	@echo "  make logs-vesc                Tail VESC motor driver logs"
+	@echo "  make logs-ble                 Tail BLE bridge logs"
 	@echo "  make stop                     Stop Docker stack"
 	@echo ""
 	@echo "DEVELOPMENT"
@@ -129,7 +131,7 @@ full-stack:
 	echo "View logs in separate terminals:" && \
 	echo "  make logs-bridge    # iOS bridge only" && \
 	echo "  make logs-nav2      # Nav2 planner only" && \
-	$(if $(VESC),echo "  make logs-vesc      # VESC motor driver" &&) \
+	$(if $(VESC),echo "  make logs-vesc      # VESC motor driver" && echo "  make logs-ble       # BLE teleop bridge" &&) \
 	echo "  make logs           # All (interleaved)" && \
 	echo "  make stop           # Stop everything" && \
 	echo ""
@@ -147,6 +149,9 @@ logs-nav2:
 
 logs-vesc:
 	cd perception && docker compose -f docker-compose.nav2.yml -f docker-compose.vesc.yml logs -f --tail 50 vesc-driver
+
+logs-ble:
+	cd perception && docker compose -f docker-compose.nav2.yml -f docker-compose.vesc.yml logs -f --tail 50 ble-bridge
 
 stop:
 	cd perception && docker compose -f docker-compose.nav2.yml -f docker-compose.vesc.yml down 2>/dev/null; \
@@ -265,3 +270,14 @@ install-extension:
 lint-extension:
 	cd foxglove/nav-control-panel && pnpm typecheck && pnpm lint && pnpm format:check
 	cd foxglove/hardware-safety-panel && pnpm typecheck && pnpm lint && pnpm format:check
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# BLE LOW-LATENCY BRIDGE
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# BLE bridge runs in Docker with `make full-stack VESC=1` (see logs-ble).
+# Only the Mac-side relay needs to be started separately:
+ble-relay:
+	@echo "Starting BLE relay on localhost:4200 (connects to Jetson via Bluetooth)..."
+	@echo "Make sure 'make full-stack VESC=1' is running on the Jetson first."
+	uv run scripts/ble_relay.py

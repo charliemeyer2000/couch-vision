@@ -29,11 +29,13 @@ dependencies = [
     "pyproj>=3.6",
     "requests>=2.28",
     "pyserial>=3.5",
+    "bleak>=0.21; sys_platform == 'linux'",
 ]
 
 [project.scripts]
 couch-nav2-planner = "couch_perception.nav2_planner:main"
 vesc-driver = "couch_perception.vesc_driver:main"
+ble-bridge = "couch_perception.ble_bridge:main"
 
 [dependency-groups]
 dev = [
