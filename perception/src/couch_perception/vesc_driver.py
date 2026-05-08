@@ -196,6 +196,8 @@ class VescConfig:
     max_linear_vel: float = 0.0  # clamp cmd_vel linear.x (0 = no limit)
     max_angular_vel: float = 0.0  # clamp cmd_vel angular.z (0 = no limit)
     coast_factor: float = 0.0  # 0.0 = full brake, 1.0 = full coast (gamepad trigger)
+    left_scale: float = 1.0  # straight-line trim: boost left wheel if rover drifts right
+    right_scale: float = 1.0  # straight-line trim: boost right wheel if rover drifts left
 
 
 def _twist_to_erpm(
@@ -211,6 +213,8 @@ def _twist_to_erpm(
         cfg.max_rpm * cfg.pole_pairs,
         invert_master=cfg.invert_master,
         invert_slave=cfg.invert_slave,
+        left_scale=cfg.left_scale,
+        right_scale=cfg.right_scale,
     )
 
 
@@ -428,6 +432,10 @@ class VescDriver(Node):
             self._config.max_angular_vel = max(0.0, float(data["max_angular_vel"]))
         if "coast_factor" in data:
             self._config.coast_factor = max(0.0, min(1.0, float(data["coast_factor"])))
+        if "left_scale" in data:
+            self._config.left_scale = max(0.0, min(2.0, float(data["left_scale"])))
+        if "right_scale" in data:
+            self._config.right_scale = max(0.0, min(2.0, float(data["right_scale"])))
 
     # ── Command loop (50ms / 20Hz) ───────────────────────────────────────
 
@@ -684,6 +692,8 @@ class VescDriver(Node):
             "max_linear_vel": self._config.max_linear_vel,
             "max_angular_vel": self._config.max_angular_vel,
             "coast_factor": self._config.coast_factor,
+            "left_scale": self._config.left_scale,
+            "right_scale": self._config.right_scale,
             "errors": self._error_count,
         }
         msg = String()

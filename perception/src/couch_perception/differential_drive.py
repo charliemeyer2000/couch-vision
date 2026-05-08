@@ -19,15 +19,20 @@ def twist_to_erpm(
     *,
     invert_master: bool = False,
     invert_slave: bool = True,
+    left_scale: float = 1.0,
+    right_scale: float = 1.0,
 ) -> tuple[int, int]:
     """Convert a differential-drive Twist to motor ERPM targets.
 
     The left/right wheel requests are scaled together when saturated so the
     commanded turn radius is preserved instead of flattening to a straight line.
     Returns (master_erpm, slave_erpm), where master is the right wheel.
+
+    left_scale / right_scale trim asymmetric drive response — bump the slow
+    side up (e.g. left_scale=1.05) when the rover veers toward the fast side.
     """
-    v_left = linear_x - (angular_z * wheel_separation / 2.0)
-    v_right = linear_x + (angular_z * wheel_separation / 2.0)
+    v_left = (linear_x - (angular_z * wheel_separation / 2.0)) * left_scale
+    v_right = (linear_x + (angular_z * wheel_separation / 2.0)) * right_scale
 
     def to_erpm(v: float) -> int:
         wheel_rpm = v / (2.0 * math.pi * wheel_radius) * 60.0
