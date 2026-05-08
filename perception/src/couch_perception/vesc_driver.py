@@ -191,7 +191,7 @@ class VescConfig:
     invert_slave: bool = True
     ramp_up_rpm_s: int = 500  # acceleration rate, RPM/s (0 = no limit)
     ramp_down_rpm_s: int = 500  # deceleration rate, RPM/s (0 = no limit)
-    brake_current: float = 0.0  # handbrake hold current (A)
+    brake_current: float = 1.0  # handbrake hold current (A)
     stop_rpm: int = 0  # below this RPM, coast instead of PID hold (0 = disabled)
     max_linear_vel: float = 0.0  # clamp cmd_vel linear.x (0 = no limit)
     max_angular_vel: float = 0.0  # clamp cmd_vel angular.z (0 = no limit)
@@ -511,9 +511,8 @@ class VescDriver(Node):
                 return
 
             if cf > 0.0:
-                # Proportional braking — scale from max_brake down to 0
-                max_brake = max(self._config.brake_current, 5.0)
-                effective_ma = int(max_brake * (1.0 - cf) * 1000.0)
+                # Proportional braking — scale brake_current down by coast trigger
+                effective_ma = int(self._config.brake_current * (1.0 - cf) * 1000.0)
                 self._send_both(self._vesc_cmd(COMM_SET_CURRENT_BRAKE, effective_ma))
                 return
 
