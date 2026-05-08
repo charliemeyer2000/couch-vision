@@ -27,7 +27,7 @@ PERC_PYTHON := $(if $(filter aarch64,$(UNAME_M)),python3.10,python3.12)
         full-stack test lint clean \
         build-extension install-extension lint-extension \
         logs logs-bridge logs-nav2 logs-vesc logs-ble stop \
-        ble-relay
+        ble-relay gamepad-relay teleop
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # HELP
@@ -90,6 +90,9 @@ full-stack:
 	@echo "OPTIONS"
 	@echo "  BAG=<path>              MCAP bag file path (omit for live mode)"
 	@echo "  VESC=1                  Enable VESC motor driver (requires /dev/ttyACM0)"
+	@echo "  REBUILD=1               Force rebuild of Docker images (src/ is volume-mounted,"
+	@echo "                            so Python changes don't need a rebuild — only set this"
+	@echo "                            when Dockerfile or system deps change)"
 	@echo "  RATE=<float>            Playback speed multiplier (default: 1.0)"
 	@echo "  PREFIX=<string>         Topic prefix for live mode (default: /iphone_charlie)"
 	@echo "  SLAM_BACKEND=<type>     SLAM algorithm (default: none)"
@@ -120,7 +123,7 @@ full-stack:
 	DEST_LAT=$(or $(DEST_LAT),38.036830) DEST_LON=$(or $(DEST_LON),-78.503577) LOOKAHEAD=$(or $(LOOKAHEAD),15.0) \
 	SLAM_BACKEND=$(SLAM_BACKEND) \
 	DOCKER_RUNTIME=$$RUNTIME DOCKER_ARCH=$$ARCH \
-	docker compose -f docker-compose.nav2.yml $$VESC_COMPOSE $$PROFILE build --build-arg DOCKER_ARCH=$$ARCH && \
+	$(if $(REBUILD),docker compose -f docker-compose.nav2.yml $$VESC_COMPOSE $$PROFILE build --build-arg DOCKER_ARCH=$$ARCH &&,) \
 	$(if $(BAG),BAG_FILE=$(patsubst bags/%,%,$(BAG)) PLAYBACK_RATE=$(or $(RATE),1.0),LIVE_MODE=1 TOPIC_PREFIX=$(or $(PREFIX),/iphone_charlie) NETWORK_MODE=host) \
 	DEST_LAT=$(or $(DEST_LAT),38.036830) DEST_LON=$(or $(DEST_LON),-78.503577) LOOKAHEAD=$(or $(LOOKAHEAD),15.0) \
 	SLAM_BACKEND=$(SLAM_BACKEND) \
@@ -281,3 +284,15 @@ ble-relay:
 	@echo "Starting BLE relay on localhost:4200 (connects to Jetson via Bluetooth)..."
 	@echo "Make sure 'make full-stack VESC=1' is running on the Jetson first."
 	uv run scripts/ble_relay.py
+
+# Native Mac gamepad reader → BLE relay. Bypasses Foxglove (which gets
+# throttled when the lid closes). Run alongside `make ble-relay`.
+gamepad-relay:
+	@echo "Starting native gamepad relay → http://127.0.0.1:4200 ..."
+	@echo "Make sure 'make ble-relay' is running too."
+	uv run scripts/gamepad_relay.py
+
+# One-command Mac-side teleop: BLE relay + native gamepad reader.
+# Pair this with `make full-stack VESC=1` on the Jetson.
+teleop:
+	@./scripts/teleop_mac.sh
