@@ -17,8 +17,8 @@ def twist_to_erpm(
     pole_pairs: int,
     max_erpm: int,
     *,
-    invert_master: bool = True,
-    invert_slave: bool = False,
+    invert_master: bool = False,
+    invert_slave: bool = True,
 ) -> tuple[int, int]:
     """Convert a differential-drive Twist to motor ERPM targets.
 

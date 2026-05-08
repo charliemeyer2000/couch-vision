@@ -187,8 +187,8 @@ class VescConfig:
     pole_pairs: int = DEFAULT_POLE_PAIRS
     gear_ratio: int = DEFAULT_GEAR_RATIO
     slave_can_id: int = DEFAULT_SLAVE_CAN_ID
-    invert_master: bool = True
-    invert_slave: bool = False
+    invert_master: bool = False
+    invert_slave: bool = True
     ramp_up_rpm_s: int = 500  # acceleration rate, RPM/s (0 = no limit)
     ramp_down_rpm_s: int = 500  # deceleration rate, RPM/s (0 = no limit)
     brake_current: float = 0.0  # handbrake hold current (A)
