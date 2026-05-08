@@ -197,7 +197,7 @@ class VescConfig:
     max_angular_vel: float = 0.0  # clamp cmd_vel angular.z (0 = no limit)
     coast_factor: float = 0.0  # 0.0 = full brake, 1.0 = full coast (gamepad trigger)
     left_scale: float = 1.0  # straight-line trim: boost left wheel if rover drifts right
-    right_scale: float = 1.0  # straight-line trim: boost right wheel if rover drifts left
+    right_scale: float = 1.03  # straight-line trim: boosts master ~3% to compensate measured asymmetry
 
 
 def _twist_to_erpm(
@@ -524,18 +524,22 @@ class VescDriver(Node):
                 self._send_both(self._vesc_cmd(COMM_SET_CURRENT_BRAKE, effective_ma))
                 return
 
-            # cf == 0.0 — normal braking (no trigger pressed)
+            # cf == 0.0 — regen brake until slow, then handbrake hold.
+            # Avoid COMM_SET_RPM, 0 here: the speed PID oscillates wildly
+            # at zero target, producing the violent decel jerk.
             stop_erpm = self._config.stop_rpm * self._config.pole_pairs
             m_telem = self._latest_telemetry.get(None)
             s_telem = self._latest_telemetry.get(self._config.slave_can_id)
             m_actual = abs(m_telem.erpm) if m_telem else 0
             s_actual = abs(s_telem.erpm) if s_telem else 0
 
-            rpm_zero = self._vesc_cmd(COMM_SET_RPM, 0)
-            stop_cmd = self._stop_cmd()
-            self._send(stop_cmd if m_actual <= stop_erpm else rpm_zero)
+            brake_cmd = self._vesc_cmd(
+                COMM_SET_CURRENT_BRAKE, int(self._config.brake_current * 1000.0)
+            )
+            hold_cmd = self._stop_cmd()
+            self._send(hold_cmd if m_actual <= stop_erpm else brake_cmd)
             self._send(
-                stop_cmd if s_actual <= stop_erpm else rpm_zero,
+                hold_cmd if s_actual <= stop_erpm else brake_cmd,
                 can_id=self._config.slave_can_id,
             )
             return
