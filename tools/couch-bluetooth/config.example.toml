@@ -1,0 +1,18 @@
+[run]
+sample_rate_hz = 10.0
+timeout_ms = 500
+hold_seconds = 30
+distances_m = [0, 5, 10, 20, 30, 50]
+distance_source = "manual_marker"
+transport = "tcp"
+notes = "Synthetic command/ack range test. No couch motion."
+
+[thresholds]
+reliable_success_rate = 0.99
+reliable_p95_latency_ms = 100
+reliable_packet_loss_percent = 1
+reliable_max_reconnects = 0
+marginal_success_rate = 0.95
+marginal_p95_latency_ms = 250
+marginal_packet_loss_percent = 5
+marginal_max_reconnects = 0
