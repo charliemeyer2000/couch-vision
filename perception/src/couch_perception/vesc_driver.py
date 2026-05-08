@@ -197,7 +197,7 @@ class VescConfig:
     max_angular_vel: float = 0.0  # clamp cmd_vel angular.z (0 = no limit)
     coast_factor: float = 0.0  # 0.0 = full brake, 1.0 = full coast (gamepad trigger)
     left_scale: float = 1.0  # straight-line trim: boost left wheel if rover drifts right
-    right_scale: float = 1.03  # straight-line trim: boosts master ~3% to compensate measured asymmetry
+    right_scale: float = 1.05  # straight-line trim: boosts master ~5% to compensate measured asymmetry
 
 
 def _twist_to_erpm(
