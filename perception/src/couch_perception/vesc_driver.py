@@ -179,7 +179,7 @@ def _parse_get_values(payload: bytes) -> VescTelemetry | None:
 
 @dataclass
 class VescConfig:
-    mode: str = "manual"
+    mode: str = "nav2"
     target_rpm: int = 0
     max_rpm: int = 7000
     wheel_radius: float = DEFAULT_WHEEL_RADIUS

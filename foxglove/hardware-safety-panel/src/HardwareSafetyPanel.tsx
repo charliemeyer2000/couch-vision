@@ -3,7 +3,6 @@ import { ReactElement, useEffect, useLayoutEffect, useState, useCallback, useRef
 import { createRoot } from "react-dom/client";
 
 const PUBLISH_RATE_MS = 100;
-const HEARTBEAT_RATE_MS = 500;
 const DEFAULT_MAX_LINEAR = 1.0;
 const DEFAULT_MAX_ANGULAR = 1.5;
 const VEL_BAR_MAX_LINEAR = 2.0;
@@ -662,9 +661,13 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
     return () => clearInterval(interval);
   }, [state.eStopped, publishCmdVel]);
 
-  // Heartbeat: publish /teleop/status at 2Hz
+  // Publish /teleop/status once on mode change (no periodic heartbeat — breaks clamshell)
+  const prevModeRef = useRef(state.motorMode);
+  const prevEStopRef = useRef(state.eStopped);
   useEffect(() => {
-    const interval = setInterval(() => {
+    if (state.motorMode !== prevModeRef.current || state.eStopped !== prevEStopRef.current) {
+      prevModeRef.current = state.motorMode;
+      prevEStopRef.current = state.eStopped;
       context.publish?.("/teleop/status", {
         data: JSON.stringify({
           mode: state.motorMode,
@@ -672,8 +675,7 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
           e_stopped: state.eStopped,
         }),
       });
-    }, HEARTBEAT_RATE_MS);
-    return () => clearInterval(interval);
+    }
   }, [context, state.motorMode, state.eStopped]);
 
   const handleEStop = useCallback(() => {
