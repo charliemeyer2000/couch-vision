@@ -75,6 +75,32 @@ The iOS app does NOT publish directly to ROS2. Data flows through **three layers
 - **Firmware**: v5.02, HW 60 Flipsky variant (build target `flipsky_60_mk5`)
 - Scripts in `scripts/`: `vesc_hold_test.py`, `vesc_hold_test_erpm.py`, `vesc_rpm_test.py`, `vesc_wasd_rpm_control.py`
 
+### VESC driver tuning (nav2 mode)
+
+The driver applies cmd_vel slew (m/s² and rad/s²) BEFORE differential-drive
+kinematics so steering can be much faster than throttle — critical for
+hill-contour driving where the inside wheel must decelerate sharply
+without dragging down bulk linear velocity. Configure via the Hardware
+Safety Panel's Motor Config section:
+
+- `linear_accel_mps2` / `linear_decel_mps2` — clamps `linear.x` rate of change.
+- `angular_accel_rps2` / `angular_decel_rps2` — clamps `angular.z` rate of change.
+- `bypass_ramp` — toggles raw passthrough for tuning. `max_linear_vel` / `max_angular_vel` clamps still apply.
+
+Manual mode (`mode: "manual"`) keeps the legacy per-wheel ERPM ramp
+(`ramp_up_rpm_s`, `ramp_down_rpm_s`); the panel always sends `mode: "nav2"`.
+
+### Plottable VESC telemetry topics
+
+`std_msgs/Float64`, sign-corrected for `invert_master`/`invert_slave`:
+
+- `/motor/wheel_{left,right}/{rpm,cmd_rpm,current,duty}` — per-wheel actual + commanded.
+- `/motor/cmd_vel/{linear,angular}_{raw,slewed}` — raw input vs post-slew. Plot
+  these together to see the controller lag directly.
+
+The legacy `/motor/status` JSON (1 Hz) still exists for the panel; the new
+Float64 topics are 10–20 Hz for clean plotting.
+
 ## BLE Low-Latency Teleop
 
 Bypasses the high-latency Foxglove WebSocket → Tailscale path for gamepad commands by sending cmd_vel directly over Bluetooth Low Energy.

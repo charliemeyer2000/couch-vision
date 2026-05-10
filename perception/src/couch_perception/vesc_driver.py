@@ -30,9 +30,9 @@ from builtin_interfaces.msg import Time as RosTime
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import BatteryState
-from std_msgs.msg import Bool, String
+from std_msgs.msg import Bool, Float64, String
 
-from couch_perception.differential_drive import twist_to_erpm
+from couch_perception.differential_drive import slew_cmd_vel, twist_to_erpm
 
 if TYPE_CHECKING:
     import serial as serial_mod
@@ -189,8 +189,8 @@ class VescConfig:
     slave_can_id: int = DEFAULT_SLAVE_CAN_ID
     invert_master: bool = False
     invert_slave: bool = True
-    ramp_up_rpm_s: int = 600  # acceleration rate, RPM/s
-    ramp_down_rpm_s: int = 400  # deceleration rate, RPM/s
+    ramp_up_rpm_s: int = 600  # manual-mode per-wheel acceleration rate, RPM/s
+    ramp_down_rpm_s: int = 400  # manual-mode per-wheel deceleration rate, RPM/s
     brake_current: float = 0.5  # handbrake hold current (A)
     stop_rpm: int = 50  # below this RPM, coast instead of PID hold
     max_linear_vel: float = 1.0  # clamp cmd_vel linear.x (m/s)
@@ -198,6 +198,14 @@ class VescConfig:
     coast_factor: float = 0.0  # 0.0 = full brake, 1.0 = full coast (gamepad trigger)
     left_scale: float = 1.05  # straight-line trim: boost left (slave) ~5% to compensate measured rightward drift
     right_scale: float = 1.0  # straight-line trim: master (right wheel)
+    # Nav2-mode cmd_vel slew limits (intuitive units, separate accel/decel
+    # so steering can be much snappier than throttle for hill-contour driving).
+    # Defaults are aggressive — bypass_ramp=True for raw passthrough during testing.
+    linear_accel_mps2: float = 4.0
+    linear_decel_mps2: float = 4.0
+    angular_accel_rps2: float = 10.0
+    angular_decel_rps2: float = 10.0
+    bypass_ramp: bool = False
 
 
 def _twist_to_erpm(
@@ -257,6 +265,13 @@ class VescDriver(Node):
         self._commanded_erpm: dict[int | None, int] = {None: 0}
         self._telemetry_tick: int = 0
 
+        # Nav2-mode cmd_vel slew state (in physical, post-clamp units).
+        # Persists across ticks so the slew_cmd_vel helper can rate-limit.
+        self._commanded_linear: float = 0.0
+        self._commanded_angular: float = 0.0
+        self._linear_raw_input: float = 0.0
+        self._angular_raw_input: float = 0.0
+
         qos = QoSProfile(depth=5)
         self.create_subscription(Twist, "/cmd_vel", self._on_cmd_vel, qos)
         self.create_subscription(Bool, "/e_stop", self._on_e_stop, qos)
@@ -264,6 +279,34 @@ class VescDriver(Node):
         self._odom_pub = self.create_publisher(Odometry, "/wheel_odom", qos)
         self._status_pub = self.create_publisher(String, "/motor/status", qos)
         self._battery_pub = self.create_publisher(BatteryState, "/motor/battery", qos)
+
+        # High-rate plottable telemetry — Foxglove can drag any of these
+        # straight into a Plot panel without parsing JSON.
+        # Master = right wheel, slave = left wheel. Sign is corrected for
+        # invert_master/invert_slave so values match physical direction.
+        def _f64(topic: str) -> "rclpy.publisher.Publisher":
+            return self.create_publisher(Float64, topic, qos)
+
+        self._wheel_pubs: dict[str, dict[str, "rclpy.publisher.Publisher"]] = {
+            "left": {
+                "rpm": _f64("/motor/wheel_left/rpm"),
+                "cmd_rpm": _f64("/motor/wheel_left/cmd_rpm"),
+                "current": _f64("/motor/wheel_left/current"),
+                "duty": _f64("/motor/wheel_left/duty"),
+            },
+            "right": {
+                "rpm": _f64("/motor/wheel_right/rpm"),
+                "cmd_rpm": _f64("/motor/wheel_right/cmd_rpm"),
+                "current": _f64("/motor/wheel_right/current"),
+                "duty": _f64("/motor/wheel_right/duty"),
+            },
+        }
+        self._cmd_vel_pubs = {
+            "linear_raw": _f64("/motor/cmd_vel/linear_raw"),
+            "linear_slewed": _f64("/motor/cmd_vel/linear_slewed"),
+            "angular_raw": _f64("/motor/cmd_vel/angular_raw"),
+            "angular_slewed": _f64("/motor/cmd_vel/angular_slewed"),
+        }
 
         self.create_timer(0.05, self._command_loop)
         self.create_timer(0.1, self._telemetry_loop)
@@ -436,6 +479,16 @@ class VescDriver(Node):
             self._config.left_scale = max(0.0, min(2.0, float(data["left_scale"])))
         if "right_scale" in data:
             self._config.right_scale = max(0.0, min(2.0, float(data["right_scale"])))
+        if "linear_accel_mps2" in data:
+            self._config.linear_accel_mps2 = max(0.0, float(data["linear_accel_mps2"]))
+        if "linear_decel_mps2" in data:
+            self._config.linear_decel_mps2 = max(0.0, float(data["linear_decel_mps2"]))
+        if "angular_accel_rps2" in data:
+            self._config.angular_accel_rps2 = max(0.0, float(data["angular_accel_rps2"]))
+        if "angular_decel_rps2" in data:
+            self._config.angular_decel_rps2 = max(0.0, float(data["angular_decel_rps2"]))
+        if "bypass_ramp" in data:
+            self._config.bypass_ramp = bool(data["bypass_ramp"])
 
     # ── Command loop (50ms / 20Hz) ───────────────────────────────────────
 
@@ -464,9 +517,23 @@ class VescDriver(Node):
             return target
         return current + (max_step if delta > 0 else -max_step)
 
+    def _reset_cmd_vel_slew(self) -> None:
+        self._commanded_linear = 0.0
+        self._commanded_angular = 0.0
+        self._linear_raw_input = 0.0
+        self._angular_raw_input = 0.0
+
     def _compute_target_erpm(self) -> tuple[int, int]:
-        """Compute (master_erpm, slave_erpm) with inversion applied."""
+        """Compute (master_erpm, slave_erpm) with inversion applied.
+
+        Nav2 mode applies cmd_vel slew (intuitive m/s² and rad/s² limits)
+        BEFORE kinematics, so steering can be much faster than throttle —
+        critical for hill-contour driving where the inside wheel must
+        decelerate sharply without dragging down bulk linear velocity.
+        Manual mode keeps the legacy per-wheel ERPM ramp (`_ramp_erpm`).
+        """
         if self._e_stopped:
+            self._reset_cmd_vel_slew()
             return 0, 0
         if self._config.mode == "manual":
             max_erpm = self._config.max_rpm * self._config.pole_pairs
@@ -481,6 +548,9 @@ class VescDriver(Node):
                 self._last_cmd_vel is None
                 or time.monotonic() - self._last_cmd_time > 0.5
             ):
+                # Stale cmd_vel: brake & forget any in-flight slew so the
+                # next fresh command starts from rest.
+                self._reset_cmd_vel_slew()
                 return 0, 0
             linear_x = self._last_cmd_vel.linear.x
             angular_z = self._last_cmd_vel.angular.z
@@ -488,16 +558,42 @@ class VescDriver(Node):
                 linear_x = max(-self._config.max_linear_vel, min(self._config.max_linear_vel, linear_x))
             if self._config.max_angular_vel > 0:
                 angular_z = max(-self._config.max_angular_vel, min(self._config.max_angular_vel, angular_z))
-            return _twist_to_erpm(linear_x, angular_z, self._config)
+            self._linear_raw_input = linear_x
+            self._angular_raw_input = angular_z
+            if self._config.bypass_ramp:
+                self._commanded_linear = linear_x
+                self._commanded_angular = angular_z
+            else:
+                self._commanded_linear = slew_cmd_vel(
+                    self._commanded_linear,
+                    linear_x,
+                    self._config.linear_accel_mps2,
+                    self._config.linear_decel_mps2,
+                    self._COMMAND_PERIOD_S,
+                )
+                self._commanded_angular = slew_cmd_vel(
+                    self._commanded_angular,
+                    angular_z,
+                    self._config.angular_accel_rps2,
+                    self._config.angular_decel_rps2,
+                    self._COMMAND_PERIOD_S,
+                )
+            return _twist_to_erpm(
+                self._commanded_linear, self._commanded_angular, self._config
+            )
         return 0, 0
 
     def _command_loop(self) -> None:
         master_target, slave_target = self._compute_target_erpm()
+        # Always publish cmd_vel telemetry (raw + slewed) — useful for plotting
+        # the controller lag even when motors aren't connected (dry-run mode).
+        self._publish_cmd_vel_telemetry()
 
         if self._serial is None:
             # Motor physically stopped — reset ramp so we start from 0 on reconnect
             self._commanded_erpm[None] = 0
             self._commanded_erpm[self._config.slave_can_id] = 0
+            self._publish_wheel_cmd_telemetry()
             self._try_reconnect()
             return
 
@@ -505,6 +601,7 @@ class VescDriver(Node):
             self._commanded_erpm[None] = 0
             self._commanded_erpm[self._config.slave_can_id] = 0
             self._send_both(self._stop_cmd())
+            self._publish_wheel_cmd_telemetry()
             return
 
         # When both targets are zero, brake or coast depending on coast_factor.
@@ -516,12 +613,14 @@ class VescDriver(Node):
 
             if cf >= 1.0:
                 self._send_both(self._vesc_cmd(COMM_SET_CURRENT, 0))
+                self._publish_wheel_cmd_telemetry()
                 return
 
             if cf > 0.0:
                 # Proportional braking — scale brake_current down by coast trigger
                 effective_ma = int(self._config.brake_current * (1.0 - cf) * 1000.0)
                 self._send_both(self._vesc_cmd(COMM_SET_CURRENT_BRAKE, effective_ma))
+                self._publish_wheel_cmd_telemetry()
                 return
 
             # cf == 0.0 — regen brake until slow, then handbrake hold.
@@ -542,10 +641,17 @@ class VescDriver(Node):
                 hold_cmd if s_actual <= stop_erpm else brake_cmd,
                 can_id=self._config.slave_can_id,
             )
+            self._publish_wheel_cmd_telemetry()
             return
 
-        master_erpm = self._ramp_erpm(None, master_target)
-        slave_erpm = self._ramp_erpm(self._config.slave_can_id, slave_target)
+        # Manual mode keeps the legacy per-wheel ERPM ramp; nav2 mode is
+        # already slewed at the cmd_vel level and passes through unchanged.
+        if self._config.mode == "manual":
+            master_erpm = self._ramp_erpm(None, master_target)
+            slave_erpm = self._ramp_erpm(self._config.slave_can_id, slave_target)
+        else:
+            master_erpm = master_target
+            slave_erpm = slave_target
 
         self._commanded_erpm[None] = master_erpm
         self._commanded_erpm[self._config.slave_can_id] = slave_erpm
@@ -555,6 +661,7 @@ class VescDriver(Node):
             self._vesc_cmd(COMM_SET_RPM, slave_erpm),
             can_id=self._config.slave_can_id,
         )
+        self._publish_wheel_cmd_telemetry()
 
     # ── Telemetry loop (100ms / 10Hz) ────────────────────────────────────
 
@@ -568,6 +675,9 @@ class VescDriver(Node):
         master_telem = self._transact(bytes([COMM_GET_VALUES]))
         if master_telem is not None:
             self._latest_telemetry[None] = master_telem
+            self._publish_wheel_actual_telemetry(
+                "right", master_telem, invert=self._config.invert_master
+            )
         else:
             self._error_count += 1
 
@@ -577,6 +687,9 @@ class VescDriver(Node):
             slave_telem = self._transact(bytes([COMM_GET_VALUES]), can_id=slave_id)
             if slave_telem is not None:
                 self._latest_telemetry[slave_id] = slave_telem
+                self._publish_wheel_actual_telemetry(
+                    "left", slave_telem, invert=self._config.invert_slave
+                )
 
         self._publish_odom()
 
@@ -591,6 +704,44 @@ class VescDriver(Node):
                     self._vesc_cmd(COMM_SET_RPM, s_erpm),
                     can_id=slave_id,
                 )
+
+    # ── Plottable telemetry (Float64 fan-out for Foxglove) ───────────────
+
+    def _publish_wheel_actual_telemetry(
+        self, side: str, telem: VescTelemetry, *, invert: bool
+    ) -> None:
+        """Publish per-wheel actual values, sign-corrected for invert flag."""
+        pubs = self._wheel_pubs[side]
+        sign = -1.0 if invert else 1.0
+        pp = self._config.pole_pairs or 1
+        pubs["rpm"].publish(Float64(data=sign * telem.erpm / pp))
+        pubs["current"].publish(Float64(data=sign * telem.current_motor))
+        pubs["duty"].publish(Float64(data=sign * telem.duty_cycle))
+
+    def _publish_wheel_cmd_telemetry(self) -> None:
+        """Publish per-wheel commanded RPM, sign-corrected to physical direction."""
+        pp = self._config.pole_pairs or 1
+        m_cmd = self._commanded_erpm.get(None, 0)
+        s_cmd = self._commanded_erpm.get(self._config.slave_can_id, 0)
+        right_sign = -1.0 if self._config.invert_master else 1.0
+        left_sign = -1.0 if self._config.invert_slave else 1.0
+        self._wheel_pubs["right"]["cmd_rpm"].publish(
+            Float64(data=right_sign * m_cmd / pp)
+        )
+        self._wheel_pubs["left"]["cmd_rpm"].publish(
+            Float64(data=left_sign * s_cmd / pp)
+        )
+
+    def _publish_cmd_vel_telemetry(self) -> None:
+        """Publish raw vs slewed cmd_vel — the gap is the controller lag."""
+        self._cmd_vel_pubs["linear_raw"].publish(Float64(data=self._linear_raw_input))
+        self._cmd_vel_pubs["linear_slewed"].publish(
+            Float64(data=self._commanded_linear)
+        )
+        self._cmd_vel_pubs["angular_raw"].publish(Float64(data=self._angular_raw_input))
+        self._cmd_vel_pubs["angular_slewed"].publish(
+            Float64(data=self._commanded_angular)
+        )
 
     def _publish_odom(self) -> None:
         now = time.time()
@@ -698,6 +849,15 @@ class VescDriver(Node):
             "coast_factor": self._config.coast_factor,
             "left_scale": self._config.left_scale,
             "right_scale": self._config.right_scale,
+            "linear_accel_mps2": self._config.linear_accel_mps2,
+            "linear_decel_mps2": self._config.linear_decel_mps2,
+            "angular_accel_rps2": self._config.angular_accel_rps2,
+            "angular_decel_rps2": self._config.angular_decel_rps2,
+            "bypass_ramp": self._config.bypass_ramp,
+            "linear_raw": self._linear_raw_input,
+            "linear_slewed": self._commanded_linear,
+            "angular_raw": self._angular_raw_input,
+            "angular_slewed": self._commanded_angular,
             "errors": self._error_count,
         }
         msg = String()
