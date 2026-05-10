@@ -44,5 +44,28 @@ services:
       - ../cyclonedds.xml:/bridge/cyclonedds.xml:ro
     profiles: ["live"]
 
+  ble-bridge:
+    build:
+      context: .
+      dockerfile: Dockerfile.nav2
+      args:
+        DOCKER_ARCH: "${DOCKER_ARCH:-amd64}"
+    runtime: "${DOCKER_RUNTIME:-runc}"
+    privileged: true
+    volumes:
+      - /dev:/dev
+      - /var/run/dbus:/var/run/dbus
+      - ./src:/perception/src:ro
+      - ./entrypoint_ble.sh:/entrypoint_ble.sh:ro
+      - ../cyclonedds.xml:/perception/cyclonedds.xml:ro
+    environment:
+      - PYTHONUNBUFFERED=1
+      - CYCLONEDDS_URI=file:///perception/cyclonedds.xml
+    network_mode: "${NETWORK_MODE:-bridge}"
+    entrypoint: ["/entrypoint_ble.sh"]
+    command: []
+    restart: unless-stopped
+    profiles: ["live"]
+
 volumes:
   slam-data:

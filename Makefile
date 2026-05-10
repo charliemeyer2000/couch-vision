@@ -37,8 +37,8 @@ help:
 	@echo "CouchVision — Self-Driving Couch"
 	@echo ""
 	@echo "DRIVING (two commands to go live)"
-	@echo "  Jetson:  make full-stack VESC=1    Start perception + motors + BLE bridge"
-	@echo "  Mac:     make teleop               Start gamepad relay + BLE (clamshell-safe)"
+	@echo "  Jetson:  make full-stack            Start perception + BLE bridge (add VESC=1 for motors)"
+	@echo "  Mac:     make teleop                Start gamepad relay + BLE (clamshell-safe)"
 	@echo ""
 	@echo "TELEOP (Mac-side)"
 	@echo "  make teleop                   Gamepad → BLE → Jetson (clamshell-safe)"
@@ -48,8 +48,8 @@ help:
 	@echo "  make gamepad-relay            Gamepad relay only (needs ble-relay running)"
 	@echo ""
 	@echo "STACK (Jetson-side)"
-	@echo "  make full-stack               Perception + Nav2 (no motors)"
-	@echo "  make full-stack VESC=1        With VESC motor driver + BLE bridge"
+	@echo "  make full-stack               Perception + Nav2 + BLE bridge"
+	@echo "  make full-stack VESC=1        Also start VESC motor driver"
 	@echo "  make full-stack BAG=<path>    Replay a recorded bag file"
 	@echo "  make stop                     Stop Docker stack"
 	@echo ""
@@ -139,7 +139,8 @@ full-stack:
 	echo "View logs in separate terminals:" && \
 	echo "  make logs-bridge    # iOS bridge only" && \
 	echo "  make logs-nav2      # Nav2 planner only" && \
-	$(if $(VESC),echo "  make logs-vesc      # VESC motor driver" && echo "  make logs-ble       # BLE teleop bridge" &&) \
+	$(if $(BAG),,echo "  make logs-ble       # BLE teleop bridge" &&) \
+	$(if $(VESC),echo "  make logs-vesc      # VESC motor driver" &&) \
 	echo "  make logs           # All (interleaved)" && \
 	echo "  make stop           # Stop everything" && \
 	echo ""
@@ -159,7 +160,7 @@ logs-vesc:
 	cd perception && docker compose -f docker-compose.nav2.yml -f docker-compose.vesc.yml logs -f --tail 50 vesc-driver
 
 logs-ble:
-	cd perception && docker compose -f docker-compose.nav2.yml -f docker-compose.vesc.yml logs -f --tail 50 ble-bridge
+	cd perception && docker compose -f docker-compose.nav2.yml logs -f --tail 50 ble-bridge
 
 stop:
 	cd perception && docker compose -f docker-compose.nav2.yml -f docker-compose.vesc.yml down 2>/dev/null; \
@@ -283,11 +284,11 @@ lint-extension:
 # BLE LOW-LATENCY BRIDGE
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# BLE bridge runs in Docker with `make full-stack VESC=1` (see logs-ble).
+# BLE bridge runs in Docker with `make full-stack` (live mode). See logs-ble.
 # Only the Mac-side relay needs to be started separately:
 ble-relay:
 	@echo "Starting BLE relay on localhost:4200 (connects to Jetson via Bluetooth)..."
-	@echo "Make sure 'make full-stack VESC=1' is running on the Jetson first."
+	@echo "Make sure 'make full-stack' is running on the Jetson first."
 	uv run scripts/ble_relay.py
 
 # Native Mac gamepad reader → BLE relay. Bypasses Foxglove (which gets
@@ -299,7 +300,7 @@ gamepad-relay:
 
 # One-command Mac-side teleop: BLE relay + native gamepad reader.
 # Prevents macOS sleep for clamshell/backpack mode.
-# Pair this with `make full-stack VESC=1` on the Jetson.
+# Pair this with `make full-stack` (or `make full-stack VESC=1`) on the Jetson.
 teleop:
 	@./scripts/teleop_mac.sh
 

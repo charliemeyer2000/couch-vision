@@ -4,8 +4,8 @@ import { createRoot } from "react-dom/client";
 
 const PUBLISH_RATE_MS = 100;
 const HEARTBEAT_RATE_MS = 500;
-const DEFAULT_MAX_LINEAR = 0.5;
-const DEFAULT_MAX_ANGULAR = 2.0;
+const DEFAULT_MAX_LINEAR = 1.0;
+const DEFAULT_MAX_ANGULAR = 1.5;
 const VEL_BAR_MAX_LINEAR = 2.0;
 const VEL_BAR_MAX_ANGULAR = 4.0;
 const GAMEPAD_DEADZONE = 0.15;
@@ -31,6 +31,8 @@ interface PanelState {
   pfLookahead: number;
   pfGoalTolerance: number;
   bleRelayEnabled: boolean;
+  leftScale: number;
+  rightScale: number;
 }
 
 interface TwistMsg {
@@ -344,15 +346,17 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
       teleopCollapsed: s?.teleopCollapsed ?? false,
       motorCollapsed: s?.motorCollapsed ?? false,
       motorMode: validMode,
-      maxRpm: s?.maxRpm ?? 500,
+      maxRpm: s?.maxRpm ?? 700,
       stopRpm: s?.stopRpm ?? 50,
-      rampUpRpmPerSec: s?.rampUpRpmPerSec ?? 500,
-      rampDownRpmPerSec: s?.rampDownRpmPerSec ?? 500,
-      brakeCurrent: s?.brakeCurrent ?? 0.0,
+      rampUpRpmPerSec: s?.rampUpRpmPerSec ?? 600,
+      rampDownRpmPerSec: s?.rampDownRpmPerSec ?? 400,
+      brakeCurrent: s?.brakeCurrent ?? 0.5,
       pfLinearSpeed: s?.pfLinearSpeed ?? 0.3,
       pfLookahead: s?.pfLookahead ?? 1.5,
       pfGoalTolerance: s?.pfGoalTolerance ?? 0.5,
       bleRelayEnabled: s?.bleRelayEnabled ?? true,
+      leftScale: s?.leftScale ?? 1.05,
+      rightScale: s?.rightScale ?? 1.0,
     };
   });
 
@@ -813,20 +817,15 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
       if (!stickActive) return;
 
       const leftY = applyDeadzone(gp.axes[1] ?? 0);
-      // Standard mapping: axes[2] = right stick X
-      // Non-standard (Linux evdev): axes[3] = right stick X (axes[2] = L2 trigger)
-      const rightXIndex = gp.mapping === "standard" ? 2 : 3;
-      const rightX =
-        gp.axes.length > rightXIndex
-          ? applyDeadzone(gp.axes[rightXIndex]!)
-          : applyDeadzone(gp.axes[0] ?? 0);
+      // Single-stick: left stick X controls angular (no two-stick coordination needed)
+      const leftX = applyDeadzone(gp.axes[0] ?? 0);
 
-      const hasInput = leftY !== 0 || rightX !== 0;
+      const hasInput = leftY !== 0 || leftX !== 0;
       if (hasInput) {
         setActiveSource("gamepad");
         publishCmdVel({
           linear: { x: -leftY * state.maxLinearVel, y: 0, z: 0 },
-          angular: { x: 0, y: 0, z: -rightX * state.maxAngularVel },
+          angular: { x: 0, y: 0, z: -leftX * state.maxAngularVel },
         });
       } else if (activeSourceRef.current === "gamepad") {
         setActiveSource("none");
@@ -1217,8 +1216,7 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
                         }}
                       >
                         {gamepadAxes.slice(0, 6).map((v, i) => {
-                          const rightXIndex = gamepadMapping === "standard" ? 2 : 3;
-                          const isActive = i === 1 || i === rightXIndex;
+                          const isActive = i === 0 || i === 1;
                           return (
                             <span
                               key={i}

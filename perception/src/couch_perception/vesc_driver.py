@@ -181,7 +181,7 @@ def _parse_get_values(payload: bytes) -> VescTelemetry | None:
 class VescConfig:
     mode: str = "manual"
     target_rpm: int = 0
-    max_rpm: int = 500
+    max_rpm: int = 700
     wheel_radius: float = DEFAULT_WHEEL_RADIUS
     wheel_separation: float = DEFAULT_WHEEL_SEPARATION
     pole_pairs: int = DEFAULT_POLE_PAIRS
@@ -189,15 +189,15 @@ class VescConfig:
     slave_can_id: int = DEFAULT_SLAVE_CAN_ID
     invert_master: bool = False
     invert_slave: bool = True
-    ramp_up_rpm_s: int = 500  # acceleration rate, RPM/s (0 = no limit)
-    ramp_down_rpm_s: int = 500  # deceleration rate, RPM/s (0 = no limit)
-    brake_current: float = 1.0  # handbrake hold current (A)
-    stop_rpm: int = 0  # below this RPM, coast instead of PID hold (0 = disabled)
-    max_linear_vel: float = 0.0  # clamp cmd_vel linear.x (0 = no limit)
-    max_angular_vel: float = 0.0  # clamp cmd_vel angular.z (0 = no limit)
+    ramp_up_rpm_s: int = 600  # acceleration rate, RPM/s
+    ramp_down_rpm_s: int = 400  # deceleration rate, RPM/s
+    brake_current: float = 0.5  # handbrake hold current (A)
+    stop_rpm: int = 50  # below this RPM, coast instead of PID hold
+    max_linear_vel: float = 1.0  # clamp cmd_vel linear.x (m/s)
+    max_angular_vel: float = 1.5  # clamp cmd_vel angular.z (rad/s)
     coast_factor: float = 0.0  # 0.0 = full brake, 1.0 = full coast (gamepad trigger)
-    left_scale: float = 1.0  # straight-line trim: boost left wheel if rover drifts right
-    right_scale: float = 1.05  # straight-line trim: boosts master ~5% to compensate measured asymmetry
+    left_scale: float = 1.05  # straight-line trim: boost left (slave) ~5% to compensate measured rightward drift
+    right_scale: float = 1.0  # straight-line trim: master (right wheel)
 
 
 def _twist_to_erpm(

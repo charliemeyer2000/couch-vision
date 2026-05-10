@@ -515,9 +515,9 @@ async def _async_main(args: argparse.Namespace) -> None:
     app = _make_viz_app(relay)
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, "127.0.0.1", args.viz_port)
+    site = web.TCPSite(runner, "0.0.0.0", args.viz_port)
     await site.start()
-    logger.info("viz: http://127.0.0.1:%d/", args.viz_port)
+    logger.info("viz: http://0.0.0.0:%d/", args.viz_port)
 
     async with aiohttp.ClientSession() as session:
         status_task = None
