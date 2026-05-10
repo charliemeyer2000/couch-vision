@@ -21,6 +21,7 @@ interface GamepadRelayState {
   cmd_vel: { lx: number; az: number };
   ble_connected: boolean | null;
   ble_rtt_ms: number | null;
+  e_stopped: boolean;
 }
 
 interface PanelState {
@@ -438,12 +439,21 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
       try {
         const res = await fetch(`${GAMEPAD_RELAY_URL}/state`);
         const data = await res.json();
-        setGamepadRelay({
+        const relayState: GamepadRelayState = {
           controller: data.controller ?? null,
           connected: data.connected ?? false,
           cmd_vel: data.cmd_vel ?? { lx: 0, az: 0 },
           ble_connected: data.ble_connected ?? null,
           ble_rtt_ms: data.ble_rtt_ms ?? null,
+          e_stopped: data.e_stopped ?? true,
+        };
+        setGamepadRelay(relayState);
+        // Sync e-stop state from gamepad relay (button presses bypass the panel)
+        setState((prev) => {
+          if (prev.eStopped !== relayState.e_stopped) {
+            return { ...prev, eStopped: relayState.e_stopped };
+          }
+          return prev;
         });
       } catch {
         setGamepadRelay(null);
@@ -496,6 +506,12 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
           headers: { "Content-Type": "application/json" },
         }).catch(() => {});
       }
+      // Update gamepad relay's e-stop tracking so panel stays in sync
+      fetch(`${GAMEPAD_RELAY_URL}/e_stop`, {
+        method: "POST",
+        body: JSON.stringify({ stop }),
+        headers: { "Content-Type": "application/json" },
+      }).catch(() => {});
     },
     [context, state.bleRelayEnabled, BLE_RELAY_URL],
   );

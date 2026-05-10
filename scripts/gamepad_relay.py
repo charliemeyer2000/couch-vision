@@ -144,6 +144,7 @@ class GamepadRelay:
             "ble_rtt_ms": None,
             "ble_writes_per_sec": None,
             "post_failures": 0,
+            "e_stopped": True,
             "ts": time.time(),
         }
         self._published_zero = True
@@ -235,9 +236,11 @@ class GamepadRelay:
             if 0 <= self.button_arm < N_BUTTONS and buttons[self.button_arm] and not self._prev_buttons[self.button_arm]:
                 logger.info("%s pressed → /e_stop {stop:false}", BUTTON_NAMES[self.button_arm])
                 await self._post(session, "/e_stop", {"stop": False})
+                self.state["e_stopped"] = False
             if 0 <= self.button_estop < N_BUTTONS and buttons[self.button_estop] and not self._prev_buttons[self.button_estop]:
                 logger.info("%s pressed → /e_stop {stop:true}", BUTTON_NAMES[self.button_estop])
                 await self._post(session, "/e_stop", {"stop": True})
+                self.state["e_stopped"] = True
             self._prev_buttons = buttons
 
             ly = axes_dz[AXIS_LEFT_Y]
@@ -429,7 +432,7 @@ tick();
 def _cors_headers(_req):
     return {
         "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "GET, OPTIONS",
+        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
         "Access-Control-Allow-Headers": "Content-Type",
     }
 
@@ -441,13 +444,21 @@ def _make_viz_app(relay: GamepadRelay) -> web.Application:
     async def state(req):
         return web.json_response(relay.state, headers=_cors_headers(req))
 
+    async def handle_e_stop(req):
+        body = await req.json()
+        stop = bool(body.get("stop", True))
+        relay.state["e_stopped"] = stop
+        return web.json_response({"ok": True}, headers=_cors_headers(req))
+
     async def cors_preflight(req):
         return web.Response(headers=_cors_headers(req))
 
     app = web.Application()
     app.router.add_get("/", index)
     app.router.add_get("/state", state)
+    app.router.add_post("/e_stop", handle_e_stop)
     app.router.add_route("OPTIONS", "/state", cors_preflight)
+    app.router.add_route("OPTIONS", "/e_stop", cors_preflight)
     return app
 
 
