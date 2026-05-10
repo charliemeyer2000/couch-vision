@@ -1,0 +1,14 @@
+name: flat_default
+description: Baseline flat concrete feel.
+slope_pitch_deg: 0.0
+slope_roll_deg: 0.0
+ground_friction: [0.95, 0.02, 0.002]
+left_ground_friction: null
+right_ground_friction: null
+bump_height: 0.0
+bump_spacing: 0.0
+bump_count: 0
+bump_width: 0.15
+bump_length: 0.8
+surface_length: 12.0
+surface_width: 7.0

@@ -1,0 +1,14 @@
+name: split_friction
+description: Uneven left/right traction for veer testing.
+slope_pitch_deg: 0.0
+slope_roll_deg: 0.0
+ground_friction: [0.95, 0.02, 0.002]
+left_ground_friction: [0.65, 0.03, 0.003]
+right_ground_friction: [1.1, 0.015, 0.002]
+bump_height: 0.0
+bump_spacing: 0.0
+bump_count: 0
+bump_width: 0.15
+bump_length: 0.8
+surface_length: 12.0
+surface_width: 7.0

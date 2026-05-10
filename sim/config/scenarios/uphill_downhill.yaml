@@ -1,0 +1,14 @@
+name: uphill_downhill
+description: Fore-aft slope for grade climbing and rollback feel.
+slope_pitch_deg: 3.0
+slope_roll_deg: 0.0
+ground_friction: [1.0, 0.03, 0.003]
+left_ground_friction: null
+right_ground_friction: null
+bump_height: 0.0
+bump_spacing: 0.0
+bump_count: 0
+bump_width: 0.15
+bump_length: 0.8
+surface_length: 12.0
+surface_width: 7.0
