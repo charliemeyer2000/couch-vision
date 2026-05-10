@@ -8,12 +8,10 @@ const DEFAULT_MAX_LINEAR = 1.0;
 const DEFAULT_MAX_ANGULAR = 1.5;
 const VEL_BAR_MAX_LINEAR = 2.0;
 const VEL_BAR_MAX_ANGULAR = 4.0;
-const GAMEPAD_DEADZONE = 0.15;
+type ControlMode = "wasd" | "nav2";
+type ActiveSource = "keyboard" | "joystick" | "none";
 
-type ControlMode = "gamepad" | "wasd" | "nav2";
-type ActiveSource = "keyboard" | "joystick" | "gamepad" | "none";
-
-const VALID_MODES: ControlMode[] = ["gamepad", "wasd", "nav2"];
+const VALID_MODES: ControlMode[] = ["wasd", "nav2"];
 
 interface PanelState {
   eStopped: boolean;
@@ -338,7 +336,7 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
     const savedMode = s?.motorMode as string | undefined;
     const validMode = VALID_MODES.includes(savedMode as ControlMode)
       ? (savedMode as ControlMode)
-      : "gamepad";
+      : "wasd";
     return {
       eStopped: s?.eStopped ?? true,
       maxLinearVel: s?.maxLinearVel ?? DEFAULT_MAX_LINEAR,
@@ -376,9 +374,6 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
   const [vescBattery, setVescBattery] = useState<VescBatteryMsg | null>(null);
   const [pathFollowerStatus, setPathFollowerStatus] = useState<PathFollowerStatus | null>(null);
   const [renderDone, setRenderDone] = useState<(() => void) | undefined>();
-  const [gamepadConnected, setGamepadConnected] = useState(false);
-  const [gamepadAxes, setGamepadAxes] = useState<number[]>([]);
-  const [gamepadMapping, setGamepadMapping] = useState<string>("");
   const [bleConnected, setBleConnected] = useState(false);
   const [bleRttMs, setBleRttMs] = useState(0);
   const bleFetchFails = useRef(0);
@@ -391,7 +386,6 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
   const teleopInterval = useRef<ReturnType<typeof setInterval> | null>(null);
   const joystickInterval = useRef<ReturnType<typeof setInterval> | null>(null);
   const joystickVel = useRef({ linear: 0, angular: 0 });
-  const gamepadButtons = useRef<boolean[]>([]);
 
   useEffect(() => {
     context.saveState(state);
@@ -604,13 +598,12 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
         data: JSON.stringify({
           mode: state.motorMode,
           active_source: activeSourceRef.current,
-          gamepad_connected: gamepadConnected,
           e_stopped: state.eStopped,
         }),
       });
     }, HEARTBEAT_RATE_MS);
     return () => clearInterval(interval);
-  }, [context, state.motorMode, gamepadConnected, state.eStopped]);
+  }, [context, state.motorMode, state.eStopped]);
 
   const handleEStop = useCallback(() => {
     setState((s) => ({ ...s, eStopped: true }));
@@ -737,118 +730,6 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
     setActiveSource("none");
   }, [publishCmdVel, setActiveSource]);
 
-  // Gamepad connection tracking
-  useEffect(() => {
-    const handleConnect = () => setGamepadConnected(true);
-    const handleDisconnect = () => {
-      setGamepadConnected(false);
-      gamepadButtons.current = [];
-    };
-    window.addEventListener("gamepadconnected", handleConnect);
-    window.addEventListener("gamepaddisconnected", handleDisconnect);
-
-    const gamepads = navigator.getGamepads?.();
-    if (gamepads) {
-      for (const gp of gamepads) {
-        if (gp) {
-          setGamepadConnected(true);
-          break;
-        }
-      }
-    }
-
-    return () => {
-      window.removeEventListener("gamepadconnected", handleConnect);
-      window.removeEventListener("gamepaddisconnected", handleDisconnect);
-    };
-  }, []);
-
-  // Gamepad polling — e-stop/arm always active, sticks only in gamepad/wasd mode
-  useEffect(() => {
-    const stickActive =
-      !state.eStopped &&
-      !state.teleopCollapsed &&
-      (state.motorMode === "gamepad" || state.motorMode === "wasd");
-
-    const applyDeadzone = (v: number): number => {
-      if (Math.abs(v) < GAMEPAD_DEADZONE) return 0;
-      const sign = v > 0 ? 1 : -1;
-      return sign * ((Math.abs(v) - GAMEPAD_DEADZONE) / (1 - GAMEPAD_DEADZONE));
-    };
-
-    const interval = setInterval(() => {
-      const gps = navigator.getGamepads?.();
-      if (!gps) return;
-
-      let gp: Gamepad | null = null;
-      for (const g of gps) {
-        if (g) {
-          gp = g;
-          break;
-        }
-      }
-      if (!gp) return;
-
-      // E-stop/arm buttons — always active regardless of mode
-      const curr = Array.from(gp.buttons).map((b) => b.pressed);
-      const prev = gamepadButtons.current;
-      if (curr[1] && !prev[1]) handleEStop();
-      if (curr[0] && !prev[0]) handleArm();
-      gamepadButtons.current = curr;
-
-      // Always capture axes for debug display
-      setGamepadAxes(Array.from(gp.axes));
-      setGamepadMapping(gp.mapping);
-
-      // Coast trigger — read LT/RT, take max (either trigger activates coast)
-      let lt: number, rt: number;
-      if (gp.mapping === "standard") {
-        lt = gp.buttons[6]?.value ?? 0;
-        rt = gp.buttons[7]?.value ?? 0;
-      } else {
-        lt = gp.axes.length > 2 ? (gp.axes[2]! + 1) / 2 : 0;
-        rt = gp.axes.length > 5 ? (gp.axes[5]! + 1) / 2 : 0;
-      }
-      const newCoast = Math.max(lt, rt);
-      if (Math.abs(newCoast - prevCoastRef.current) > 0.01) {
-        prevCoastRef.current = newCoast;
-        setCoastFactor(newCoast);
-        publishMotorConfig(newCoast);
-      }
-
-      if (!stickActive) return;
-
-      const leftY = applyDeadzone(gp.axes[1] ?? 0);
-      // Single-stick: left stick X controls angular (no two-stick coordination needed)
-      const leftX = applyDeadzone(gp.axes[0] ?? 0);
-
-      const hasInput = leftY !== 0 || leftX !== 0;
-      if (hasInput) {
-        setActiveSource("gamepad");
-        publishCmdVel({
-          linear: { x: -leftY * state.maxLinearVel, y: 0, z: 0 },
-          angular: { x: 0, y: 0, z: -leftX * state.maxAngularVel },
-        });
-      } else if (activeSourceRef.current === "gamepad") {
-        setActiveSource("none");
-        publishCmdVel(zeroTwist());
-      }
-    }, PUBLISH_RATE_MS);
-
-    return () => clearInterval(interval);
-  }, [
-    publishCmdVel,
-    publishMotorConfig,
-    state.eStopped,
-    state.teleopCollapsed,
-    state.motorMode,
-    state.maxLinearVel,
-    state.maxAngularVel,
-    handleEStop,
-    handleArm,
-    setActiveSource,
-  ]);
-
   const thermalLabel = (val: number | null): { text: string; color: string } => {
     switch (val) {
       case 0:
@@ -875,8 +756,6 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
 
   const modeLabel = (mode: ControlMode): string => {
     switch (mode) {
-      case "gamepad":
-        return "Gamepad";
       case "wasd":
         return "WASD";
       case "nav2":
@@ -889,9 +768,7 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
       ? "KB"
       : activeSource === "joystick"
         ? "JOY"
-        : activeSource === "gamepad"
-          ? "PAD"
-          : "idle";
+        : "idle";
 
   return (
     <div
@@ -996,7 +873,7 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
           <div style={{ position: "relative", marginTop: "4px" }}>
             {/* Mode selector */}
             <div style={{ display: "flex", gap: "4px", marginBottom: "6px" }}>
-              {(["gamepad", "wasd", "nav2"] as const).map((mode) => (
+              {(["wasd", "nav2"] as const).map((mode) => (
                 <button
                   key={mode}
                   onClick={() => handleModeChange(mode)}
@@ -1045,24 +922,6 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
                 >
                   {sourceBadge}
                 </span>
-              </div>
-            )}
-
-            {/* Gamepad mode: warning if no gamepad */}
-            {state.motorMode === "gamepad" && !gamepadConnected && (
-              <div
-                style={{
-                  padding: "8px",
-                  background: "#332b00",
-                  border: "1px solid #f59e0b",
-                  borderRadius: "3px",
-                  marginBottom: "6px",
-                  textAlign: "center",
-                  fontSize: "11px",
-                  color: "#f59e0b",
-                }}
-              >
-                Connect gamepad to drive
               </div>
             )}
 
@@ -1158,17 +1017,14 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
               </div>
             )}
 
-            {/* Velocity inputs + controls — shown in gamepad and wasd modes */}
-            {state.motorMode !== "nav2" && (
+            {/* Velocity inputs + controls — shown in WASD mode */}
+            {state.motorMode === "wasd" && (
               <>
-                {/* Joystick — only in WASD mode */}
-                {state.motorMode === "wasd" && (
-                  <Joystick
-                    disabled={state.eStopped}
-                    onMove={handleJoystickMove}
-                    onRelease={handleJoystickRelease}
-                  />
-                )}
+                <Joystick
+                  disabled={state.eStopped}
+                  onMove={handleJoystickMove}
+                  onRelease={handleJoystickRelease}
+                />
 
                 <div
                   style={{
@@ -1178,64 +1034,8 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
                     marginTop: "2px",
                   }}
                 >
-                  {state.motorMode === "wasd"
-                    ? "WASD keys \u00b7 drag joystick \u00b7 gamepad sticks"
-                    : "Use sticks to drive"}
+                  WASD keys {"\u00b7"} drag joystick
                 </div>
-
-                {gamepadConnected && (
-                  <div style={{ marginTop: "3px" }}>
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        gap: "4px",
-                      }}
-                    >
-                      <div
-                        style={{
-                          width: "6px",
-                          height: "6px",
-                          borderRadius: "50%",
-                          background: "#22c55e",
-                          boxShadow: "0 0 3px #22c55e",
-                        }}
-                      />
-                      <span style={{ fontSize: "9px", color: "#22c55e" }}>
-                        Gamepad ({gamepadMapping || "non-standard"})
-                      </span>
-                    </div>
-                    {gamepadAxes.length > 0 && (
-                      <div
-                        style={{
-                          fontSize: "9px",
-                          color: "#666",
-                          fontFamily: "monospace",
-                          textAlign: "center",
-                          marginTop: "2px",
-                          lineHeight: "1.4",
-                        }}
-                      >
-                        {gamepadAxes.slice(0, 6).map((v, i) => {
-                          const isActive = i === 0 || i === 1;
-                          return (
-                            <span
-                              key={i}
-                              style={{
-                                color: isActive ? "#22c55e" : "#555",
-                                fontWeight: isActive ? "bold" : "normal",
-                              }}
-                            >
-                              {i > 0 ? " " : ""}
-                              {i}:{v.toFixed(2)}
-                            </span>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                )}
               </>
             )}
 

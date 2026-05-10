@@ -43,6 +43,8 @@ foxglove/nav-control-panel/node_modules/
 foxglove/nav-control-panel/dist/
 foxglove/hardware-safety-panel/node_modules/
 foxglove/hardware-safety-panel/dist/
+foxglove/gamepad-relay-panel/node_modules/
+foxglove/gamepad-relay-panel/dist/
 *.tsbuildinfo
 
 # models
