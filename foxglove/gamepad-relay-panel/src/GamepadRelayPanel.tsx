@@ -247,6 +247,7 @@ function GamepadRelayPanel({ context }: { context: PanelExtensionContext }): Rea
           border: "1px solid #232831",
           borderRadius: "6px",
           padding: "8px",
+          marginBottom: "8px",
         }}
       >
         <div style={labelStyle}>Output</div>
@@ -292,6 +293,37 @@ function GamepadRelayPanel({ context }: { context: PanelExtensionContext }): Rea
             <span style={{ fontSize: "9px", color: "#ef4444" }}>{state!.post_failures} fails</span>
           )}
         </div>
+      </div>
+
+      {/* Control mapping */}
+      <div
+        style={{
+          background: "#14171c",
+          border: "1px solid #232831",
+          borderRadius: "6px",
+          padding: "8px",
+        }}
+      >
+        <div style={labelStyle}>Controls</div>
+        {[
+          ["Left Stick Y", "Drive (fwd / rev)"],
+          ["Left Stick X", "Steer (left / right)"],
+          ["A", "Arm motors"],
+          ["B", "E-Stop"],
+        ].map(([input, action]) => (
+          <div
+            key={input}
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              fontSize: "10px",
+              padding: "1px 0",
+            }}
+          >
+            <span style={{ color: "#c4cad3" }}>{input}</span>
+            <span style={{ color: "#8a93a0" }}>{action}</span>
+          </div>
+        ))}
       </div>
     </div>
   );
