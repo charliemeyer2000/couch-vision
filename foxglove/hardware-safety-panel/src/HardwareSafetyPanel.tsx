@@ -33,8 +33,13 @@ interface PanelState {
   motorMode: ControlMode;
   maxRpm: number;
   stopRpm: number;
-  rampUpRpmPerSec: number;
-  rampDownRpmPerSec: number;
+  // Nav2-mode cmd_vel slew limits — aggressive defaults so steering can
+  // be much snappier than throttle (key for hill-contour driving).
+  linearAccel: number; // m/s²
+  linearDecel: number; // m/s²
+  angularAccel: number; // rad/s²
+  angularDecel: number; // rad/s²
+  bypassRamp: boolean; // skip slew entirely (raw cmd_vel passthrough)
   brakeCurrent: number;
   pfLinearSpeed: number;
   pfLookahead: number;
@@ -357,8 +362,11 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
       motorMode: validMode,
       maxRpm: s?.maxRpm ?? 700,
       stopRpm: s?.stopRpm ?? 50,
-      rampUpRpmPerSec: s?.rampUpRpmPerSec ?? 600,
-      rampDownRpmPerSec: s?.rampDownRpmPerSec ?? 400,
+      linearAccel: s?.linearAccel ?? 4.0,
+      linearDecel: s?.linearDecel ?? 4.0,
+      angularAccel: s?.angularAccel ?? 10.0,
+      angularDecel: s?.angularDecel ?? 10.0,
+      bypassRamp: s?.bypassRamp ?? false,
       brakeCurrent: s?.brakeCurrent ?? 0.5,
       pfLinearSpeed: s?.pfLinearSpeed ?? 0.3,
       pfLookahead: s?.pfLookahead ?? 1.5,
@@ -391,6 +399,17 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
   const [coastFactor, setCoastFactor] = useState(0.0);
   const prevCoastRef = useRef(0.0);
   const [gamepadRelay, setGamepadRelay] = useState<GamepadRelayState | null>(null);
+
+  // High-rate per-wheel + cmd_vel telemetry (Float64 topics from VESC driver).
+  // These let you see steering lag without leaving the panel.
+  const [wheelLeftRpm, setWheelLeftRpm] = useState(0);
+  const [wheelLeftCmdRpm, setWheelLeftCmdRpm] = useState(0);
+  const [wheelRightRpm, setWheelRightRpm] = useState(0);
+  const [wheelRightCmdRpm, setWheelRightCmdRpm] = useState(0);
+  const [linearRaw, setLinearRaw] = useState(0);
+  const [linearSlewed, setLinearSlewed] = useState(0);
+  const [angularRaw, setAngularRaw] = useState(0);
+  const [angularSlewed, setAngularSlewed] = useState(0);
 
   const BLE_RELAY_URL = "http://127.0.0.1:4200";
 
@@ -585,6 +604,22 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
             } catch {
               /* ignore */
             }
+          } else if (ev.topic === "/motor/wheel_left/rpm") {
+            setWheelLeftRpm((ev.message as { data: number }).data);
+          } else if (ev.topic === "/motor/wheel_left/cmd_rpm") {
+            setWheelLeftCmdRpm((ev.message as { data: number }).data);
+          } else if (ev.topic === "/motor/wheel_right/rpm") {
+            setWheelRightRpm((ev.message as { data: number }).data);
+          } else if (ev.topic === "/motor/wheel_right/cmd_rpm") {
+            setWheelRightCmdRpm((ev.message as { data: number }).data);
+          } else if (ev.topic === "/motor/cmd_vel/linear_raw") {
+            setLinearRaw((ev.message as { data: number }).data);
+          } else if (ev.topic === "/motor/cmd_vel/linear_slewed") {
+            setLinearSlewed((ev.message as { data: number }).data);
+          } else if (ev.topic === "/motor/cmd_vel/angular_raw") {
+            setAngularRaw((ev.message as { data: number }).data);
+          } else if (ev.topic === "/motor/cmd_vel/angular_slewed") {
+            setAngularSlewed((ev.message as { data: number }).data);
           }
         }
       }
@@ -598,6 +633,14 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
       { topic: "/motor/status" },
       { topic: "/motor/battery" },
       { topic: "/nav/path_follower/status" },
+      { topic: "/motor/wheel_left/rpm" },
+      { topic: "/motor/wheel_left/cmd_rpm" },
+      { topic: "/motor/wheel_right/rpm" },
+      { topic: "/motor/wheel_right/cmd_rpm" },
+      { topic: "/motor/cmd_vel/linear_raw" },
+      { topic: "/motor/cmd_vel/linear_slewed" },
+      { topic: "/motor/cmd_vel/angular_raw" },
+      { topic: "/motor/cmd_vel/angular_slewed" },
     ]);
   }, [context]);
 
@@ -613,14 +656,18 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
           mode: "nav2",
           max_rpm: state.maxRpm,
           stop_rpm: state.stopRpm,
-          ramp_up_rpm_s: state.rampUpRpmPerSec,
-          ramp_down_rpm_s: state.rampDownRpmPerSec,
           brake_current: state.brakeCurrent,
           max_linear_vel: state.maxLinearVel,
           max_angular_vel: state.maxAngularVel,
           coast_factor: cf ?? prevCoastRef.current,
           left_scale: state.leftScale,
           right_scale: state.rightScale,
+          // Nav2-mode cmd_vel slew (intuitive units, not per-wheel ERPM).
+          linear_accel_mps2: state.linearAccel,
+          linear_decel_mps2: state.linearDecel,
+          angular_accel_rps2: state.angularAccel,
+          angular_decel_rps2: state.angularDecel,
+          bypass_ramp: state.bypassRamp,
         }),
       });
     },
@@ -628,13 +675,16 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
       context,
       state.maxRpm,
       state.stopRpm,
-      state.rampUpRpmPerSec,
-      state.rampDownRpmPerSec,
       state.brakeCurrent,
       state.maxLinearVel,
       state.maxAngularVel,
       state.leftScale,
       state.rightScale,
+      state.linearAccel,
+      state.linearDecel,
+      state.angularAccel,
+      state.angularDecel,
+      state.bypassRamp,
     ],
   );
   useEffect(() => {
@@ -919,6 +969,109 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
         </div>
       </div>
 
+      {/* cmd_vel transport banner — abundantly clear which path is live.
+          BLE = green/fast (~10ms localhost). Wi-Fi = amber, WebSocket route
+          via Tailscale (~hundreds of ms). On panel-side fault, the path
+          flips automatically and this banner reflects it. */}
+      <div
+        style={{
+          padding: "8px 10px",
+          margin: "0 0 6px 0",
+          background: !state.bleRelayEnabled ? "#1a1a2e" : bleConnected ? "#0f3a1f" : "#3a2410",
+          border: `2px solid ${
+            !state.bleRelayEnabled ? "#555" : bleConnected ? "#22c55e" : "#f59e0b"
+          }`,
+          borderRadius: "4px",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: "8px",
+          transition: "background 0.2s, border 0.2s",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "10px",
+            minWidth: 0,
+            flex: 1,
+          }}
+        >
+          <div
+            style={{
+              width: "12px",
+              height: "12px",
+              borderRadius: "50%",
+              flexShrink: 0,
+              background: !state.bleRelayEnabled ? "#888" : bleConnected ? "#22c55e" : "#f59e0b",
+              boxShadow:
+                state.bleRelayEnabled && bleConnected
+                  ? "0 0 8px #22c55e"
+                  : !state.bleRelayEnabled
+                    ? "none"
+                    : "0 0 6px #f59e0b",
+            }}
+          />
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div
+              style={{
+                fontSize: "13px",
+                fontWeight: "bold",
+                letterSpacing: "0.5px",
+                color: !state.bleRelayEnabled ? "#aaa" : bleConnected ? "#86efac" : "#fcd34d",
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+              }}
+            >
+              {"cmd_vel \u2192 "}
+              {!state.bleRelayEnabled
+                ? "Wi-Fi (WebSocket)"
+                : bleConnected
+                  ? "BLE FAST PATH"
+                  : "Wi-Fi fallback"}
+            </div>
+            <div
+              style={{
+                fontSize: "10px",
+                color: "#888",
+                marginTop: "2px",
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+              }}
+            >
+              {!state.bleRelayEnabled
+                ? "BLE disabled \u00b7 routed via Foxglove WS over Tailscale"
+                : bleConnected
+                  ? `BLE \u00b7 ${bleRttMs > 0 ? `${bleRttMs.toFixed(0)} ms RTT` : "connected"}`
+                  : "BLE relay unreachable \u00b7 routed via Foxglove WS over Tailscale"}
+            </div>
+          </div>
+        </div>
+        <button
+          onClick={() => setState((s) => ({ ...s, bleRelayEnabled: !s.bleRelayEnabled }))}
+          style={{
+            padding: "4px 12px",
+            fontSize: "11px",
+            fontWeight: "bold",
+            background: state.bleRelayEnabled ? "#166534" : "#1a1a2e",
+            color: state.bleRelayEnabled ? "#86efac" : "#888",
+            border: `1px solid ${state.bleRelayEnabled ? "#22c55e" : "#555"}`,
+            borderRadius: "3px",
+            cursor: "pointer",
+            flexShrink: 0,
+            letterSpacing: "0.5px",
+          }}
+          title={
+            state.bleRelayEnabled ? "Disable BLE \u2014 force Wi-Fi route" : "Enable BLE fast path"
+          }
+        >
+          BLE {state.bleRelayEnabled ? "ON" : "OFF"}
+        </button>
+      </div>
+
       {/* Teleop */}
       <div style={sectionStyle}>
         <div
@@ -1097,7 +1250,17 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
                     borderRadius: "3px",
                   }}
                 >
-                  <div style={{ fontSize: "9px", color: "#666", marginBottom: "4px", textTransform: "uppercase", letterSpacing: ".04em" }}>Controls</div>
+                  <div
+                    style={{
+                      fontSize: "9px",
+                      color: "#666",
+                      marginBottom: "4px",
+                      textTransform: "uppercase",
+                      letterSpacing: ".04em",
+                    }}
+                  >
+                    Controls
+                  </div>
                   {[
                     ["L Stick Y", "Drive (fwd/rev)"],
                     ["L Stick X", "Steer (left/right)"],
@@ -1259,7 +1422,34 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
 
       {/* Velocity Monitor */}
       <div style={sectionStyle}>
-        <label style={labelStyle}>Velocity Monitor</label>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginBottom: "2px",
+          }}
+        >
+          <label style={{ ...labelStyle, marginBottom: 0 }}>Velocity Monitor</label>
+          {/* Path tag — mirrors the banner above so you always know
+              which transport these numbers are going out on. */}
+          <span
+            style={{
+              fontSize: "9px",
+              fontWeight: "bold",
+              padding: "1px 6px",
+              borderRadius: "8px",
+              letterSpacing: "0.5px",
+              background: !state.bleRelayEnabled ? "#1a1a2e" : bleConnected ? "#0f3a1f" : "#3a2410",
+              color: !state.bleRelayEnabled ? "#888" : bleConnected ? "#86efac" : "#fcd34d",
+              border: `1px solid ${
+                !state.bleRelayEnabled ? "#555" : bleConnected ? "#22c55e" : "#f59e0b"
+              }`,
+            }}
+          >
+            via {!state.bleRelayEnabled ? "Wi-Fi" : bleConnected ? "BLE" : "Wi-Fi (FB)"}
+          </span>
+        </div>
         <VelocityBar
           label="Linear"
           value={currentLinear}
@@ -1274,6 +1464,47 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
           centered
         />
         <VelocityBar label="Coast" value={coastFactor} maxScale={1.0} unit="" />
+
+        {/* Slew lag — gap between user input (raw) and what's actually
+            being commanded (slewed). The bigger the gap, the laggier
+            the controller feels. Bump linear/angular accel to close it. */}
+        <div
+          style={{
+            fontSize: "9px",
+            color: "#666",
+            textTransform: "uppercase",
+            letterSpacing: ".04em",
+            margin: "6px 0 2px",
+          }}
+        >
+          Slew lag (raw → cmd)
+        </div>
+        <VelocityBar
+          label="Lin raw"
+          value={linearRaw}
+          maxScale={Math.max(state.maxLinearVel, 0.1)}
+          unit="m/s"
+        />
+        <VelocityBar
+          label="Lin cmd"
+          value={linearSlewed}
+          maxScale={Math.max(state.maxLinearVel, 0.1)}
+          unit="m/s"
+        />
+        <VelocityBar
+          label="Ang raw"
+          value={angularRaw}
+          maxScale={Math.max(state.maxAngularVel, 0.1)}
+          unit="rad/s"
+          centered
+        />
+        <VelocityBar
+          label="Ang cmd"
+          value={angularSlewed}
+          maxScale={Math.max(state.maxAngularVel, 0.1)}
+          unit="rad/s"
+          centered
+        />
       </div>
 
       {/* Motor Config */}
@@ -1314,42 +1545,6 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
                 />
               </div>
               <div style={{ flex: 1 }}>
-                <label style={labelStyle}>Ramp ↑ (RPM/s)</label>
-                <input
-                  type="number"
-                  step="50"
-                  min="0"
-                  value={state.rampUpRpmPerSec}
-                  onFocus={(e) => e.target.select()}
-                  onChange={(e) =>
-                    setState((s) => ({
-                      ...s,
-                      rampUpRpmPerSec: Math.max(0, parseInt(e.target.value) || 0),
-                    }))
-                  }
-                  style={inputStyle}
-                />
-              </div>
-              <div style={{ flex: 1 }}>
-                <label style={labelStyle}>Ramp ↓ (RPM/s)</label>
-                <input
-                  type="number"
-                  step="50"
-                  min="0"
-                  value={state.rampDownRpmPerSec}
-                  onFocus={(e) => e.target.select()}
-                  onChange={(e) =>
-                    setState((s) => ({
-                      ...s,
-                      rampDownRpmPerSec: Math.max(0, parseInt(e.target.value) || 0),
-                    }))
-                  }
-                  style={inputStyle}
-                />
-              </div>
-            </div>
-            <div style={{ display: "flex", gap: "6px", marginBottom: "4px" }}>
-              <div style={{ flex: 1 }}>
                 <label style={labelStyle}>Stop RPM</label>
                 <input
                   type="number"
@@ -1361,23 +1556,6 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
                     setState((s) => ({
                       ...s,
                       stopRpm: Math.max(0, parseInt(e.target.value) || 0),
-                    }))
-                  }
-                  style={inputStyle}
-                />
-              </div>
-              <div style={{ flex: 1 }}>
-                <label style={labelStyle}>Max Linear (m/s)</label>
-                <input
-                  type="number"
-                  step="0.1"
-                  min="0"
-                  value={state.maxLinearVel}
-                  onFocus={(e) => e.target.select()}
-                  onChange={(e) =>
-                    setState((s) => ({
-                      ...s,
-                      maxLinearVel: Math.max(0, parseFloat(e.target.value) || 0),
                     }))
                   }
                   style={inputStyle}
@@ -1403,6 +1581,23 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
             </div>
             <div style={{ display: "flex", gap: "6px", marginBottom: "6px" }}>
               <div style={{ flex: 1 }}>
+                <label style={labelStyle}>Max Linear (m/s)</label>
+                <input
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  value={state.maxLinearVel}
+                  onFocus={(e) => e.target.select()}
+                  onChange={(e) =>
+                    setState((s) => ({
+                      ...s,
+                      maxLinearVel: Math.max(0, parseFloat(e.target.value) || 0),
+                    }))
+                  }
+                  style={inputStyle}
+                />
+              </div>
+              <div style={{ flex: 1 }}>
                 <label style={labelStyle}>Max Angular (rad/s)</label>
                 <input
                   type="number"
@@ -1419,6 +1614,138 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
                   style={inputStyle}
                 />
               </div>
+            </div>
+
+            {/* Slew limits — applied to cmd_vel BEFORE kinematics so steering
+                can be much snappier than throttle (key for hill-contour driving). */}
+            <div
+              style={{
+                fontSize: "9px",
+                color: "#666",
+                textTransform: "uppercase",
+                letterSpacing: ".04em",
+                margin: "4px 0 2px",
+              }}
+            >
+              Slew limits
+            </div>
+            <div style={{ display: "flex", gap: "6px", marginBottom: "6px" }}>
+              <div style={{ flex: 1 }}>
+                <label style={labelStyle}>Linear ↑ (m/s²)</label>
+                <input
+                  type="number"
+                  step="0.5"
+                  min="0"
+                  value={state.linearAccel}
+                  onFocus={(e) => e.target.select()}
+                  onChange={(e) =>
+                    setState((s) => ({
+                      ...s,
+                      linearAccel: Math.max(0, parseFloat(e.target.value) || 0),
+                    }))
+                  }
+                  style={inputStyle}
+                />
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={labelStyle}>Linear ↓ (m/s²)</label>
+                <input
+                  type="number"
+                  step="0.5"
+                  min="0"
+                  value={state.linearDecel}
+                  onFocus={(e) => e.target.select()}
+                  onChange={(e) =>
+                    setState((s) => ({
+                      ...s,
+                      linearDecel: Math.max(0, parseFloat(e.target.value) || 0),
+                    }))
+                  }
+                  style={inputStyle}
+                />
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={labelStyle}>Angular ↑ (rad/s²)</label>
+                <input
+                  type="number"
+                  step="1"
+                  min="0"
+                  value={state.angularAccel}
+                  onFocus={(e) => e.target.select()}
+                  onChange={(e) =>
+                    setState((s) => ({
+                      ...s,
+                      angularAccel: Math.max(0, parseFloat(e.target.value) || 0),
+                    }))
+                  }
+                  style={inputStyle}
+                />
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={labelStyle}>Angular ↓ (rad/s²)</label>
+                <input
+                  type="number"
+                  step="1"
+                  min="0"
+                  value={state.angularDecel}
+                  onFocus={(e) => e.target.select()}
+                  onChange={(e) =>
+                    setState((s) => ({
+                      ...s,
+                      angularDecel: Math.max(0, parseFloat(e.target.value) || 0),
+                    }))
+                  }
+                  style={inputStyle}
+                />
+              </div>
+            </div>
+
+            {/* Bypass slew toggle — instant raw cmd_vel passthrough for tuning. */}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: "4px 6px",
+                background: "#1a1a2e",
+                border: `1px solid ${state.bypassRamp ? "#f59e0b" : "#333"}`,
+                borderRadius: "3px",
+                marginBottom: "6px",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                <div
+                  style={{
+                    width: "6px",
+                    height: "6px",
+                    borderRadius: "50%",
+                    background: state.bypassRamp ? "#f59e0b" : "#555",
+                    boxShadow: state.bypassRamp ? "0 0 3px #f59e0b" : "none",
+                  }}
+                />
+                <span style={{ fontSize: "11px", color: "#e0e0e0" }}>Bypass slew</span>
+                <span style={{ fontSize: "9px", color: "#888" }}>
+                  {state.bypassRamp ? "raw cmd_vel" : "rate-limited"}
+                </span>
+              </div>
+              <button
+                onClick={() => setState((s) => ({ ...s, bypassRamp: !s.bypassRamp }))}
+                style={{
+                  padding: "2px 8px",
+                  fontSize: "10px",
+                  fontWeight: "bold",
+                  background: state.bypassRamp ? "#92400e" : "#1a1a2e",
+                  color: state.bypassRamp ? "#fcd34d" : "#888",
+                  border: `1px solid ${state.bypassRamp ? "#f59e0b" : "#555"}`,
+                  borderRadius: "3px",
+                  cursor: "pointer",
+                }}
+              >
+                {state.bypassRamp ? "ON" : "OFF"}
+              </button>
+            </div>
+
+            <div style={{ display: "flex", gap: "6px", marginBottom: "6px" }}>
               <div style={{ flex: 1 }}>
                 <label style={labelStyle}>Left Trim</label>
                 <input
@@ -1455,64 +1782,6 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
                   style={inputStyle}
                 />
               </div>
-            </div>
-
-            {/* BLE Fast Path toggle */}
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                padding: "4px 6px",
-                background: "#1a1a2e",
-                border: `1px solid ${state.bleRelayEnabled ? (bleConnected ? "#22c55e" : "#f59e0b") : "#333"}`,
-                borderRadius: "3px",
-                marginBottom: "6px",
-              }}
-            >
-              <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                <div
-                  style={{
-                    width: "6px",
-                    height: "6px",
-                    borderRadius: "50%",
-                    background: !state.bleRelayEnabled
-                      ? "#555"
-                      : bleConnected
-                        ? "#22c55e"
-                        : "#f59e0b",
-                    boxShadow: state.bleRelayEnabled && bleConnected ? "0 0 3px #22c55e" : "none",
-                  }}
-                />
-                <span style={{ fontSize: "11px", color: "#e0e0e0" }}>BLE Fast Path</span>
-                {state.bleRelayEnabled && (
-                  <span
-                    style={{
-                      fontSize: "9px",
-                      color: bleConnected ? "#22c55e" : "#f59e0b",
-                    }}
-                  >
-                    {bleConnected
-                      ? `BLE ${bleRttMs > 0 ? `${bleRttMs.toFixed(0)}ms` : ""}`
-                      : "WS fallback"}
-                  </span>
-                )}
-              </div>
-              <button
-                onClick={() => setState((s) => ({ ...s, bleRelayEnabled: !s.bleRelayEnabled }))}
-                style={{
-                  padding: "2px 8px",
-                  fontSize: "10px",
-                  fontWeight: "bold",
-                  background: state.bleRelayEnabled ? "#166534" : "#1a1a2e",
-                  color: state.bleRelayEnabled ? "#86efac" : "#888",
-                  border: `1px solid ${state.bleRelayEnabled ? "#22c55e" : "#555"}`,
-                  borderRadius: "3px",
-                  cursor: "pointer",
-                }}
-              >
-                {state.bleRelayEnabled ? "ON" : "OFF"}
-              </button>
             </div>
 
             {/* Motor telemetry */}
@@ -1554,6 +1823,72 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
                     unit="RPM"
                   />
                 )}
+
+                {/* Per-wheel actual vs commanded RPM. The gap on a single
+                    wheel = how much the slew/PID is lagging behind the
+                    target — useful to spot one-sided lag during turns. */}
+                <div
+                  style={{
+                    fontSize: "9px",
+                    color: "#666",
+                    textTransform: "uppercase",
+                    letterSpacing: ".04em",
+                    margin: "6px 0 2px",
+                  }}
+                >
+                  Wheel telemetry
+                </div>
+                <VelocityBar
+                  label="Left actual"
+                  value={wheelLeftRpm}
+                  maxScale={state.maxRpm || 500}
+                  unit="RPM"
+                  centered
+                />
+                <VelocityBar
+                  label="Left cmd"
+                  value={wheelLeftCmdRpm}
+                  maxScale={state.maxRpm || 500}
+                  unit="RPM"
+                  centered
+                />
+                <VelocityBar
+                  label="Right actual"
+                  value={wheelRightRpm}
+                  maxScale={state.maxRpm || 500}
+                  unit="RPM"
+                  centered
+                />
+                <VelocityBar
+                  label="Right cmd"
+                  value={wheelRightCmdRpm}
+                  maxScale={state.maxRpm || 500}
+                  unit="RPM"
+                  centered
+                />
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    fontSize: "10px",
+                    fontFamily: "monospace",
+                    color: "#999",
+                    marginTop: "2px",
+                  }}
+                >
+                  <span>
+                    L lag:{" "}
+                    <span style={{ color: "#e0e0e0" }}>
+                      {(wheelLeftCmdRpm - wheelLeftRpm).toFixed(0)} RPM
+                    </span>
+                  </span>
+                  <span>
+                    R lag:{" "}
+                    <span style={{ color: "#e0e0e0" }}>
+                      {(wheelRightCmdRpm - wheelRightRpm).toFixed(0)} RPM
+                    </span>
+                  </span>
+                </div>
                 {motorStatus.connected && (
                   <>
                     {vescBattery && (

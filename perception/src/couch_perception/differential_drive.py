@@ -8,6 +8,62 @@ from __future__ import annotations
 import math
 
 
+def slew_cmd_vel(
+    current: float,
+    target: float,
+    accel: float,
+    decel: float,
+    dt: float,
+) -> float:
+    """Slew-rate limit ``current`` toward ``target`` over a step ``dt``.
+
+    Acceleration is "moving away from zero" or "increasing magnitude in the
+    same sign", deceleration is "moving toward zero". A target on the opposite
+    side of zero is handled in two phases within a single step: decelerate to
+    zero at ``decel``, then accelerate toward the target at ``accel``, all
+    within the same ``dt`` budget. ``accel <= 0`` or ``decel <= 0`` disables
+    the corresponding limit (passthrough).
+    """
+    if dt <= 0.0:
+        return current
+    delta = target - current
+    if delta == 0.0:
+        return target
+
+    # Pick rate by quadrant: same sign / heading-away-from-zero = accel,
+    # opposite-sign / heading-toward-zero = decel.
+    if current == 0.0 or (delta > 0) == (current > 0):
+        rate = accel
+    else:
+        rate = decel
+
+    if rate <= 0.0:
+        return target
+
+    # Sign change: decel from |current| to 0, then accel from 0 toward target,
+    # sharing the dt budget. Lets a single step both stop and reverse cleanly.
+    if (current > 0.0 and target < 0.0) or (current < 0.0 and target > 0.0):
+        if decel <= 0.0:
+            time_to_zero = 0.0
+        else:
+            time_to_zero = abs(current) / decel
+        if time_to_zero >= dt:
+            step = decel * dt
+            return current - step if current > 0.0 else current + step
+        remaining = dt - time_to_zero
+        if accel <= 0.0:
+            return target
+        step = accel * remaining
+        if step >= abs(target):
+            return target
+        return step if target > 0.0 else -step
+
+    max_step = rate * dt
+    if abs(delta) <= max_step:
+        return target
+    return current + (max_step if delta > 0.0 else -max_step)
+
+
 def twist_to_erpm(
     linear_x: float,
     angular_z: float,

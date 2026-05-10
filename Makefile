@@ -27,6 +27,7 @@ PERC_PYTHON := $(if $(filter aarch64,$(UNAME_M)),python3.10,python3.12)
         full-stack test lint clean \
         build-extension install-extension lint-extension \
         logs logs-bridge logs-nav2 logs-vesc logs-ble stop \
+        sim sim-plot \
         ble-relay gamepad-relay teleop teleop-test teleop-list
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -74,6 +75,8 @@ help:
 	@echo "  make bag                      Record all ROS2 topics to MCAP"
 	@echo "  make build-extension          Build Foxglove panel extensions"
 	@echo "  make install-extension        Install extensions into local Foxglove"
+	@echo "  make sim                      Run the standalone MuJoCo couch sandbox"
+	@echo "  make sim-plot LOG=<path>      Plot a simulator log (COMPARE=<path> optional)"
 	@echo ""
 	@echo "Add HELP=1 for detailed options: make full-stack HELP=1"
 
@@ -216,6 +219,16 @@ else
 test:
 	cd perception && uv run --group dev pytest tests/ -v $(ARGS)
 endif
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SIMULATOR
+# ═══════════════════════════════════════════════════════════════════════════════
+
+sim:
+	cd sim && uv sync --quiet && uv run couch-sim $(ARGS)
+
+sim-plot:
+	cd sim && uv sync --quiet && uv run couch-sim-plot $(LOG) $(COMPARE)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # SETUP & iOS
