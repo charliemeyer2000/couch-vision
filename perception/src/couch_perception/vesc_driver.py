@@ -181,7 +181,7 @@ def _parse_get_values(payload: bytes) -> VescTelemetry | None:
 class VescConfig:
     mode: str = "manual"
     target_rpm: int = 0
-    max_rpm: int = 700
+    max_rpm: int = 7000
     wheel_radius: float = DEFAULT_WHEEL_RADIUS
     wheel_separation: float = DEFAULT_WHEEL_SEPARATION
     pole_pairs: int = DEFAULT_POLE_PAIRS
@@ -189,8 +189,8 @@ class VescConfig:
     slave_can_id: int = DEFAULT_SLAVE_CAN_ID
     invert_master: bool = False
     invert_slave: bool = True
-    ramp_up_rpm_s: int = 600  # acceleration rate, RPM/s
-    ramp_down_rpm_s: int = 400  # deceleration rate, RPM/s
+    ramp_up_rpm_s: int = 2 * 600  # acceleration rate, RPM/s # -> introduces lag
+    ramp_down_rpm_s: int = 2 * 400  # deceleration rate, RPM/s
     brake_current: float = 0.5  # handbrake hold current (A)
     stop_rpm: int = 50  # below this RPM, coast instead of PID hold
     max_linear_vel: float = 1.0  # clamp cmd_vel linear.x (m/s)
