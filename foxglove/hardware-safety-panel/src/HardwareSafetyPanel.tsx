@@ -550,6 +550,13 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
             try {
               const data = JSON.parse((ev.message as { data: string }).data) as MotorStatus;
               setMotorStatus(data);
+              // Sync e-stop state from VESC driver (gamepad buttons bypass the panel)
+              setState((prev) => {
+                if (prev.eStopped !== data.e_stopped) {
+                  return { ...prev, eStopped: data.e_stopped };
+                }
+                return prev;
+              });
             } catch {
               /* ignore */
             }
@@ -971,7 +978,7 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
               </div>
             )}
 
-            {/* Gamepad mode: relay status */}
+            {/* Gamepad mode: relay status + controls */}
             {state.motorMode === "gamepad" && (
               <div
                 style={{
@@ -1064,6 +1071,37 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
                     </div>
                   </div>
                 )}
+                {/* Control mapping */}
+                <div
+                  style={{
+                    marginTop: "8px",
+                    padding: "6px 8px",
+                    background: "#1a1a2e",
+                    border: "1px solid #333",
+                    borderRadius: "3px",
+                  }}
+                >
+                  <div style={{ fontSize: "9px", color: "#666", marginBottom: "4px", textTransform: "uppercase", letterSpacing: ".04em" }}>Controls</div>
+                  {[
+                    ["L Stick Y", "Drive (fwd/rev)"],
+                    ["L Stick X", "Steer (left/right)"],
+                    ["A", "Arm motors"],
+                    ["B", "E-Stop"],
+                  ].map(([input, action]) => (
+                    <div
+                      key={input}
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        fontSize: "10px",
+                        padding: "1px 0",
+                      }}
+                    >
+                      <span style={{ color: "#e0e0e0" }}>{input}</span>
+                      <span style={{ color: "#888" }}>{action}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
 
