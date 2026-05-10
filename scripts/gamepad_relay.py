@@ -48,8 +48,8 @@ logger = logging.getLogger("gamepad_relay")
 DEFAULT_BASE_URL = "http://127.0.0.1:4200"
 DEFAULT_VIZ_PORT = 4201
 DEFAULT_DEADZONE = 0.15
-DEFAULT_MAX_LINEAR = 0.5
-DEFAULT_MAX_ANGULAR = 2.0
+DEFAULT_MAX_LINEAR = 1.0
+DEFAULT_MAX_ANGULAR = 1.5
 DEFAULT_RATE_HZ = 50
 
 # SDL_CONTROLLER_AXIS_* — same order as Chrome's "standard" Gamepad mapping
@@ -241,14 +241,14 @@ class GamepadRelay:
             self._prev_buttons = buttons
 
             ly = axes_dz[AXIS_LEFT_Y]
-            rx = axes_dz[AXIS_RIGHT_X]
-            lx = self.linear_sign * ly * self.max_linear
-            az = self.angular_sign * rx * self.max_angular
+            lx = axes_dz[AXIS_LEFT_X]
+            cmd_lx = self.linear_sign * ly * self.max_linear
+            cmd_az = self.angular_sign * lx * self.max_angular
 
-            has_input = ly != 0.0 or rx != 0.0
+            has_input = ly != 0.0 or lx != 0.0
             if has_input:
-                await self._post(session, "/cmd_vel", {"lx": lx, "az": az})
-                self.state["cmd_vel"] = {"lx": lx, "az": az}
+                await self._post(session, "/cmd_vel", {"lx": cmd_lx, "az": cmd_az})
+                self.state["cmd_vel"] = {"lx": cmd_lx, "az": cmd_az}
                 self._published_zero = False
             elif not self._published_zero:
                 await self._post(session, "/cmd_vel", {"lx": 0.0, "az": 0.0})

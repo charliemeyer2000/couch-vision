@@ -83,7 +83,7 @@ Bypasses the high-latency Foxglove WebSocket → Tailscale path for gamepad comm
 - **Key insight**: Mac runs the BLE server (bless works natively on macOS via CoreBluetooth). Jetson runs as BLE client (bleak). This avoids BlueZ D-Bus advertising issues on the Jetson's Realtek adapter.
 - **Exclusive mode**: Panel sends cmd_vel on exactly ONE path at a time (BLE or WebSocket, never both). E-stop always goes on both paths for safety.
 - **Failover**: 3 consecutive fetch failures → automatic fallback to WebSocket. Periodic health poll recovers to BLE when relay reconnects.
-- **Jetson BLE client runs in Docker** alongside VESC driver (`docker-compose.vesc.yml`). Mounts `/var/run/dbus` for BlueZ D-Bus access. Starts automatically with `make full-stack VESC=1`.
+- **Jetson BLE client runs in Docker** (`docker-compose.nav2.yml`, live profile). Mounts `/var/run/dbus` for BlueZ D-Bus access. Starts automatically with `make full-stack` (any live mode).
 - **GATT service UUID**: `a1b2c3d4-e5f6-7890-abcd-ef1234567890`
 
 ## Common Learnings / Gotchas
@@ -117,18 +117,19 @@ Bypasses the high-latency Foxglove WebSocket → Tailscale path for gamepad comm
 ```bash
 # ── Driving (two commands to go live) ──
 # Jetson:
-make full-stack VESC=1              # start perception + motors + BLE bridge
+make full-stack                    # perception + BLE bridge (add VESC=1 for motors)
 # Mac:
-make teleop                         # gamepad → BLE → Jetson (clamshell-safe)
+make teleop                        # gamepad → BLE → Jetson (clamshell-safe)
 
 # Teleop (Mac-side)
 make teleop             # gamepad + BLE relay (prevents macOS sleep)
 make teleop-test        # test gamepad without BLE (dry-run, viz on :4201)
 make teleop-list        # list detected game controllers
 
-# Full stack (Docker, runs bridge + Nav2 + perception)
-make full-stack                    # live mode (iPhone → bridge → perception)
-make full-stack BAG=bags/walk.mcap # bag replay mode
+# Full stack (Docker, runs bridge + Nav2 + perception + BLE)
+make full-stack                    # live mode (iPhone → bridge → perception + BLE)
+make full-stack VESC=1             # live mode + VESC motor driver
+make full-stack BAG=bags/walk.mcap # bag replay mode (no BLE)
 
 # Log management (stack runs in background)
 make logs-bridge    # tail iOS bridge logs

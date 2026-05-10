@@ -565,10 +565,12 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
           max_linear_vel: state.maxLinearVel,
           max_angular_vel: state.maxAngularVel,
           coast_factor: cf ?? prevCoastRef.current,
+          left_scale: state.leftScale,
+          right_scale: state.rightScale,
         }),
       });
     },
-    [context, state.maxRpm, state.stopRpm, state.rampUpRpmPerSec, state.rampDownRpmPerSec, state.brakeCurrent, state.maxLinearVel, state.maxAngularVel],
+    [context, state.maxRpm, state.stopRpm, state.rampUpRpmPerSec, state.rampDownRpmPerSec, state.brakeCurrent, state.maxLinearVel, state.maxAngularVel, state.leftScale, state.rightScale],
   );
   useEffect(() => {
     publishMotorConfig();
@@ -1421,7 +1423,42 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
                   style={inputStyle}
                 />
               </div>
-              <div style={{ flex: 1 }} />
+              <div style={{ flex: 1 }}>
+                <label style={labelStyle}>Left Trim</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0.8"
+                  max="1.2"
+                  value={state.leftScale}
+                  onFocus={(e) => e.target.select()}
+                  onChange={(e) =>
+                    setState((s) => ({
+                      ...s,
+                      leftScale: Math.max(0.8, Math.min(1.2, parseFloat(e.target.value) || 1.0)),
+                    }))
+                  }
+                  style={inputStyle}
+                />
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={labelStyle}>Right Trim</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0.8"
+                  max="1.2"
+                  value={state.rightScale}
+                  onFocus={(e) => e.target.select()}
+                  onChange={(e) =>
+                    setState((s) => ({
+                      ...s,
+                      rightScale: Math.max(0.8, Math.min(1.2, parseFloat(e.target.value) || 1.0)),
+                    }))
+                  }
+                  style={inputStyle}
+                />
+              </div>
             </div>
 
             {/* BLE Fast Path toggle */}
