@@ -426,16 +426,28 @@ tick();
 """
 
 
+def _cors_headers(_req):
+    return {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type",
+    }
+
+
 def _make_viz_app(relay: GamepadRelay) -> web.Application:
     async def index(_req):
         return web.Response(text=VIZ_HTML, content_type="text/html")
 
-    async def state(_req):
-        return web.json_response(relay.state)
+    async def state(req):
+        return web.json_response(relay.state, headers=_cors_headers(req))
+
+    async def cors_preflight(req):
+        return web.Response(headers=_cors_headers(req))
 
     app = web.Application()
     app.router.add_get("/", index)
     app.router.add_get("/state", state)
+    app.router.add_route("OPTIONS", "/state", cors_preflight)
     return app
 
 
