@@ -27,7 +27,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import json
 import logging
 import os
 import signal
@@ -38,6 +37,8 @@ import aiohttp
 from aiohttp import web
 
 os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
+# Allow joystick events even when no window has focus (clamshell mode).
+os.environ.setdefault("SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS", "1")
 
 import pygame  # noqa: E402
 from pygame._sdl2 import controller as sdl_controller  # noqa: E402
@@ -109,6 +110,7 @@ class GamepadRelay:
         invert_angular: bool,
         button_arm: int,
         button_estop: int,
+        dry_run: bool = False,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.deadzone = deadzone
@@ -117,6 +119,7 @@ class GamepadRelay:
         self.period = 1.0 / rate_hz
         self.button_arm = button_arm
         self.button_estop = button_estop
+        self.dry_run = dry_run
         # Foxglove panel uses linear = -leftY, angular = -rightX (Gamepad API
         # has Y down = +1 / right = +1). SDL GameController matches.
         self.linear_sign = 1.0 if invert_linear else -1.0
@@ -165,6 +168,9 @@ class GamepadRelay:
     async def _post(
         self, session: aiohttp.ClientSession, path: str, payload: dict,
     ) -> bool:
+        if self.dry_run:
+            logger.info("dry-run POST %s %s", path, payload)
+            return True
         url = f"{self.base_url}{path}"
         try:
             async with session.post(
@@ -452,6 +458,8 @@ def _parse_args() -> argparse.Namespace:
                    help="button index to publish e_stop {stop:true} (default B=1)")
     p.add_argument("--invert-linear", action="store_true")
     p.add_argument("--invert-angular", action="store_true")
+    p.add_argument("--dry-run", action="store_true",
+                   help="log cmd_vel to console instead of POSTing to BLE relay")
     p.add_argument("--list", action="store_true",
                    help="list detected controllers and exit")
     p.add_argument("-v", "--verbose", action="store_true")
@@ -501,6 +509,7 @@ async def _async_main(args: argparse.Namespace) -> None:
         invert_angular=args.invert_angular,
         button_arm=args.button_arm,
         button_estop=args.button_estop,
+        dry_run=args.dry_run,
     )
 
     app = _make_viz_app(relay)
@@ -511,11 +520,14 @@ async def _async_main(args: argparse.Namespace) -> None:
     logger.info("viz: http://127.0.0.1:%d/", args.viz_port)
 
     async with aiohttp.ClientSession() as session:
-        status_task = asyncio.create_task(relay._refresh_ble_status(session))
+        status_task = None
+        if not args.dry_run:
+            status_task = asyncio.create_task(relay._refresh_ble_status(session))
         try:
             await relay.run(session)
         finally:
-            status_task.cancel()
+            if status_task is not None:
+                status_task.cancel()
             await runner.cleanup()
 
 

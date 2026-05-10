@@ -27,7 +27,7 @@ PERC_PYTHON := $(if $(filter aarch64,$(UNAME_M)),python3.10,python3.12)
         full-stack test lint clean \
         build-extension install-extension lint-extension \
         logs logs-bridge logs-nav2 logs-vesc logs-ble stop \
-        ble-relay gamepad-relay teleop
+        ble-relay gamepad-relay teleop teleop-test teleop-list
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # HELP
@@ -293,6 +293,16 @@ gamepad-relay:
 	uv run scripts/gamepad_relay.py
 
 # One-command Mac-side teleop: BLE relay + native gamepad reader.
+# Prevents macOS sleep for clamshell/backpack mode.
 # Pair this with `make full-stack VESC=1` on the Jetson.
 teleop:
 	@./scripts/teleop_mac.sh
+
+# Test gamepad input without BLE relay or Jetson.
+# Opens viz at http://127.0.0.1:4201/ and logs cmd_vel to console.
+teleop-test:
+	@./scripts/teleop_mac.sh --dry-run -v
+
+# List detected game controllers (SDL GameController API).
+teleop-list:
+	@uv run scripts/gamepad_relay.py --list
