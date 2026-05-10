@@ -115,6 +115,17 @@ Bypasses the high-latency Foxglove WebSocket → Tailscale path for gamepad comm
 ## Helpful Commands
 
 ```bash
+# ── Driving (two commands to go live) ──
+# Jetson:
+make full-stack VESC=1              # start perception + motors + BLE bridge
+# Mac:
+make teleop                         # gamepad → BLE → Jetson (clamshell-safe)
+
+# Teleop (Mac-side)
+make teleop             # gamepad + BLE relay (prevents macOS sleep)
+make teleop-test        # test gamepad without BLE (dry-run, viz on :4201)
+make teleop-list        # list detected game controllers
+
 # Full stack (Docker, runs bridge + Nav2 + perception)
 make full-stack                    # live mode (iPhone → bridge → perception)
 make full-stack BAG=bags/walk.mcap # bag replay mode
@@ -122,6 +133,8 @@ make full-stack BAG=bags/walk.mcap # bag replay mode
 # Log management (stack runs in background)
 make logs-bridge    # tail iOS bridge logs
 make logs-nav2      # tail Nav2 planner logs
+make logs-vesc      # tail VESC motor driver logs
+make logs-ble       # tail BLE bridge logs on Jetson
 make logs           # tail all logs (interleaved)
 make stop           # bring everything down
 
@@ -135,21 +148,11 @@ make xcode          # open Xcode project
 make topics                   # list all ROS2 topics
 make hz T=/iphone_charlie/imu # check topic frequency
 make echo T=/iphone_charlie/odom # echo topic messages
-make rviz                     # launch RViz2 with project config
 
 # Foxglove extensions
 make build-extension    # build all Foxglove panel extensions
 make install-extension  # install extensions into local Foxglove
 make lint-extension     # typecheck + lint + format check
-
-# BLE low-latency teleop (bypasses Tailscale for gamepad commands)
-# BLE bridge starts automatically with `make full-stack VESC=1`
-make ble-relay          # start BLE relay on Mac (localhost:4200)
-make logs-ble           # tail BLE bridge logs on Jetson
-
-# Utilities
-make ip             # show IP addresses
-make deploy         # pull latest code on Jetson via SSH
 ```
 
 ## File Structure

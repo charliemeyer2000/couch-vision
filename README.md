@@ -137,23 +137,25 @@ See [CLAUDE.md](CLAUDE.md) for detailed VESC configuration, known firmware bugs,
 
 ## BLE Low-Latency Teleop
 
-Gamepad commands normally flow through the Foxglove WebSocket connection over Tailscale VPN, adding 20-100ms of network latency. The BLE bridge bypasses the network entirely, sending commands directly over Bluetooth Low Energy for ~15ms latency.
+Gamepad commands bypass the network entirely, going directly over Bluetooth Low Energy for ~15ms latency. The Mac reads the Logitech gamepad natively via SDL, relays over BLE to the Jetson, which publishes to ROS2. Works in clamshell mode (Mac in backpack).
 
 ### How it works
 
 ```
-Foxglove Panel → HTTP POST localhost:4200 → Mac BLE Relay (bless)
-                                                    ↓ BLE notify (~15ms)
-                                            Jetson BLE Bridge (bleak)
-                                                    ↓ ROS2 /cmd_vel
-                                                VESC Driver → Motors
+Logitech Gamepad (USB) → gamepad_relay.py (SDL/pygame, viz on :4201)
+                              ↓ HTTP POST localhost:4200
+                         ble_relay.py (Mac, BLE GATT peripheral)
+                              ↓ BLE notify (~15ms)
+                         ble_bridge.py (Jetson Docker, BLE central)
+                              ↓ ROS2 /cmd_vel
+                         VESC Driver → Motors
 ```
 
 The Mac runs as BLE **peripheral** (server) and the Jetson runs as BLE **central** (client). This direction is intentional — `bless` works natively on macOS via CoreBluetooth, while BLE advertising on the Jetson's Realtek USB adapter has BlueZ D-Bus issues.
 
-### Running
+### Going live (two commands)
 
-**1. Start the full stack on the Jetson** (includes BLE bridge automatically):
+**1. Jetson** — start the full stack with motors:
 
 ```bash
 ssh jetson-nano
@@ -161,40 +163,43 @@ cd ~/couch-vision
 make full-stack VESC=1
 ```
 
-The `ble-bridge` container starts alongside the VESC driver. It automatically scans for the Mac's BLE peripheral and connects when found.
-
-**2. Start the BLE relay on your Mac:**
+**2. Mac** — start gamepad + BLE relay (prevents sleep, safe for clamshell):
 
 ```bash
-make ble-relay
+make teleop
 ```
 
-This advertises a BLE GATT service and starts an HTTP server on `localhost:4200`. The Jetson discovers and connects within a few seconds.
+Close the lid, put the Mac in your backpack, drive with the Logitech controller.
 
-**3. Enable BLE in the Foxglove panel:**
+### Testing
 
-Toggle "BLE Fast Path" in the Hardware Safety Panel's motor config section. When enabled, gamepad commands route through BLE instead of WebSocket.
+```bash
+make teleop-list    # verify controller is detected
+make teleop-test    # dry-run: gamepad viz on :4201, no BLE needed
+```
 
 ### Monitoring
 
 ```bash
+# Gamepad viz (before closing lid)
+open http://127.0.0.1:4201/
+
 # On Jetson — check BLE bridge is connected
 make logs-ble
 
 # From Mac — check relay status
 curl localhost:4200/status
-# → {"connected": true, "latency_ms": 0.12, "writes_per_sec": 9.8}
 ```
 
 ### Failover
 
-The Foxglove panel automatically falls back to WebSocket if the BLE relay becomes unreachable (3 consecutive failures, ~300ms). It recovers back to BLE when the relay reconnects (checked every 2s). E-stop always sends on **both** paths regardless of mode.
+The Foxglove panel can also send gamepad commands via WebSocket as a fallback. It automatically falls back if the BLE relay becomes unreachable (3 consecutive failures) and recovers when the relay reconnects. E-stop always sends on **both** paths regardless of mode.
 
 ### Prerequisites
 
-- Mac must have Bluetooth enabled
-- Jetson needs a Bluetooth adapter (built-in Realtek USB on Orin Nano works). BlueZ must be running (`sudo systemctl enable --now bluetooth`)
-- The `entrypoint_ble.sh` script automatically sets the Jetson's adapter to LE-only mode on container start
+- Mac: Bluetooth enabled, Logitech gamepad connected via USB
+- Jetson: Bluetooth adapter (built-in Realtek USB on Orin Nano). BlueZ running (`sudo systemctl enable --now bluetooth`)
+- `entrypoint_ble.sh` auto-sets the Jetson adapter to LE-only mode
 
 ## Perception Stack
 
@@ -295,8 +300,10 @@ foxglove/                 # Foxglove config + panel extensions
 ├── couch_layout.json     # Default panel layout
 ├── nav-control-panel/    # Navigation destination + map
 └── hardware-safety-panel/ # E-stop, teleop, motor config
-scripts/                  # Setup, VESC test scripts, BLE relay
+scripts/                  # Setup, VESC test scripts, teleop relay
 ├── ble_relay.py          # Mac BLE peripheral + HTTP relay (bless)
+├── gamepad_relay.py      # Native SDL gamepad reader + live viz
+├── teleop_mac.sh         # One-command teleop launcher (clamshell-safe)
 urdf/                     # Robot description (iphone_sensor.urdf)
 infra/                    # Terraform (S3 bag storage)
 bags/                     # Recorded MCAP bag files
@@ -305,9 +312,22 @@ bags/                     # Recorded MCAP bag files
 ## Commands Reference
 
 ```bash
-# Full stack (Docker, run on Jetson)
+# ── Driving (two commands to go live) ──
+# Jetson:
+make full-stack VESC=1              # start perception + motors + BLE bridge
+# Mac:
+make teleop                         # gamepad → BLE → Jetson (clamshell-safe)
+
+# ── Teleop (Mac-side) ──
+make teleop                         # gamepad + BLE relay (prevents sleep)
+make teleop-test                    # test gamepad without BLE (dry-run, viz on :4201)
+make teleop-list                    # list detected game controllers
+make ble-relay                      # BLE relay only (localhost:4200)
+make gamepad-relay                  # gamepad relay only (needs ble-relay)
+
+# ── Stack (Jetson-side) ──
 make full-stack                     # perception + Nav2
-make full-stack VESC=1              # with motor driver
+make full-stack VESC=1              # with motor driver + BLE bridge
 make full-stack BAG=bags/walk.mcap  # bag replay (visualization only)
 make logs                           # tail all container logs
 make logs-bridge                    # tail bridge logs
@@ -316,24 +336,21 @@ make logs-vesc                      # tail VESC driver logs
 make logs-ble                       # tail BLE bridge logs
 make stop                           # stop Docker stack
 
-# BLE teleop (low-latency gamepad over Bluetooth)
-make ble-relay                      # start Mac BLE relay (localhost:4200)
-
-# Bridge (standalone, no Docker, run on Mac)
+# ── Bridge (standalone, no Docker, run on Mac) ──
 make bridge                         # start TCP bridge (PORT=7447)
 make xcode                          # open Xcode project
 
-# ROS2 debugging
+# ── ROS2 debugging ──
 make topics                         # list all topics
 make hz T=/iphone_charlie/imu       # topic publish rate
 make echo T=/iphone_charlie/odom    # print topic messages
 
-# Foxglove extensions
+# ── Foxglove extensions ──
 make build-extension                # build both panels
 make install-extension              # install to local Foxglove
 make lint-extension                 # typecheck + lint + format check
 
-# Development
+# ── Development ──
 make setup                          # install all dependencies
 make test                           # run perception tests
 make test ARGS='-k test_ekf'        # run specific tests
