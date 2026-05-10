@@ -8,10 +8,20 @@ const DEFAULT_MAX_LINEAR = 1.0;
 const DEFAULT_MAX_ANGULAR = 1.5;
 const VEL_BAR_MAX_LINEAR = 2.0;
 const VEL_BAR_MAX_ANGULAR = 4.0;
-type ControlMode = "wasd" | "nav2";
+const GAMEPAD_RELAY_URL = "http://127.0.0.1:4201";
+const GAMEPAD_POLL_MS = 200;
+type ControlMode = "gamepad" | "wasd" | "nav2";
 type ActiveSource = "keyboard" | "joystick" | "none";
 
-const VALID_MODES: ControlMode[] = ["wasd", "nav2"];
+const VALID_MODES: ControlMode[] = ["gamepad", "wasd", "nav2"];
+
+interface GamepadRelayState {
+  controller: string | null;
+  connected: boolean;
+  cmd_vel: { lx: number; az: number };
+  ble_connected: boolean | null;
+  ble_rtt_ms: number | null;
+}
 
 interface PanelState {
   eStopped: boolean;
@@ -336,7 +346,7 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
     const savedMode = s?.motorMode as string | undefined;
     const validMode = VALID_MODES.includes(savedMode as ControlMode)
       ? (savedMode as ControlMode)
-      : "wasd";
+      : "gamepad";
     return {
       eStopped: s?.eStopped ?? true,
       maxLinearVel: s?.maxLinearVel ?? DEFAULT_MAX_LINEAR,
@@ -379,6 +389,7 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
   const bleFetchFails = useRef(0);
   const [coastFactor, setCoastFactor] = useState(0.0);
   const prevCoastRef = useRef(0.0);
+  const [gamepadRelay, setGamepadRelay] = useState<GamepadRelayState | null>(null);
 
   const BLE_RELAY_URL = "http://127.0.0.1:4200";
 
@@ -416,6 +427,32 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
     const interval = setInterval(checkHealth, 2000);
     return () => clearInterval(interval);
   }, [state.bleRelayEnabled, bleConnected, BLE_RELAY_URL]);
+
+  // Gamepad relay polling — only in gamepad mode
+  useEffect(() => {
+    if (state.motorMode !== "gamepad") {
+      setGamepadRelay(null);
+      return;
+    }
+    const poll = async () => {
+      try {
+        const res = await fetch(`${GAMEPAD_RELAY_URL}/state`);
+        const data = await res.json();
+        setGamepadRelay({
+          controller: data.controller ?? null,
+          connected: data.connected ?? false,
+          cmd_vel: data.cmd_vel ?? { lx: 0, az: 0 },
+          ble_connected: data.ble_connected ?? null,
+          ble_rtt_ms: data.ble_rtt_ms ?? null,
+        });
+      } catch {
+        setGamepadRelay(null);
+      }
+    };
+    poll();
+    const interval = setInterval(poll, GAMEPAD_POLL_MS);
+    return () => clearInterval(interval);
+  }, [state.motorMode]);
 
   // Exclusive-mode cmd_vel publisher
   const bleActive = state.bleRelayEnabled && bleConnected;
@@ -564,7 +601,18 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
         }),
       });
     },
-    [context, state.maxRpm, state.stopRpm, state.rampUpRpmPerSec, state.rampDownRpmPerSec, state.brakeCurrent, state.maxLinearVel, state.maxAngularVel, state.leftScale, state.rightScale],
+    [
+      context,
+      state.maxRpm,
+      state.stopRpm,
+      state.rampUpRpmPerSec,
+      state.rampDownRpmPerSec,
+      state.brakeCurrent,
+      state.maxLinearVel,
+      state.maxAngularVel,
+      state.leftScale,
+      state.rightScale,
+    ],
   );
   useEffect(() => {
     publishMotorConfig();
@@ -756,6 +804,8 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
 
   const modeLabel = (mode: ControlMode): string => {
     switch (mode) {
+      case "gamepad":
+        return "Gamepad";
       case "wasd":
         return "WASD";
       case "nav2":
@@ -764,11 +814,7 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
   };
 
   const sourceBadge =
-    activeSource === "keyboard"
-      ? "KB"
-      : activeSource === "joystick"
-        ? "JOY"
-        : "idle";
+    activeSource === "keyboard" ? "KB" : activeSource === "joystick" ? "JOY" : "idle";
 
   return (
     <div
@@ -873,7 +919,7 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
           <div style={{ position: "relative", marginTop: "4px" }}>
             {/* Mode selector */}
             <div style={{ display: "flex", gap: "4px", marginBottom: "6px" }}>
-              {(["wasd", "nav2"] as const).map((mode) => (
+              {(["gamepad", "wasd", "nav2"] as const).map((mode) => (
                 <button
                   key={mode}
                   onClick={() => handleModeChange(mode)}
@@ -894,8 +940,8 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
               ))}
             </div>
 
-            {/* Active source badge — teleop modes only */}
-            {state.motorMode !== "nav2" && (
+            {/* Active source badge — WASD mode only */}
+            {state.motorMode === "wasd" && (
               <div
                 style={{
                   display: "flex",
@@ -922,6 +968,102 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
                 >
                   {sourceBadge}
                 </span>
+              </div>
+            )}
+
+            {/* Gamepad mode: relay status */}
+            {state.motorMode === "gamepad" && (
+              <div
+                style={{
+                  padding: "8px",
+                  fontSize: "11px",
+                  color: "#999",
+                }}
+              >
+                {gamepadRelay ? (
+                  <>
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "6px",
+                        marginBottom: "6px",
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: "8px",
+                          height: "8px",
+                          borderRadius: "50%",
+                          background: gamepadRelay.connected ? "#22c55e" : "#f59e0b",
+                          boxShadow: `0 0 4px ${gamepadRelay.connected ? "#22c55e" : "#f59e0b"}`,
+                        }}
+                      />
+                      <span
+                        style={{
+                          fontWeight: "bold",
+                          color: gamepadRelay.connected ? "#22c55e" : "#f59e0b",
+                        }}
+                      >
+                        {gamepadRelay.connected
+                          ? (gamepadRelay.controller ?? "Controller")
+                          : "No controller"}
+                      </span>
+                    </div>
+                    {gamepadRelay.connected && (
+                      <div
+                        style={{
+                          fontFamily: "monospace",
+                          fontSize: "10px",
+                          display: "flex",
+                          gap: "12px",
+                          color: "#e0e0e0",
+                        }}
+                      >
+                        <span>lx: {gamepadRelay.cmd_vel.lx.toFixed(2)}</span>
+                        <span>az: {gamepadRelay.cmd_vel.az.toFixed(2)}</span>
+                      </div>
+                    )}
+                    {gamepadRelay.ble_connected != null && (
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "4px",
+                          marginTop: "4px",
+                          fontSize: "10px",
+                        }}
+                      >
+                        <div
+                          style={{
+                            width: "5px",
+                            height: "5px",
+                            borderRadius: "50%",
+                            background: gamepadRelay.ble_connected ? "#22c55e" : "#ef4444",
+                          }}
+                        />
+                        <span style={{ color: gamepadRelay.ble_connected ? "#22c55e" : "#ef4444" }}>
+                          {gamepadRelay.ble_connected
+                            ? `BLE ${gamepadRelay.ble_rtt_ms != null ? `${gamepadRelay.ble_rtt_ms.toFixed(0)}ms` : ""}`
+                            : "BLE disconnected"}
+                        </span>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div style={{ textAlign: "center", color: "#555" }}>
+                    Gamepad relay not running
+                    <div style={{ fontSize: "9px", marginTop: "2px" }}>
+                      Run{" "}
+                      <code
+                        style={{ background: "#1a1a2e", padding: "1px 4px", borderRadius: "2px" }}
+                      >
+                        make teleop
+                      </code>{" "}
+                      on Mac
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -957,8 +1099,8 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
                       <div>Goal: {pathFollowerStatus.dist_to_goal.toFixed(1)}m</div>
                     )}
                     <div style={{ marginBottom: "6px" }}>
-                      Path: {pathFollowerStatus.path_points} pts ·{" "}
-                      Pose: {pathFollowerStatus.has_pose ? "OK" : "NO"}
+                      Path: {pathFollowerStatus.path_points} pts · Pose:{" "}
+                      {pathFollowerStatus.has_pose ? "OK" : "NO"}
                     </div>
                   </>
                 ) : (
@@ -1296,7 +1438,9 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
                       color: bleConnected ? "#22c55e" : "#f59e0b",
                     }}
                   >
-                    {bleConnected ? `BLE ${bleRttMs > 0 ? `${bleRttMs.toFixed(0)}ms` : ""}` : "WS fallback"}
+                    {bleConnected
+                      ? `BLE ${bleRttMs > 0 ? `${bleRttMs.toFixed(0)}ms` : ""}`
+                      : "WS fallback"}
                   </span>
                 )}
               </div>
@@ -1420,7 +1564,9 @@ function HardwareSafetyPanel({ context }: { context: PanelExtensionContext }): R
                       </span>
                       <span>
                         Motor:{" "}
-                        <span style={{ color: motorStatus.temp_motor > 100 ? "#ef4444" : "#e0e0e0" }}>
+                        <span
+                          style={{ color: motorStatus.temp_motor > 100 ? "#ef4444" : "#e0e0e0" }}
+                        >
                           {motorStatus.temp_motor.toFixed(1)}C
                         </span>
                       </span>
