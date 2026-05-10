@@ -2,10 +2,13 @@
 # Keep Foxglove receiving gamepad input with the lid closed.
 #
 # Stacks every macOS workaround:
-#   1. caffeinate -dimsu  -> blocks display + system + idle sleep
-#   2. pmset disablesleep -> overrides lid-close sleep (needs sudo)
-#   3. osascript activate -> keeps Foxglove frontmost so Gamepad API polls
-#   4. cliclick mouse nudge -> defeats user-idle detection
+#   1. relaunch Foxglove with Chromium flags that disable renderer backgrounding
+#      (without these, lid-close occludes the window and Chromium throttles
+#      JS timers to ~1Hz, killing Gamepad API polling after ~30s)
+#   2. caffeinate -dimsu  -> blocks display + system + idle sleep
+#   3. pmset disablesleep -> overrides lid-close sleep (needs sudo)
+#   4. osascript activate -> keeps Foxglove frontmost so Gamepad API polls
+#   5. cliclick mouse nudge -> defeats user-idle detection
 #
 # Usage:  ./scripts/keep-foxglove-alive.sh
 # Stop:   Ctrl-C (cleans up caffeinate + restores pmset)
@@ -15,8 +18,39 @@ set -euo pipefail
 APP_NAME="Foxglove"
 TICK_SECONDS=3
 
-if ! pgrep -xq "$APP_NAME"; then
-  echo "warn: $APP_NAME is not running — start it first" >&2
+CHROMIUM_FLAGS=(
+  --disable-background-timer-throttling
+  --disable-renderer-backgrounding
+  --disable-backgrounding-occluded-windows
+)
+
+needs_relaunch() {
+  # Renderer process carries the same argv flags Electron passed in.
+  local pid
+  pid=$(pgrep -f "Foxglove Helper \(Renderer\)" | head -n1 || true)
+  [[ -z "$pid" ]] && return 0
+  local args
+  args=$(ps -o command= -p "$pid" 2>/dev/null || true)
+  for flag in "${CHROMIUM_FLAGS[@]}"; do
+    [[ "$args" == *"$flag"* ]] || return 0
+  done
+  return 1
+}
+
+if pgrep -xq "$APP_NAME" && ! needs_relaunch; then
+  echo "==> $APP_NAME already running with anti-throttling flags"
+else
+  if pgrep -xq "$APP_NAME"; then
+    echo "==> quitting $APP_NAME (missing anti-throttling flags)"
+    osascript -e "tell application \"$APP_NAME\" to quit" 2>/dev/null || true
+    for _ in {1..20}; do
+      pgrep -xq "$APP_NAME" || break
+      sleep 0.25
+    done
+    pgrep -xq "$APP_NAME" && pkill -x "$APP_NAME" || true
+  fi
+  echo "==> launching $APP_NAME with anti-throttling flags"
+  open -na "$APP_NAME" --args "${CHROMIUM_FLAGS[@]}"
 fi
 
 if ! command -v cliclick >/dev/null 2>&1; then
