@@ -281,6 +281,7 @@ install-extension:
 lint-extension:
 	cd foxglove/nav-control-panel && pnpm typecheck && pnpm lint && pnpm format:check
 	cd foxglove/hardware-safety-panel && pnpm typecheck && pnpm lint && pnpm format:check
+	cd foxglove/gamepad-relay-panel && pnpm typecheck && pnpm lint && pnpm format:check
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # BLE LOW-LATENCY BRIDGE

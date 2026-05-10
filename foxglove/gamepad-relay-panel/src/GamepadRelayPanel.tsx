@@ -289,9 +289,7 @@ function GamepadRelayPanel({ context }: { context: PanelExtensionContext }): Rea
             </span>
           )}
           {(state?.post_failures ?? 0) > 0 && (
-            <span style={{ fontSize: "9px", color: "#ef4444" }}>
-              {state!.post_failures} fails
-            </span>
+            <span style={{ fontSize: "9px", color: "#ef4444" }}>{state!.post_failures} fails</span>
           )}
         </div>
       </div>

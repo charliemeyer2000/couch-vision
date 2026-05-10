@@ -13,13 +13,22 @@
     "local-install": "foxglove-extension install",
     "package": "foxglove-extension package",
     "pretest": "foxglove-extension pretest",
+    "lint": "eslint src/",
+    "lint:fix": "eslint src/ --fix",
+    "format": "prettier --write src/",
+    "format:check": "prettier --check src/",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
     "@foxglove/extension": "2.40.0",
     "@types/react": "18.3.12",
     "@types/react-dom": "18.3.1",
+    "@typescript-eslint/eslint-plugin": "^8.54.0",
+    "@typescript-eslint/parser": "^8.54.0",
     "create-foxglove-extension": "1.0.4",
+    "eslint": "^9.39.2",
+    "eslint-config-prettier": "^10.1.8",
+    "prettier": "^3.8.1",
     "react": "18.3.1",
     "react-dom": "18.3.1",
     "typescript": "5.7.2"
