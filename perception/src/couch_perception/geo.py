@@ -1,3 +1,5 @@
+"""Geodetic coordinate conversions (WGS-84 → ECEF → ENU)."""
+
 from __future__ import annotations
 
 import math
