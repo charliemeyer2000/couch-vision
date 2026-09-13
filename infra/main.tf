@@ -50,15 +50,11 @@ resource "aws_s3_bucket_policy" "bags_public_read" {
   })
 }
 
+# Send object events to EventBridge so we can exclude index.txt and avoid
+# recursive Lambda invokes when the generator writes the listing file.
 resource "aws_s3_bucket_notification" "bags_notification" {
-  bucket = aws_s3_bucket.bags.id
-
-  lambda_function {
-    lambda_function_arn = aws_lambda_function.index_generator.arn
-    events              = ["s3:ObjectCreated:*", "s3:ObjectRemoved:*"]
-  }
-
-  depends_on = [aws_lambda_permission.allow_s3]
+  bucket      = aws_s3_bucket.bags.id
+  eventbridge = true
 }
 
 # --- Lambda: index.txt generator ---
@@ -126,12 +122,39 @@ resource "aws_lambda_function" "index_generator" {
   }
 }
 
-resource "aws_lambda_permission" "allow_s3" {
-  statement_id  = "AllowS3Invoke"
+# Invoke Lambda for every object change except index.txt itself.
+resource "aws_cloudwatch_event_rule" "bags_object_change" {
+  name        = "couch-vision-bags-object-change"
+  description = "Regenerate bag index.txt on non-index object changes"
+
+  event_pattern = jsonencode({
+    source      = ["aws.s3"]
+    detail-type = ["Object Created", "Object Deleted"]
+    detail = {
+      bucket = {
+        name = [aws_s3_bucket.bags.id]
+      }
+      object = {
+        key = [{
+          "anything-but" = ["index.txt"]
+        }]
+      }
+    }
+  })
+}
+
+resource "aws_cloudwatch_event_target" "index_generator" {
+  rule      = aws_cloudwatch_event_rule.bags_object_change.name
+  target_id = "couch-vision-index-generator"
+  arn       = aws_lambda_function.index_generator.arn
+}
+
+resource "aws_lambda_permission" "allow_eventbridge" {
+  statement_id  = "AllowEventBridgeInvoke"
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.index_generator.function_name
-  principal     = "s3.amazonaws.com"
-  source_arn    = aws_s3_bucket.bags.arn
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.bags_object_change.arn
 }
 
 # --- Outputs ---
