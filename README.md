@@ -305,7 +305,6 @@ scripts/                  # Setup, VESC test scripts, teleop relay
 ├── gamepad_relay.py      # Native SDL gamepad reader + live viz
 ├── teleop_mac.sh         # One-command teleop launcher (clamshell-safe)
 urdf/                     # Robot description (iphone_sensor.urdf)
-infra/                    # Terraform (S3 bag storage)
 bags/                     # Recorded MCAP bag files
 ```
 
@@ -361,7 +360,9 @@ make clean                          # remove build artifacts + venvs
 
 ## Bag Files
 
-Recorded ROS2 bags are stored in a public S3 bucket:
+Recorded ROS2 bags are stored in a public S3 bucket (Terraform in
+[charliemeyer2000/life-infra](https://github.com/charliemeyer2000/life-infra),
+`terraform/couch-vision.tf`, including the Lambda that regenerates `index.txt`):
 
 ```bash
 aws s3 cp s3://couch-vision-bags/<filename> .
